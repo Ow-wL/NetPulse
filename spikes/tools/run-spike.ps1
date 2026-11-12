@@ -53,6 +53,8 @@ function Wait-Exit($p, [int] $Seconds) {
     if ($p.ExitCode -ne 0) { throw "비정상 종료 (코드 $($p.ExitCode))" }
 }
 function Read-Log { Get-Content $logFile -Encoding UTF8 | ForEach-Object { $_ | ConvertFrom-Json } }
+# 실행마다 원본 로그를 보존한다 (다음 실행이 같은 파일을 덮어쓰므로).
+function Save-Log([string] $Name) { Copy-Item $logFile (Join-Path $OutDir "$Name-$Candidate.jsonl") -Force }
 function Wait-LogKind([string] $Kind, [int] $Seconds) {
     $deadline = (Get-Date).AddSeconds($Seconds)
     while ((Get-Date) -lt $deadline) {
@@ -101,6 +103,7 @@ function Capture([int] $ProcessId, [string] $Name) { & "$here\capture-window.ps1
 if (Test-Path $logDir) { Remove-Item -Recurse -Force $logDir }
 foreach ($i in 1, 2) {
     $p = Start-Spike @('--run-seconds', '6'); Wait-Exit $p 40
+    Save-Log "startup$i"
     $summary["startupMs_run$i"] = (Read-Log | Where-Object kind -eq 'ready' | Select-Object -First 1).msSinceProcessStart
 }
 
@@ -109,7 +112,8 @@ $p = Start-Spike ($cdp + @('--bench', '--run-seconds', '75'))
 Ui-Attach $p
 Start-Sleep -Seconds 5
 $res = & "$here\measure-process.ps1" -ProcessId $p.Id -Seconds 10
-$summary.resources = $res
+$res.sampleData | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $OutDir "resources-$Candidate.json") -Encoding UTF8
+$summary.resources = $res | Select-Object * -ExcludeProperty sampleData
 Start-Sleep -Seconds 16
 Capture $p.Id 'dark'
 $summary.roundTextBefore = Ui-Read 'round'
@@ -121,18 +125,23 @@ Ui-Click 'nav-monitor'
 Ui-Click 'theme-toggle'
 $summary.koreanInput = Ui-Type 'memo' '화상회의 중 끊김'
 Wait-Exit $p 90
-Copy-Item $logFile (Join-Path $OutDir "bench-$Candidate.jsonl")
+Save-Log 'bench'
 $log = Read-Log
 $summary.frames = @($log | Where-Object kind -eq 'frames' | ForEach-Object { [ordered]@{ label = $_.label; avgFps = $_.avgFps; p95Ms = $_.p95Ms; count = $_.count } })
+# P4: 측정은 0번 회차부터 시작해야 하고, 0번부터 마지막 번호까지 빠짐없이 한 번씩 있어야 한다.
+# 시험 시간은 회차 번호 범위가 아니라 첫 회차와 마지막 회차의 실제 시각 차이로 잰다.
 $rounds = @($log | Where-Object kind -eq 'round')
-$idx = $rounds | ForEach-Object { [long]$_.index }
+$idx = @($rounds | ForEach-Object { [long]$_.index })
 $late = $rounds | ForEach-Object { [double]$_.actualMs - [double]$_.scheduledMs }
+$actual = $rounds | ForEach-Object { [double]$_.actualMs }
+$lastIndex = ($idx | Measure-Object -Maximum).Maximum
+$unique = @($idx | Sort-Object -Unique)
 $summary.p4 = [ordered]@{
-    rounds = $rounds.Count; firstIndex = ($idx | Measure-Object -Minimum).Minimum; lastIndex = ($idx | Measure-Object -Maximum).Maximum
-    duplicates = $rounds.Count - @($idx | Sort-Object -Unique).Count
-    missing = (($idx | Measure-Object -Maximum).Maximum - ($idx | Measure-Object -Minimum).Minimum + 1) - @($idx | Sort-Object -Unique).Count
+    rounds = $rounds.Count; firstIndex = ($idx | Measure-Object -Minimum).Minimum; lastIndex = $lastIndex
+    duplicates = $rounds.Count - $unique.Count
+    missing = ($lastIndex + 1) - $unique.Count            # 0번부터 마지막 번호까지 기대한 회차 중 없는 수
     maxLateMs = [math]::Round(($late | Measure-Object -Maximum).Maximum, 1)
-    coveredSeconds = ($idx | Measure-Object -Maximum).Maximum - ($idx | Measure-Object -Minimum).Minimum + 1
+    elapsedSeconds = [math]::Round((($actual | Measure-Object -Maximum).Maximum - ($actual | Measure-Object -Minimum).Minimum) / 1000, 2)
 }
 $summary.probes = ($log | Where-Object kind -eq 'probes').values
 $summary.windowsSettings = ($log | Where-Object kind -eq 'windowsSettings').values
@@ -142,16 +151,23 @@ if ($isA) { $summary.webview2 = ($log | Where-Object kind -eq 'webview2').browse
 $p = Start-Spike ($cdp + @('--hide-test', '--run-seconds', '55'))
 Ui-Attach $p
 $show = Wait-LogKind 'show' 50
-$wait = Ui-WaitRound ([int]$show.latestIndex) 5000
+# 판정: 앱이 직접 잰 "다시 보인 순간 → 그 순간의 최신 회차가 그려진 프레임" 시간 (p5Display).
+# 보조: 바깥에서 화면 값을 읽어 최신 회차 이상인지, 다시 보인 시각부터 읽은 시각까지 얼마인지 (도구 지연 포함).
+$display = Wait-LogKind 'p5Display' 8
+$readValue = [int](Ui-Read 'round'); $readAt = Get-Date
 $summary.p5 = [ordered]@{ roundsWhileHidden = $show.roundsWhileHidden; missedWhileHidden = $show.missedWhileHidden
-    latestAtShow = $show.latestIndex; shownValue = $wait.value; elapsedMs = $wait.elapsedMs; passed = ($show.missedWhileHidden -eq 0 -and $wait.value -ge $show.latestIndex) }
+    latestAtShow = $show.latestIndex; displayMsSinceShow = $display.msSinceShow; displayedIndex = $display.shownIndex
+    externalReadValue = $readValue; externalReadMsSinceShow = [math]::Round(($readAt - [DateTimeOffset]::Parse($show.t).LocalDateTime).TotalMilliseconds)
+    passed = ($show.missedWhileHidden -eq 0 -and $display.msSinceShow -le 5000 -and $readValue -ge $show.latestIndex) }
 Wait-Exit $p 30
+Save-Log 'hide'
 
 # ---- P1: 흑백 줄무늬 위 틴트만 / 블러 / 불투명 ----
 $p = Start-Spike ($cdp + @('--glass-test', '--run-seconds', '14'))
 Start-Sleep -Seconds 9
 Capture $p.Id 'glass-test'
 Wait-Exit $p 30
+Save-Log 'glass'
 
 # ---- P9: 대체 동작 (강제 옵션), 이동 없음을 시간 간격 두 캡처로 확인 ----
 $p = Start-Spike ($cdp + @('--reduce-transparency', '--reduce-motion', '--run-seconds', '16'))
@@ -160,6 +176,7 @@ Capture $p.Id 'reduced-1'
 Start-Sleep -Milliseconds 400
 Capture $p.Id 'reduced-2'
 Wait-Exit $p 30
+Save-Log 'reduced'
 
 # ---- P7: 쓰기 금지 폴더에서 시작 ----
 $ro = Join-Path $OutDir "readonly-$Candidate"
@@ -171,6 +188,7 @@ try {
     if (Test-Path $logFile) { Remove-Item $logFile }
     $p = Start-Process -FilePath (Join-Path $ro (Split-Path $exe -Leaf)) -ArgumentList @('--run-seconds', '8') -PassThru
     Wait-Exit $p 40
+    Save-Log 'readonly'
     $summary.readOnlyStart = [bool](Read-Log | Where-Object kind -eq 'ready')
 } finally {
     icacls $ro /reset /T | Out-Null

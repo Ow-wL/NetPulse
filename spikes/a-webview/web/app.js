@@ -82,6 +82,8 @@ if (host) host.addEventListener('message', (e) => {
     document.getElementById('latency').textContent = `${m.series[2].toFixed(0)} ms`;
     document.getElementById('late').textContent = `예정 대비 ${m.late} ms`;
     document.getElementById('status-text').textContent = m.series[2] > 80 ? '지연 급증' : '안정적';
+    // P5: 바뀐 회차 번호가 그려진 다음 프레임에 본체에 알린다.
+    requestAnimationFrame(() => send(`shown|${m.index}`));
   } else if (m.type === 'probes') {
     document.getElementById('probes').textContent = m.text;
   }

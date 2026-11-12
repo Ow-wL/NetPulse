@@ -11,7 +11,11 @@ const runs = Object.keys(names).filter(k => fs.existsSync(path.join(dir, `summar
 
 const ok = (b) => (b ? '통과' : '**불합격**');
 const frame = (s, label) => s.frames.find(f => f.label === label) || { avgFps: NaN, p95Ms: NaN };
-const probesOk = (p) => /icmp=Success/.test(p) && /eventlog=read:\d+/.test(p) && /bestinterface=ok/.test(p) && /interfaces=count:\d+/.test(p);
+// P6 합격선: 관리자 권한 없이, 네 API가 각각 결과 또는 명시적 실패 상태를 낸다.
+// 값이 'fail:<예외>' 형태여도 명시적 실패 상태이므로 통과다. 키가 없거나 비었으면 불합격.
+const probeMap = (p) => Object.fromEntries(p.split(',').map(kv => { const i = kv.indexOf('='); return [kv.slice(0, i), kv.slice(i + 1)]; }));
+const probesOk = (p) => { const m = probeMap(p); return m.elevated === 'no' && ['icmp', 'eventlog', 'bestinterface', 'interfaces'].every(k => typeof m[k] === 'string' && m[k].length > 0); };
+const probesSucceeded = (p) => /icmp=Success/.test(p) && /eventlog=read:\d+/.test(p) && /bestinterface=ok/.test(p) && /interfaces=count:\d+/.test(p);
 
 const rows = [];
 const add = (label, criterion, f) => rows.push([label, criterion, ...runs.map(r => f(r.s))]);
@@ -21,8 +25,8 @@ for (const r of runs) {
   verdict[r.key] = {
     P2: sc.avgFps >= 55 && sc.p95Ms <= 25,
     P3: res.cpuPercent <= 15 && res.memoryMBMax <= 400,
-    P4: p4.coveredSeconds >= 60 && p4.duplicates === 0 && p4.missing === 0 && p4.maxLateMs <= 100,
-    P5: p5.passed && p5.elapsedMs <= 5000,
+    P4: p4.elapsedSeconds >= 60 && p4.firstIndex === 0 && p4.duplicates === 0 && p4.missing === 0 && p4.maxLateMs <= 100,
+    P5: p5.missedWhileHidden === 0 && p5.displayMsSinceShow <= 5000 && p5.displayedIndex >= p5.latestAtShow && p5.externalReadValue >= p5.latestAtShow,
     P6: probesOk(s.probes),
     P7: s.publishMB <= 300 && s.startupMs_run2 <= 3000 && s.readOnlyStart === true && s.readOnlyFolderWritable === false,
     P8: typeof s.roundTextBefore === 'string' && s.koreanInput === '화상회의 중 끊김',
@@ -36,9 +40,10 @@ add('P3 CPU (10초, 전체 코어 기준)', '15%↓', s => `${s.resources.cpuPer
 add('　메모리 작업 집합 합계 (평균 / 최대)', '최대 400 MB↓', s => `${s.resources.memoryMBAvg} / ${s.resources.memoryMBMax} MB`);
 add('　(보조) 전용 작업 집합 (평균 / 최대)', '판정에 안 씀', s => `${s.resources.privateMBAvg} / ${s.resources.privateMBMax} MB`);
 add('　관측된 프로세스 수', '', s => `${s.resources.processesSeen}`);
-add('P4 측정 영향', '60초 이상, 중복·누락 0, 지연 최대 100 ms↓', s => `${s.p4.coveredSeconds}초 ${s.p4.rounds}회차, 중복 ${s.p4.duplicates}, 누락 ${s.p4.missing}, 최대 ${s.p4.maxLateMs} ms`);
-add('P5 30초 숨김 후', '누락 0, 5초 안에 최신 회차', s => `누락 ${s.p5.missedWhileHidden}, ${s.p5.elapsedMs} ms 만에 ${s.p5.shownValue} (복귀 시 최신 ${s.p5.latestAtShow})`);
-add('P6 비관리자 진단 API', '네 API 모두 응답', s => probesOk(s.probes) ? '4/4' : s.probes);
+add('P4 측정 영향', '실제 시각 60초 이상, 0번부터 중복·누락 0, 지연 최대 100 ms↓', s => `${s.p4.elapsedSeconds}초, ${s.p4.firstIndex}~${s.p4.lastIndex}번 ${s.p4.rounds}회차, 중복 ${s.p4.duplicates}, 누락 ${s.p4.missing}, 최대 ${s.p4.maxLateMs} ms`);
+add('P5 30초 숨김 후 (앱 안에서 잼)', '누락 0, 다시 보인 뒤 5초 안에 최신 회차', s => `누락 ${s.p5.missedWhileHidden}, ${s.p5.displayMsSinceShow} ms 만에 ${s.p5.displayedIndex}번 표시 (복귀 시 최신 ${s.p5.latestAtShow})`);
+add('　(보조) 바깥에서 읽은 값', '최신 회차 이상', s => `${s.p5.externalReadValue} (다시 보인 뒤 ${s.p5.externalReadMsSinceShow} ms, 도구 지연 포함)`);
+add('P6 비관리자 진단 API', '관리자 아님, 네 API 모두 결과 또는 명시적 실패', s => probesOk(s.probes) ? (probesSucceeded(s.probes) ? '4/4 성공' : '명시적 실패 포함') : s.probes);
 add('P7 배포 크기 (파일 수)', '300 MB↓', s => `${s.publishMB} MB (${s.publishFiles})`);
 add('　첫 실행 / 두 번째 실행 시작', '두 번째 3초↓', s => `${(s.startupMs_run1 / 1000).toFixed(2)} / ${(s.startupMs_run2 / 1000).toFixed(2)}초`);
 add('　쓰기 금지 폴더에서 시작', '가능', s => s.readOnlyStart && !s.readOnlyFolderWritable ? '가능' : '불가');

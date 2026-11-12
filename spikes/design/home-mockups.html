@@ -350,7 +350,7 @@ main { min-width: 0; display: grid; grid-template-columns: 1.35fr 1fr; grid-temp
       </svg>
     </section>
 
-    <section class="glass content timeline rise" style="--i:4" aria-label="최근 10분 타임라인">
+    <section class="glass content timeline rise" style="--i:4" aria-label="최근 2분 타임라인">
       <div class="card-head"><span class="card-title">최근 2분</span><span class="card-note" id="liveNote">실시간 · 1초 간격</span></div>
       <canvas id="chart"></canvas>
       <div class="legend"><span><i style="background:var(--accent)"></i>인터넷 지연</span><span><i style="background:var(--accent-2)"></i>공유기 지연</span><span><i style="background:var(--bad)"></i>응답 없음</span><span><i style="background:var(--warn)"></i>증상 표시</span></div>
@@ -409,7 +409,7 @@ function countUp(el, to, suffix = '', ms = 1100) {
 // ---- 상태: 정상 / 끊김 ----
 const states = {
   ok: { grade: 'A', score: 96, verdict: '지금 연결은 안정적입니다', sub: '최근 2시간 동안 끊김 <b>0회</b> · 평균 지연 <b class="number" id="avg">18 ms</b> · 응답 성공 <b>99.9%</b>' },
-  problem: { grade: 'D', score: 41, verdict: '외부 인터넷 연결이 끊긴 것으로 보입니다', sub: '공유기는 응답하지만 서로 다른 외부 대상 <b>3곳</b>이 함께 응답하지 않습니다 · 최근 2분 <b>3회</b>, 최장 <b>6초</b>' }
+  problem: { grade: 'D', score: 41, verdict: '외부 인터넷 연결이 끊긴 것으로 보입니다', sub: '공유기는 응답하지만 서로 다른 외부 대상 <b>3곳</b>이 함께 응답하지 않습니다 · <b>지금 끊김이 이어지는 중</b>' }
 };
 let state = q.get('state') === 'problem' ? 'problem' : 'ok';
 function applyState(initial) {
@@ -431,17 +431,25 @@ function applyState(initial) {
   document.getElementById('checkTime').textContent = bad ? '끊김 감지 후 자동 재확인 · 방금 전' : '3분 전 확인';
   document.getElementById('monitorText').innerHTML = bad ? '끊김 감지 · 알림 보냄<br><b style="color:var(--ink)">방금 전</b>' : '백그라운드 모니터링 켜짐<br><b style="color:var(--ink)">2시간 14분째</b>';
   document.getElementById('problemToggle').setAttribute('aria-pressed', String(bad));
+  // 그래프도 같은 상태에서 파생: 끊김이면 6초 전부터 지금까지 응답 없음이 이어진다.
+  if (!initial) {
+    problemSince = bad ? tick - 6 : Infinity;
+    for (let k = 0; k < N; k++) { const i = tick - N + k; if (lostAt(i)) net[k] = null; else if (net[k] === null) net[k] = sample(i).net; }
+  }
 }
 
 // ---- 타임라인: 합성 데이터, 매초 새 값이 부드럽게 흘러 들어옴 ----
 const canvas = document.getElementById('chart'), ctx = canvas.getContext('2d');
 const N = 120; let net = [], gw = [], lastArrival = performance.now();
 let seed = 11; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+// 끊김 상태에서는 지난 끊김(37초마다 6초)과 지금 이어지는 끊김(problemSince부터)을 응답 없음으로 그린다.
+let problemSince = Infinity;
+function lostAt(i) { return state === 'problem' && (i >= problemSince || (i % 37 > 30 && i < problemSince - 3)); }
 function sample(i) {
-  const lost = state === 'problem' && (i % 37 > 30);
-  return { net: lost ? null : 16 + 6 * Math.sin(i / 9) + rnd() * 7 + (i % 53 === 0 ? 45 : 0), gw: 1.5 + rnd() * 2 };
+  return { net: lostAt(i) ? null : 16 + 6 * Math.sin(i / 9) + rnd() * 7 + (i % 53 === 0 ? 45 : 0), gw: 1.5 + rnd() * 2 };
 }
 let tick = 0;
+if (state === 'problem') problemSince = N - 6;
 for (; tick < N; tick++) { const s = sample(tick); net.push(s.net); gw.push(s.gw); }
 const marks = [N - 46];
 setInterval(() => { const s = sample(tick++); net.push(s.net); gw.push(s.gw); net.shift(); gw.shift(); marks.forEach((m, k) => marks[k] = m - 1); lastArrival = performance.now(); }, 1000);

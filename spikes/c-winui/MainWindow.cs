@@ -64,6 +64,8 @@ namespace NetPulseSpike
         private double lastArrivalMs, lastFrameMs;
         private List<double> frameTimes;
         private const int WindowSize = 60;
+        private long latestAtShow = -1;
+        private Stopwatch showClock;
 
         private static Color C(string hex)
         {
@@ -435,6 +437,13 @@ namespace NetPulseSpike
             double step = w / (WindowSize - 2);
             // 움직임 줄이기에서는 그래프를 흘리지 않고 새 값이 오면 한 번에 바꾼다.
             chartShift.X = options.ReduceMotion ? 0 : -Math.Min(1, (now - lastArrivalMs) / 1000) * step;
+            // 화면의 회차 번호가 복귀 시점의 최신 회차 이상이면, 이 프레임에서 그려진 것으로 본다.
+            long shown;
+            if (showClock != null && long.TryParse(roundText.Text, out shown) && shown >= latestAtShow)
+            {
+                log.Write("p5Display", "msSinceShow", Math.Round(showClock.Elapsed.TotalMilliseconds, 1), "shownIndex", shown, "latestAtShow", latestAtShow);
+                showClock = null;
+            }
             if (!ready)
             {
                 ready = true;
@@ -474,9 +483,12 @@ namespace NetPulseSpike
             log.Write("hide", "rounds", before);
             AppWindow.Hide();
             await Task.Delay(30000);
+            // P5: 다시 보인 순간부터, 그 순간의 최신 회차가 화면에 그려질 때까지를 앱 안에서 잰다.
+            latestAtShow = loop.Latest == null ? -1 : loop.Latest.Index;
+            showClock = Stopwatch.StartNew();
             AppWindow.Show();
             log.Write("show", "rounds", loop.Rounds, "roundsWhileHidden", loop.Rounds - before, "missedWhileHidden", loop.Missed - missedBefore,
-                "latestIndex", loop.Latest == null ? -1 : loop.Latest.Index);
+                "latestIndex", latestAtShow);
         }
 
         private async Task CloseAfterAsync(int seconds)

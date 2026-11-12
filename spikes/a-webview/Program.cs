@@ -36,6 +36,8 @@ namespace NetPulseSpike
         private readonly MeasureLoop loop = new MeasureLoop();
         private bool ready;
         private volatile string probesJson;
+        private long latestAtShow = -1;
+        private System.Diagnostics.Stopwatch showClock;
 
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
@@ -139,9 +141,12 @@ namespace NetPulseSpike
             log.Write("hide", "rounds", before);
             Hide();
             await Task.Delay(30000);
+            // P5: 다시 보인 순간부터, 그 순간의 최신 회차가 화면에 그려질 때까지를 앱 안에서 잰다.
+            latestAtShow = loop.Latest == null ? -1 : loop.Latest.Index;
+            showClock = System.Diagnostics.Stopwatch.StartNew();
             Show();
             log.Write("show", "rounds", loop.Rounds, "roundsWhileHidden", loop.Rounds - before, "missedWhileHidden", loop.Missed - missedBefore,
-                "latestIndex", loop.Latest == null ? -1 : loop.Latest.Index);
+                "latestIndex", latestAtShow);
             if (loop.Latest != null) SendRound(loop.Latest);
         }
 
@@ -190,6 +195,16 @@ namespace NetPulseSpike
                 case "frames" when parts.Length == 5:
                     log.Write("frames", "label", parts[1], "avgFps", double.Parse(parts[2], CultureInfo.InvariantCulture),
                         "p95Ms", double.Parse(parts[3], CultureInfo.InvariantCulture), "count", int.Parse(parts[4], CultureInfo.InvariantCulture));
+                    break;
+                case "shown" when parts.Length == 2:
+                    // 웹 화면이 회차 번호를 고친 뒤 다음 프레임에서 보낸다.
+                    long shown;
+                    if (showClock != null && long.TryParse(parts[1], System.Globalization.NumberStyles.Integer, CultureInfo.InvariantCulture, out shown)
+                        && shown >= latestAtShow)
+                    {
+                        log.Write("p5Display", "msSinceShow", Math.Round(showClock.Elapsed.TotalMilliseconds, 1), "shownIndex", shown, "latestAtShow", latestAtShow);
+                        showClock = null;
+                    }
                     break;
                 case "mark" when parts.Length == 2 && parts[1].Length <= 40:
                     log.Write("mark", "label", parts[1]);
