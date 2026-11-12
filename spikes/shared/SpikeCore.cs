@@ -51,11 +51,14 @@ namespace NetPulseSpike
         private readonly object gate = new object();
         public readonly string Folder;
 
+        public readonly string RunId = Guid.NewGuid().ToString("N").Substring(0, 12);
+
         public ResultLog(string name)
         {
             Folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetPulseSpike", name);
             Directory.CreateDirectory(Folder);
             writer = new StreamWriter(Path.Combine(Folder, "results.jsonl"), false, new UTF8Encoding(false));
+            Write("run", "runId", RunId, "pid", Process.GetCurrentProcess().Id);
         }
 
         public void Write(string kind, params object[] pairs)
@@ -233,6 +236,20 @@ namespace NetPulseSpike
             bool animation = true;
             r["clientAreaAnimation"] = SystemParametersInfo(SPI_GETCLIENTAREAANIMATION, 0, ref animation, 0) ? (animation ? "on" : "off") : "unknown";
             return r;
+        }
+    }
+
+    public static class ProbeSummary
+    {
+        /// <summary>화면에 보여줄 요약. 인터페이스 수 같은 환경 정보는 화면에 내지 않는다 (공개 캡처용).</summary>
+        public static string ForDisplay(Dictionary<string, string> values)
+        {
+            int ok = 0;
+            if (values["icmp"] == "Success") ok++;
+            if (values["eventlog"].StartsWith("read:", StringComparison.Ordinal)) ok++;
+            if (values["bestinterface"] == "ok") ok++;
+            if (values["interfaces"].StartsWith("count:", StringComparison.Ordinal)) ok++;
+            return "진단 API " + ok + "/4 응답 · 관리자 권한 " + (values["elevated"] == "yes" ? "있음" : "없음");
         }
     }
 

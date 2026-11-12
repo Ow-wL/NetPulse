@@ -108,13 +108,16 @@ namespace NetPulseSpike
             core.NewWindowRequested += (s, a) => { a.Handled = true; };
             core.WebMessageReceived += OnWebMessage;
 
+            // 회차마다 예정·실제 시각을 남긴다 (P4를 원본에서 다시 계산할 수 있게).
+            loop.RoundCompleted += round => log.Write("round", "index", round.Index, "scheduledMs", Math.Round(round.ScheduledMs, 1),
+                "actualMs", Math.Round(round.ActualMs, 1), "rttMs", round.RttMs.HasValue ? (object)round.RttMs.Value : null);
             loop.RoundCompleted += round => BeginInvokeSafe(() => SendRound(round));
             _ = loop.RunAsync(stop.Token);
             _ = Task.Run(() =>
             {
                 var probes = Probes.RunAll();
                 log.Write("probes", "values", string.Join(",", probes.Select(p => p.Key + "=" + p.Value)));
-                probesJson = "{\"type\":\"probes\",\"text\":" + ResultLog.Json(string.Join("  ", probes.Select(p => p.Key + " " + p.Value))) + "}";
+                probesJson = "{\"type\":\"probes\",\"text\":" + ResultLog.Json(ProbeSummary.ForDisplay(probes)) + "}";
                 BeginInvokeSafe(() => { if (ready) Post(probesJson); });
             });
 

@@ -102,9 +102,11 @@
 @property --spin { syntax: "<angle>"; inherits: true; initial-value: 0deg; }
 
 /* 끊김 상태: 배경 빛이 붉게 물든다 */
-[data-state="problem"] { --light-a: #e11d48; --light-b: #f97316; --light-opacity: .6; }
-[data-state="problem"][data-variant="obsidian"] { --light-a: #4c0519; --light-b: #7c2d12; }
-[data-state="problem"][data-theme="light"] { --light-a: #fecdd3; --light-b: #fed7aa; }
+/* 시안·테마 선택자(속성 2개)보다 우선하도록 속성 3개로 쓴다 */
+[data-state="problem"][data-variant][data-theme] { --light-a: #e11d48; --light-b: #f97316; --light-opacity: .6; }
+[data-state="problem"][data-variant][data-theme="light"] { --light-a: #fecdd3; --light-b: #fed7aa; --light-opacity: .85; }
+[data-state="problem"][data-variant="obsidian"][data-theme="dark"] { --light-a: #4c0519; --light-b: #7c2d12; }
+[data-state="problem"][data-variant="prism"][data-theme="dark"] { --light-c: #be123c; --light-d: #f97316; --light-opacity: .7; }
 
 /* ============ 바탕 ============ */
 * { box-sizing: border-box; }
@@ -255,7 +257,8 @@ main { min-width: 0; display: grid; grid-template-columns: 1.35fr 1fr; grid-temp
 .row .when { font-weight: 600; } .row .what { font-size: 12.5px; color: var(--muted); }
 .row .count { font-size: 12.5px; color: var(--muted); text-align: right; }
 .row .count b { display: block; color: var(--ink); font-size: 15px; }
-.checks { padding: 16px 18px; border-radius: var(--radius-l); display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.checks { padding: 14px 18px 16px; border-radius: var(--radius-l); display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.checks .card-head { grid-column: 1 / -1; margin: 0 2px; }
 .check { padding: 10px 12px; font-size: 12.5px; display: flex; align-items: center; gap: 8px; }
 .check .s { width: 18px; height: 18px; border-radius: 6px; display: grid; place-items: center; font-size: 11px; font-weight: 700; flex: none; }
 .s.ok { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
@@ -341,14 +344,14 @@ main { min-width: 0; display: grid; grid-template-columns: 1.35fr 1fr; grid-temp
       <svg viewBox="0 0 360 170" id="mapSvg">
         <g id="seg1"><path class="wire" d="M60 92 C110 92 130 92 180 92"/><path class="flow" d="M60 92 C110 92 130 92 180 92"/><path class="flow b" d="M60 92 C110 92 130 92 180 92"/></g>
         <g id="seg2"><path class="wire" d="M180 92 C230 92 250 92 300 92"/><path class="flow" d="M180 92 C230 92 250 92 300 92"/><path class="flow b" d="M180 92 C230 92 250 92 300 92"/></g>
-        <g class="node" transform="translate(60 92)"><circle class="halo" r="30"/><circle class="core" r="26"/><path d="M-10 -6h20v12h-20zM-5 10h10"/><text y="50">이 PC</text><text class="ms" y="66">유선</text></g>
+        <g class="node" transform="translate(60 92)"><circle class="halo" r="30"/><circle class="core" r="26"/><path d="M-10 -6h20v12h-20zM-5 10h10"/><text y="50">이 PC</text><text class="ms" y="66">Wi‑Fi</text></g>
         <g class="node" transform="translate(180 92)"><circle class="halo" r="30"/><circle class="core" r="26"/><path d="M-11 2h22v7h-22zM-6 2v-6M6 2v-6M-8 -9a12 12 0 0 1 16 0"/><text y="50">공유기</text><text class="ms" y="66" id="msGw">2 ms</text></g>
         <g class="node" id="nodeNet" transform="translate(300 92)"><circle class="halo" r="30"/><circle class="core" r="26"/><path d="M-11 0a11 11 0 1 0 22 0a11 11 0 1 0 -22 0M-11 0h22M0 -11c5 6 5 16 0 22M0 -11c-5 6 -5 16 0 22"/><text y="50">인터넷</text><text class="ms" y="66" id="msNet">18 ms</text></g>
       </svg>
     </section>
 
     <section class="glass content timeline rise" style="--i:4" aria-label="최근 10분 타임라인">
-      <div class="card-head"><span class="card-title">최근 10분</span><span class="card-note" id="liveNote">실시간 · 1초 간격</span></div>
+      <div class="card-head"><span class="card-title">최근 2분</span><span class="card-note" id="liveNote">실시간 · 1초 간격</span></div>
       <canvas id="chart"></canvas>
       <div class="legend"><span><i style="background:var(--accent)"></i>인터넷 지연</span><span><i style="background:var(--accent-2)"></i>공유기 지연</span><span><i style="background:var(--bad)"></i>응답 없음</span><span><i style="background:var(--warn)"></i>증상 표시</span></div>
     </section>
@@ -361,11 +364,12 @@ main { min-width: 0; display: grid; grid-template-columns: 1.35fr 1fr; grid-temp
         <div class="row"><div class="badge d">D</div><div><div class="when">11월 10일 오후 8:45</div><div class="what">3시간 · Wi‑Fi</div></div><div class="count"><b>11회</b>최장 41초</div></div>
       </section>
       <section class="glass control checks rise" style="--i:6" aria-label="빠른 진단 결과">
+        <div class="card-head"><span class="card-title">빠른 진단</span><span class="card-note" id="checkTime">3분 전 확인</span></div>
         <div class="glass float check"><span class="s ok">✓</span>어댑터</div>
         <div class="glass float check"><span class="s ok">✓</span>공유기</div>
-        <div class="glass float check"><span class="s ok">✓</span>인터넷</div>
+        <div class="glass float check"><span class="s ok" id="ckNet">✓</span>인터넷</div>
         <div class="glass float check"><span class="s ok">✓</span>DNS</div>
-        <div class="glass float check"><span class="s ok">✓</span>HTTPS</div>
+        <div class="glass float check"><span class="s ok" id="ckHttps">✓</span>HTTPS</div>
         <div class="glass float check"><span class="s warn">!</span>링크 기록</div>
       </section>
     </div>
@@ -405,7 +409,7 @@ function countUp(el, to, suffix = '', ms = 1100) {
 // ---- 상태: 정상 / 끊김 ----
 const states = {
   ok: { grade: 'A', score: 96, verdict: '지금 연결은 안정적입니다', sub: '최근 2시간 동안 끊김 <b>0회</b> · 평균 지연 <b class="number" id="avg">18 ms</b> · 응답 성공 <b>99.9%</b>' },
-  problem: { grade: 'D', score: 41, verdict: '인터넷 구간에서 끊김이 이어지고 있습니다', sub: '공유기는 응답하지만 외부 대상 <b>3곳</b>이 함께 응답하지 않습니다 · 최근 10분 <b>4회</b>, 최장 <b>12초</b>' }
+  problem: { grade: 'D', score: 41, verdict: '외부 인터넷 연결이 끊긴 것으로 보입니다', sub: '공유기는 응답하지만 서로 다른 외부 대상 <b>3곳</b>이 함께 응답하지 않습니다 · 최근 2분 <b>3회</b>, 최장 <b>6초</b>' }
 };
 let state = q.get('state') === 'problem' ? 'problem' : 'ok';
 function applyState(initial) {
@@ -423,6 +427,8 @@ function applyState(initial) {
   document.getElementById('nodeNet').classList.toggle('bad', bad);
   document.getElementById('msNet').textContent = bad ? '응답 없음' : '18 ms';
   document.getElementById('chipNet').textContent = bad ? '응답 없음' : '18 ms';
+  for (const id of ['ckNet', 'ckHttps']) { const el = document.getElementById(id); el.className = 's ' + (bad ? 'bad' : 'ok'); el.textContent = bad ? '✕' : '✓'; }
+  document.getElementById('checkTime').textContent = bad ? '끊김 감지 후 자동 재확인 · 방금 전' : '3분 전 확인';
   document.getElementById('monitorText').innerHTML = bad ? '끊김 감지 · 알림 보냄<br><b style="color:var(--ink)">방금 전</b>' : '백그라운드 모니터링 켜짐<br><b style="color:var(--ink)">2시간 14분째</b>';
   document.getElementById('problemToggle').setAttribute('aria-pressed', String(bad));
 }
@@ -452,9 +458,14 @@ function draw(now) {
   const w = canvas.clientWidth, h = canvas.clientHeight; if (!w || !h) return;
   ctx.clearRect(0, 0, w, h);
   const step = w / (N - 2), shift = root.dataset.motion === 'reduce' ? 0 : Math.min(1, (now - lastArrival) / 1000) * step;
-  const y = (v) => h - 12 - (v / 80) * (h - 28), x = (i) => w - (N - 1 - i) * step - shift;
+  const y = (v) => h - 20 - (v / 80) * (h - 36), x = (i) => w - (N - 1 - i) * step - shift;
+  // 축: 지연 0·40·80 ms, 시간 2분 전·1분 전·지금
   ctx.strokeStyle = css('--faint'); ctx.lineWidth = 1;
-  for (let k = 1; k <= 3; k++) { ctx.beginPath(); ctx.moveTo(0, h * k / 4); ctx.lineTo(w, h * k / 4); ctx.stroke(); }
+  ctx.fillStyle = css('--muted'); ctx.font = '11px Pretendard, "Segoe UI", sans-serif';
+  for (const v of [0, 40, 80]) { ctx.beginPath(); ctx.moveTo(34, y(v)); ctx.lineTo(w, y(v)); ctx.stroke(); ctx.fillText(v + ' ms', 0, y(v) + 4); }
+  ctx.textAlign = 'center';
+  [['2분 전', 0.06], ['1분 전', 0.5]].forEach(([t, r]) => ctx.fillText(t, w * r + (r < .1 ? 14 : 0), h - 4));
+  ctx.textAlign = 'right'; ctx.fillText('지금', w, h - 4); ctx.textAlign = 'left';
   // 응답 없음 구간: 세로 띠
   const bad = css('--bad');
   ctx.fillStyle = bad + '33';

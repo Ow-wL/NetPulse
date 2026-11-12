@@ -28,7 +28,8 @@ function draw(now) {
   const w = canvas.clientWidth, h = canvas.clientHeight;
   ctx.clearRect(0, 0, w, h);
   const step = w / (WINDOW - 2);
-  const shift = Math.min(1, (now - lastArrival) / 1000) * step;
+  // 움직임 줄이기에서는 그래프를 흘리지 않고 새 값이 오면 한 번에 바꾼다.
+  const shift = root.classList.contains('reduce-motion') ? 0 : Math.min(1, (now - lastArrival) / 1000) * step;
   ctx.strokeStyle = root.dataset.theme === 'light' ? 'rgba(17,24,39,.08)' : 'rgba(255,255,255,.07)';
   ctx.lineWidth = 1;
   for (let i = 1; i < 5; i++) { const y = h * i / 5; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
@@ -88,6 +89,7 @@ if (host) host.addEventListener('message', (e) => {
 
 // ---- 포인터를 따라가는 하이라이트 ----
 document.addEventListener('pointermove', (e) => {
+  if (root.classList.contains('reduce-motion')) return;
   for (const el of document.querySelectorAll('.glass')) {
     const r = el.getBoundingClientRect();
     el.style.setProperty('--mx', `${e.clientX - r.left}px`);

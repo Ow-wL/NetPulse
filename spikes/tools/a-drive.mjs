@@ -33,6 +33,19 @@ switch (action) {
     await page.screenshot({ path: arg });
     console.log('saved', arg);
     break;
+  case 'wait-round': {
+    // 화면의 회차 번호가 기준 이상이 될 때까지 기다리고 걸린 시간을 낸다 (P5).
+    const [min, timeout] = arg.split(':').map(Number);
+    const start = Date.now();
+    let value = -1;
+    while (Date.now() - start < timeout) {
+      value = Number((await page.locator('#round').textContent()).trim());
+      if (value >= min) break;
+      await page.waitForTimeout(100);
+    }
+    console.log(JSON.stringify({ value, elapsedMs: Date.now() - start }));
+    break;
+  }
   case 'type': {
     const [selector, text] = arg.split('::');
     await page.locator(selector).fill(text);

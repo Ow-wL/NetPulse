@@ -24,6 +24,12 @@
       <h1 class="page-title">실시간 측정</h1>
       <div class="chart-wrap">
         <canvas id="chart" aria-label="실시간 지연 그래프"></canvas>
+        <div class="glass-lab" aria-hidden="true">
+          <div class="stripes"></div>
+          <div class="lab lab-none">틴트만</div>
+          <div class="lab lab-blur">블러</div>
+          <div class="lab lab-opaque">불투명</div>
+        </div>
         <div class="glass glass-content overlay overlay-status">
           <div class="label">지금 상태</div>
           <div class="headline" id="status-text">측정 준비 중</div>

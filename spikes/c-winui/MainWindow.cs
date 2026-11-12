@@ -91,13 +91,15 @@ namespace NetPulseSpike
             Stage("content", () => Content = root);
 
             CompositionTarget.Rendering += OnRendering;
+            loop.RoundCompleted += r => log.Write("round", "index", r.Index, "scheduledMs", Math.Round(r.ScheduledMs, 1),
+                "actualMs", Math.Round(r.ActualMs, 1), "rttMs", r.RttMs.HasValue ? (object)r.RttMs.Value : null);
             loop.RoundCompleted += r => DispatcherQueue.TryEnqueue(() => OnRound(r));
             _ = loop.RunAsync(stop.Token);
             _ = Task.Run(() =>
             {
                 var values = Probes.RunAll();
                 log.Write("probes", "values", string.Join(",", values.Select(p => p.Key + "=" + p.Value)));
-                probes = string.Join("  ", values.Select(p => p.Key + " " + p.Value));
+                probes = ProbeSummary.ForDisplay(values);
                 DispatcherQueue.TryEnqueue(() => probesText.Text = probes);
             });
             Closed += (s, e) =>
@@ -183,6 +185,7 @@ namespace NetPulseSpike
                 chart.Children.Add(lines[k]);
             }
             chartWrap.Children.Add(chart);
+            if (options.GlassTest) chartWrap.Children.Add(BuildGlassLab());
 
             var status = new StackPanel();
             status.Children.Add(Muted("지금 상태"));
@@ -230,6 +233,32 @@ namespace NetPulseSpike
             Grid.SetRow(toolbarBorder, 2);
             page.Children.Add(toolbarBorder);
             return page;
+        }
+
+        private Border[] labPanels;
+
+        // P1 확인용: 흑백 줄무늬 위에 틴트만 / Acrylic / 불투명 패널을 나란히 놓는다.
+        private Grid BuildGlassLab()
+        {
+            var lab = new Grid { IsHitTestVisible = false };
+            var stripes = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Height = 260 };
+            for (int i = 0; i < 120; i++)
+                stripes.Children.Add(new Rectangle { Width = 6, Fill = new SolidColorBrush(i % 2 == 0 ? Colors.White : Colors.Black) });
+            lab.Children.Add(stripes);
+            var row = new Grid { ColumnSpacing = 40, Padding = new Thickness(40, 0, 40, 0), VerticalAlignment = VerticalAlignment.Center, Height = 330 };
+            string[] names = { "틴트만", "Acrylic", "불투명" };
+            labPanels = new Border[3];
+            for (int i = 0; i < 3; i++)
+            {
+                row.ColumnDefinitions.Add(new ColumnDefinition());
+                labPanels[i] = new Border { CornerRadius = new CornerRadius(16), BorderThickness = new Thickness(1), Padding = new Thickness(0, 10, 0, 0),
+                    Child = new TextBlock { Text = names[i], FontWeight = Microsoft.UI.Text.FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center,
+                        Foreground = new SolidColorBrush(Colors.White) } };
+                Grid.SetColumn(labPanels[i], i);
+                row.Children.Add(labPanels[i]);
+            }
+            lab.Children.Add(row);
+            return lab;
         }
 
         private Grid BuildDiagnosePage()
@@ -319,8 +348,15 @@ namespace NetPulseSpike
                 orbs[i].Fill = g;
                 orbs[i].Visibility = options.ReduceTransparency ? Visibility.Collapsed : Visibility.Visible;
             }
-            if (options.GlassTest) { Paint(glassContent, 0.12); Paint(glassControl, 0.12); Paint(glassFloat, 0.12); }
-            else { Paint(glassContent, 0.62); Paint(glassControl, 0.42); Paint(glassFloat, 0.28); }
+            Paint(glassContent, 0.62); Paint(glassControl, 0.42); Paint(glassFloat, 0.28);
+            if (labPanels != null)
+            {
+                var t = palette.Tint;
+                labPanels[0].Background = new SolidColorBrush(Color.FromArgb(31, t.R, t.G, t.B));
+                labPanels[1].Background = new AcrylicBrush { TintColor = t, TintOpacity = 0.12, TintLuminosityOpacity = 0.12, FallbackColor = t };
+                labPanels[2].Background = new SolidColorBrush(t);
+                foreach (var p in labPanels) p.BorderBrush = new SolidColorBrush(palette.Edge);
+            }
             foreach (var t in inkText) t.Foreground = new SolidColorBrush(palette.Ink);
             foreach (var t in mutedText) t.Foreground = new SolidColorBrush(palette.Muted);
             for (int k = 0; k < 3; k++) lines[k].Stroke = new SolidColorBrush(palette.Lines[k]);
@@ -397,7 +433,8 @@ namespace NetPulseSpike
             lastFrameMs = now;
             double w = (chart.Parent as FrameworkElement)?.ActualWidth ?? 0;
             double step = w / (WindowSize - 2);
-            chartShift.X = -Math.Min(1, (now - lastArrivalMs) / 1000) * step;
+            // 움직임 줄이기에서는 그래프를 흘리지 않고 새 값이 오면 한 번에 바꾼다.
+            chartShift.X = options.ReduceMotion ? 0 : -Math.Min(1, (now - lastArrivalMs) / 1000) * step;
             if (!ready)
             {
                 ready = true;

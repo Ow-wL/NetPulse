@@ -51,8 +51,15 @@ body {
 .glass-content { background: rgb(var(--glass-tint) / .62); backdrop-filter: blur(28px) saturate(170%); }
 .glass-control { background: rgb(var(--glass-tint) / .42); backdrop-filter: blur(20px) saturate(160%); }
 .glass-float   { background: rgb(var(--glass-tint) / .28); backdrop-filter: blur(14px) saturate(150%); box-shadow: inset 0 1px 0 var(--glass-hi), 0 18px 50px rgba(0, 0, 0, .35); }
-/* P1 확인용: 틴트를 낮춰 뒤가 흐려 보이는지 확인 */
-:root.glass-test .glass-content, :root.glass-test .glass-control, :root.glass-test .glass-float { background: rgb(var(--glass-tint) / .12); backdrop-filter: blur(10px); }
+/* P1 확인용: 흑백 줄무늬 위에 틴트만 / 블러 / 불투명 패널을 나란히 놓는다 */
+.glass-lab { display: none; position: absolute; inset: 0; z-index: 5; }
+:root.glass-test .glass-lab { display: block; }
+.stripes { position: absolute; left: 0; right: 0; top: 30%; height: 44%; background: repeating-linear-gradient(90deg, #fff 0 6px, #000 6px 12px); }
+.lab { position: absolute; top: 24%; height: 56%; width: 27%; border-radius: 16px; border: 1px solid var(--glass-edge);
+  display: grid; place-items: start center; padding-top: 10px; font-weight: 700; color: var(--ink); text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+.lab-none { left: 4%; background: rgb(var(--glass-tint) / .12); }
+.lab-blur { left: 36.5%; background: rgb(var(--glass-tint) / .12); backdrop-filter: blur(10px); }
+.lab-opaque { left: 69%; background: rgb(var(--glass-tint)); }
 :root.reduce-transparency .glass { backdrop-filter: none; background: rgb(var(--glass-tint) / 1); }
 :root.reduce-transparency .orb { display: none; }
 
