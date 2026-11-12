@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- M0 스파이크 C: WinUI 3, 패키지 없는 배포, 런타임 포함. 제품 코드가 아니다. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Platforms>x64</Platforms>
+    <!-- EnableMsixTooling을 켜면(단일 파일 배포의 필수 조건) 시작 시 CoreMessagingXP.dll에서 종료되어 끈다. 배포는 폴더로 한다. -->
+    <AssemblyName>NetPulseSpikeC</AssemblyName>
+    <RootNamespace>NetPulseSpike</RootNamespace>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <!-- 패키지 없는 폴더 배포에서는 App.xbf와 앱 .pri가 배포 폴더로 복사되지 않아 시작 시 종료된다. 직접 복사한다. -->
+  <Target Name="CopyXamlArtifactsToPublish" AfterTargets="Publish">
+    <Copy SourceFiles="$(OutDir)App.xbf;$(OutDir)$(AssemblyName).pri" DestinationFolder="$(PublishDir)" />
+  </Target>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.5" />
+    <!-- WinUI 프로젝트에는 Windows Desktop 프레임워크가 없어 이벤트 로그 API를 패키지로 받는다. -->
+    <PackageReference Include="System.Diagnostics.EventLog" Version="10.0.3" />
+    <Compile Include="..\shared\SpikeCore.cs" Link="SpikeCore.cs" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,104 @@
+/* M0 스파이크 A 시험 장면. 디자인 시안이 아니라 기술 확인용이다. */
+:root {
+  --bg: #0b1020;
+  --ink: #eef2ff;
+  --muted: #a7b0c8;
+  --accent: #5eead4;
+  --warn: #fbbf24;
+  --glass-tint: 18 24 44;
+  --glass-edge: rgba(255, 255, 255, .16);
+  --glass-hi: rgba(255, 255, 255, .22);
+  --orb-a: #22d3ee; --orb-b: #8b5cf6; --orb-c: #0ea5e9;
+  --ease-in: cubic-bezier(0, 0, 0, 1);
+}
+:root[data-theme="light"] {
+  --bg: #eef2f8;
+  --ink: #111827;
+  --muted: #4b5563;
+  --accent: #0f766e;
+  --warn: #b45309;
+  --glass-tint: 255 255 255;
+  --glass-edge: rgba(255, 255, 255, .7);
+  --glass-hi: rgba(255, 255, 255, .9);
+  --orb-a: #67e8f9; --orb-b: #c4b5fd; --orb-c: #93c5fd;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 14px/1.45 "Segoe UI Variable", "Segoe UI", "Malgun Gothic", sans-serif;
+  display: grid; grid-template-columns: 200px 1fr; gap: 16px; padding: 16px;
+}
+
+.backdrop { position: fixed; inset: 0; overflow: hidden; z-index: -1; }
+.orb { position: absolute; width: 60vmax; height: 60vmax; border-radius: 50%; filter: blur(60px); opacity: .55; will-change: transform; }
+.orb-a { background: var(--orb-a); left: -15vmax; top: -20vmax; animation: drift-a 18s ease-in-out infinite alternate; }
+.orb-b { background: var(--orb-b); right: -20vmax; top: 10vmax; animation: drift-b 22s ease-in-out infinite alternate; }
+.orb-c { background: var(--orb-c); left: 20vmax; bottom: -30vmax; animation: drift-c 26s ease-in-out infinite alternate; }
+@keyframes drift-a { to { transform: translate(20vmax, 15vmax) scale(1.15); } }
+@keyframes drift-b { to { transform: translate(-25vmax, 10vmax) scale(.9); } }
+@keyframes drift-c { to { transform: translate(15vmax, -20vmax) scale(1.1); } }
+
+/* 유리 3단계: 콘텐츠(두꺼움), 컨트롤(보통), 떠 있는 것(얇음) */
+.glass {
+  position: relative; border-radius: 20px; border: 1px solid var(--glass-edge);
+  box-shadow: inset 0 1px 0 var(--glass-hi), 0 10px 40px rgba(0, 0, 0, .25);
+}
+.glass::before { /* 포인터를 따라가는 하이라이트 */
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: radial-gradient(240px circle at var(--mx, 50%) var(--my, 0%), rgba(255, 255, 255, .14), transparent 60%);
+}
+.glass-content { background: rgb(var(--glass-tint) / .62); backdrop-filter: blur(28px) saturate(170%); }
+.glass-control { background: rgb(var(--glass-tint) / .42); backdrop-filter: blur(20px) saturate(160%); }
+.glass-float   { background: rgb(var(--glass-tint) / .28); backdrop-filter: blur(14px) saturate(150%); box-shadow: inset 0 1px 0 var(--glass-hi), 0 18px 50px rgba(0, 0, 0, .35); }
+/* P1 확인용: 틴트를 낮춰 뒤가 흐려 보이는지 확인 */
+:root.glass-test .glass-content, :root.glass-test .glass-control, :root.glass-test .glass-float { background: rgb(var(--glass-tint) / .12); backdrop-filter: blur(10px); }
+:root.reduce-transparency .glass { backdrop-filter: none; background: rgb(var(--glass-tint) / 1); }
+:root.reduce-transparency .orb { display: none; }
+
+.rail { padding: 16px 12px; display: flex; flex-direction: column; gap: 6px; }
+.brand { font-weight: 700; font-size: 17px; padding: 6px 10px 16px; display: flex; align-items: center; gap: 10px; }
+.pulse-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 0 var(--accent); animation: pulse 2s var(--ease-in) infinite; }
+@keyframes pulse { to { box-shadow: 0 0 0 12px transparent; } }
+.spacer { flex: 1; }
+.nav-item { all: unset; cursor: pointer; padding: 10px 12px; border-radius: 12px; color: var(--muted); transition: background .167s var(--ease-in), color .167s; }
+.nav-item:hover { background: rgba(255, 255, 255, .08); color: var(--ink); }
+.nav-item.active { background: rgba(255, 255, 255, .14); color: var(--ink); font-weight: 600; }
+.nav-item:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+main { position: relative; min-width: 0; }
+.page { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 16px; }
+.page.hidden { display: none; }
+.page-title { margin: 4px 0 0; font-size: 30px; letter-spacing: -.02em; view-transition-name: page-title; }
+.chart-wrap { position: relative; flex: 1; border-radius: 22px; overflow: hidden; }
+#chart { position: absolute; inset: 0; width: 100%; height: 100%; }
+.overlay { position: absolute; padding: 18px 20px; }
+.overlay-status { left: 28px; top: 28px; width: 360px; }
+.overlay-metric { right: 28px; bottom: 28px; width: 240px; }
+.nested { margin-top: 14px; padding: 12px 14px; border-radius: 14px; }
+.label { color: var(--muted); font-size: 12.5px; }
+.headline { font-size: 22px; font-weight: 650; margin-top: 2px; }
+.big { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ok { color: var(--accent); } .warn { color: var(--warn); }
+.toolbar { display: flex; align-items: center; gap: 14px; padding: 12px 14px; }
+.btn { all: unset; cursor: pointer; padding: 9px 16px; border-radius: 12px; font-weight: 600; transition: transform .167s var(--ease-in); }
+.btn:active { transform: scale(.97); }
+.btn.primary { background: var(--accent); color: #04211d; }
+.memo { all: unset; padding: 8px 12px; border-radius: 10px; background: rgba(255, 255, 255, .08); border: 1px solid var(--glass-edge); min-width: 180px; }
+.cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.card { padding: 20px; animation: rise .333s var(--ease-in) both; }
+.card:nth-child(2) { animation-delay: .04s; } .card:nth-child(3) { animation-delay: .08s; } .card:nth-child(4) { animation-delay: .12s; }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+
+/* 화면 전환과 테마 전환 */
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+.theme-switching::view-transition-new(root) { animation: reveal .5s var(--ease-in); }
+@keyframes reveal { from { clip-path: circle(0 at var(--rx) var(--ry)); } to { clip-path: circle(150% at var(--rx) var(--ry)); } }
+.page-switching::view-transition-old(root) { animation: fade-out .167s linear both; }
+.page-switching::view-transition-new(root) { animation: fade-in .25s var(--ease-in) both; }
+::view-transition-group(page-title) { animation-duration: .333s; animation-timing-function: var(--ease-in); }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes fade-in { from { opacity: 0; transform: translateY(8px); } }
+
+:root.reduce-motion *, :root.reduce-motion *::before { animation: none !important; transition: none !important; }
+:root.reduce-motion::view-transition-group(*), :root.reduce-motion::view-transition-old(*), :root.reduce-motion::view-transition-new(*) { animation: none !important; }
