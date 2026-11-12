@@ -458,14 +458,15 @@ function draw(now) {
   const w = canvas.clientWidth, h = canvas.clientHeight; if (!w || !h) return;
   ctx.clearRect(0, 0, w, h);
   const step = w / (N - 2), shift = root.dataset.motion === 'reduce' ? 0 : Math.min(1, (now - lastArrival) / 1000) * step;
-  const y = (v) => h - 20 - (v / 80) * (h - 36), x = (i) => w - (N - 1 - i) * step - shift;
+  const y = (v) => h - 26 - (v / 80) * (h - 42), x = (i) => w - (N - 1 - i) * step - shift;
   // 축: 지연 0·40·80 ms, 시간 2분 전·1분 전·지금
   ctx.strokeStyle = css('--faint'); ctx.lineWidth = 1;
   ctx.fillStyle = css('--muted'); ctx.font = '11px Pretendard, "Segoe UI", sans-serif';
   for (const v of [0, 40, 80]) { ctx.beginPath(); ctx.moveTo(34, y(v)); ctx.lineTo(w, y(v)); ctx.stroke(); ctx.fillText(v + ' ms', 0, y(v) + 4); }
   ctx.textAlign = 'center';
-  [['2분 전', 0.06], ['1분 전', 0.5]].forEach(([t, r]) => ctx.fillText(t, w * r + (r < .1 ? 14 : 0), h - 4));
-  ctx.textAlign = 'right'; ctx.fillText('지금', w, h - 4); ctx.textAlign = 'left';
+  ctx.textBaseline = 'bottom';
+  [['2분 전', 0.06], ['1분 전', 0.5]].forEach(([t, r]) => ctx.fillText(t, w * r + (r < .1 ? 14 : 0), h - 6));
+  ctx.textAlign = 'right'; ctx.fillText('지금', w, h - 6); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   // 응답 없음 구간: 세로 띠
   const bad = css('--bad');
   ctx.fillStyle = bad + '33';
