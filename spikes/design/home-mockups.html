@@ -240,7 +240,10 @@ main { min-width: 0; display: grid; grid-template-columns: 1.35fr 1fr; grid-temp
 
 /* --- 타임라인 --- */
 .timeline { grid-column: 1; padding: 20px 22px 16px; display: flex; flex-direction: column; min-height: 0; border-radius: var(--radius-xl); }
-.timeline canvas { width: 100%; flex: 1; min-height: 0; display: block; }
+/* 캔버스가 배치 계산에 끼어들지 않게 감싸는 상자 안에 절대 위치로 둔다 */
+.timeline { min-width: 0; }
+.plot { position: relative; flex: 1; min-height: 0; }
+.plot canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin-top: 8px; }
 .legend i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
 
@@ -352,7 +355,7 @@ main { min-width: 0; display: grid; grid-template-columns: 1.35fr 1fr; grid-temp
 
     <section class="glass content timeline rise" style="--i:4" aria-label="최근 2분 타임라인">
       <div class="card-head"><span class="card-title">최근 2분</span><span class="card-note" id="liveNote">실시간 · 1초 간격</span></div>
-      <canvas id="chart"></canvas>
+      <div class="plot"><canvas id="chart"></canvas></div>
       <div class="legend"><span><i style="background:var(--accent)"></i>인터넷 지연</span><span><i style="background:var(--accent-2)"></i>공유기 지연</span><span><i style="background:var(--bad)"></i>응답 없음</span><span><i style="background:var(--warn)"></i>증상 표시</span></div>
     </section>
 
@@ -453,8 +456,10 @@ if (state === 'problem') problemSince = N - 6;
 for (; tick < N; tick++) { const s = sample(tick); net.push(s.net); gw.push(s.gw); }
 const marks = [N - 46];
 setInterval(() => { const s = sample(tick++); net.push(s.net); gw.push(s.gw); net.shift(); gw.shift(); marks.forEach((m, k) => marks[k] = m - 1); lastArrival = performance.now(); }, 1000);
-function resize() { const r = canvas.getBoundingClientRect(), d = devicePixelRatio || 1; canvas.width = r.width * d; canvas.height = r.height * d; ctx.setTransform(d, 0, 0, d, 0, 0); }
-addEventListener('resize', resize);
+// getBoundingClientRect는 등장 애니메이션의 축소(scale)까지 반영하므로 변형과 무관한 clientWidth로 잰다.
+function resize() { const d = devicePixelRatio || 1; canvas.width = canvas.clientWidth * d; canvas.height = canvas.clientHeight * d; ctx.setTransform(d, 0, 0, d, 0, 0); }
+// 배치가 끝난 뒤나 창 크기가 바뀔 때마다 캔버스 화소 크기를 실제 표시 크기에 맞춘다.
+new ResizeObserver(resize).observe(canvas);
 function curve(points) {
   ctx.moveTo(points[0][0], points[0][1]);
   for (let i = 1; i < points.length; i++) {
