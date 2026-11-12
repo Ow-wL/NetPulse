@@ -32,7 +32,7 @@ namespace NetPulse
                 WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.CanResize,
                 Width = 955, Height = 725, MinWidth = 720, MinHeight = 525, FontSize = 14,
                 FontFamily = owner.FontFamily, Foreground = Ui.Ink, Language = owner.Language,
-                UseLayoutRounding = true, SnapsToDevicePixels = true, Background = Ui.Brush("#EDF3FB")
+                UseLayoutRounding = true, SnapsToDevicePixels = true, Background = Ui.Brush("#F5F6F8")
             };
             WindowChrome.SetWindowChrome(Window, new WindowChrome
             {
@@ -40,10 +40,7 @@ namespace NetPulse
                 GlassFrameThickness = new Thickness(0), CornerRadius = new CornerRadius(14)
             });
             var backdrop = new Grid { Background = (Brush)owner.Resources["Backdrop"] };
-            backdrop.Children.Add(new Border { IsHitTestVisible = false, Background = new RadialGradientBrush(
-                Color.FromArgb(142, 161, 187, 255), Color.FromArgb(0, 161, 187, 255))
-                { Center = new Point(0.92, 0.14), GradientOrigin = new Point(0.92, 0.14), RadiusX = 0.8, RadiusY = 0.75 } });
-            Window.Content = new Border { Child = backdrop, BorderBrush = Ui.Brush("#CFDAEE"), BorderThickness = new Thickness(1) };
+            Window.Content = new Border { Child = backdrop, BorderBrush = Ui.Brush("#D9DDE3"), BorderThickness = new Thickness(1) };
 
             var frame = new DockPanel();
             backdrop.Children.Add(frame);

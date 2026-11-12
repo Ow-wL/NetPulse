@@ -15,6 +15,8 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 
+[assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8")]
+
 namespace NetPulse
 {
     internal static class Program
@@ -77,14 +79,14 @@ namespace NetPulse
             progress = Find<ProgressBar>("Progress");
 
             var host = Find<Grid>("CardsHost");
-            var colors = new[] { "#007B78", "#2D5BD2", "#7053B9" };
+            var accent = Ui.Brush("#0067D8");
             cards = new Card[targets.Length];
             for (int i = 0; i < targets.Length; i++)
             {
-                cards[i] = new Card(targets[i], Ui.Brush(colors[i]), (Style)Window.Resources["Glass"], i);
+                cards[i] = new Card(targets[i], accent, (Style)Window.Resources["Glass"], i);
                 host.ColumnDefinitions.Add(new ColumnDefinition());
                 Grid.SetColumn(cards[i].View, i);
-                if (i > 0) cards[i].View.Margin = new Thickness(14, 0, 0, 0);
+                if (i > 0) cards[i].View.Margin = new Thickness(11, 0, 0, 0);
                 host.Children.Add(cards[i].View);
             }
 
@@ -111,6 +113,7 @@ namespace NetPulse
             startButton.Click += Start;
             stopButton.Click += (sender, args) => RequestStop();
             Find<Button>("FolderButton").Click += (sender, args) => OpenFolder();
+            Find<Button>("QuickButton").Click += (sender, args) => OpenQuick();
             compareButton.Click += (sender, args) => OpenComparison();
             analysisButton.Click += (sender, args) => OpenAnalysis();
             markButton.Click += (sender, args) => MarkSymptom();
@@ -302,6 +305,12 @@ namespace NetPulse
             catch (Exception ex) { MessageBox.Show(Window, ex.Message, "끊김 분석"); }
         }
 
+        private void OpenQuick()
+        {
+            try { new QuickWindow(Window).Window.ShowDialog(); }
+            catch (Exception ex) { MessageBox.Show(Window, ex.Message, "빠른 진단"); }
+        }
+
         private void OpenComparison()
         {
             try { new Comparison(Window, root).Window.ShowDialog(); }
@@ -314,8 +323,8 @@ namespace NetPulse
         internal static readonly FontFamily AppFont = new FontFamily(
             new Uri("pack://application:,,,/" + typeof(Ui).Assembly.GetName().Name + ";component/"),
             "./fonts/#Pretendard, Malgun Gothic");
-        internal static readonly SolidColorBrush Ink = Brush("#192238");
-        internal static readonly SolidColorBrush Muted = Brush("#526078");
+        internal static readonly SolidColorBrush Ink = Brush("#202124");
+        internal static readonly SolidColorBrush Muted = Brush("#555A64");
         internal static readonly SolidColorBrush Loss = Brush("#A94122");
 
         internal static SolidColorBrush Brush(string hex)
@@ -334,14 +343,12 @@ namespace NetPulse
 
     internal sealed class Card
     {
-        private readonly Brush accent;
         private readonly TextBlock value, hint, lossRate, average, maximum, streak;
         private readonly Sparkline graph;
         internal readonly Border View;
 
         internal Card(Target target, SolidColorBrush accent, Style glass, int index)
         {
-            this.accent = accent;
             var title = Ui.Text(target.Name, 15, Ui.Ink, true);
             var ip = Ui.Text(target.Ip, 12, Ui.Muted);
             ip.Margin = new Thickness(0, 2, 0, 0);
@@ -354,7 +361,7 @@ namespace NetPulse
             titleRow.Children.Add(CreateIcon(accent, index));
             titleRow.Children.Add(labels);
 
-            value = Ui.Text("—", 34, Ui.Ink, true);
+            value = Ui.Text("—", 31, Ui.Ink, true);
             Typography.SetNumeralAlignment(value, FontNumeralAlignment.Tabular);
             hint = Ui.Text("응답 대기", 12, Ui.Muted);
             var values = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
@@ -378,7 +385,7 @@ namespace NetPulse
             content.Children.Add(graph);
             content.Children.Add(new Border
             {
-                BorderBrush = Ui.Brush("#9BD5DFF0"),
+                BorderBrush = Ui.Brush("#E7E9ED"),
                 BorderThickness = new Thickness(0, 1, 0, 0),
                 Padding = new Thickness(0, 10, 0, 0),
                 Child = metrics
@@ -405,11 +412,11 @@ namespace NetPulse
             Color color = accent.Color;
             return new Border
             {
-                Width = 39, Height = 39, CornerRadius = new CornerRadius(11), Child = symbol,
+                Width = 34, Height = 34, CornerRadius = new CornerRadius(8), Child = symbol,
                 Margin = new Thickness(0, 0, 10, 0), BorderBrush = Brushes.White,
                 BorderThickness = new Thickness(1),
-                Background = new LinearGradientBrush(Color.FromArgb(23, color.R, color.G, color.B),
-                    Color.FromArgb(39, color.R, color.G, color.B), 65)
+                Background = new LinearGradientBrush(Color.FromArgb(12, color.R, color.G, color.B),
+                    Color.FromArgb(23, color.R, color.G, color.B), 65)
             };
         }
 
@@ -442,7 +449,7 @@ namespace NetPulse
         internal void Update(long slot, Sample sample, TargetStats totals)
         {
             value.Text = sample.Rtt.HasValue ? sample.Rtt.Value + " ms" : sample.Error ? "오류" : "손실";
-            value.Foreground = sample.Rtt.HasValue ? accent : sample.Error ? Ui.Muted : Ui.Loss;
+            value.Foreground = sample.Rtt.HasValue ? Ui.Ink : sample.Error ? Ui.Muted : Ui.Loss;
             hint.Text = sample.Rtt.HasValue ? "최근 응답" : sample.Error ? "검사 실패" : "ICMP";
             lossRate.Text = totals.LossPercent.HasValue ? totals.LossPercent.Value.ToString("0.00") + "%" : "—";
             lossRate.Foreground = totals.Lost > 0 ? Ui.Loss : Ui.Ink;
@@ -455,7 +462,7 @@ namespace NetPulse
 
     internal sealed class Sparkline : FrameworkElement
     {
-        private readonly Pen grid = new Pen(Ui.Brush("#A3CAD6EB"), 0.85);
+        private readonly Pen grid = new Pen(Ui.Brush("#CED6E1"), 0.85);
         private readonly Pen line;
         private readonly Brush accent, fill;
         private readonly Queue<KeyValuePair<long, Sample>> points = new Queue<KeyValuePair<long, Sample>>();

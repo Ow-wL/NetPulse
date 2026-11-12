@@ -86,7 +86,7 @@ namespace NetPulse
                 Width = 740, Height = 725, MinWidth = 545, MinHeight = 450,
                 FontFamily = owner.FontFamily, Foreground = Ui.Ink, FontSize = 14,
                 Language = owner.Language, UseLayoutRounding = true, SnapsToDevicePixels = true,
-                Background = Ui.Brush("#EDF3FB")
+                Background = Ui.Brush("#F5F6F8")
             };
             WindowChrome.SetWindowChrome(Window, new WindowChrome
             {
@@ -96,13 +96,7 @@ namespace NetPulse
             glass = (Style)owner.Resources["Glass"];
 
             var background = new Grid { Background = (Brush)owner.Resources["Backdrop"] };
-            var glow = new RadialGradientBrush(Color.FromArgb(155, 161, 187, 255), Color.FromArgb(0, 161, 187, 255))
-            {
-                Center = new Point(0.92, 0.14), GradientOrigin = new Point(0.92, 0.14),
-                RadiusX = 0.8, RadiusY = 0.75
-            };
-            background.Children.Add(new Border { Background = glow, IsHitTestVisible = false });
-            Window.Content = new Border { Child = background, BorderThickness = new Thickness(1), BorderBrush = Ui.Brush("#CFDAEE") };
+            Window.Content = new Border { Child = background, BorderThickness = new Thickness(1), BorderBrush = Ui.Brush("#D9DDE3") };
 
             var frame = new DockPanel();
             background.Children.Add(frame);
@@ -177,7 +171,7 @@ namespace NetPulse
                 title.Margin = new Thickness(0, 0, 0, 9);
                 body.Children.Add(title);
                 AddRow(body, "지표", "Mesh 경유", "직접 Wi‑Fi", true);
-                body.Children.Add(new Border { Height = 1, Background = Ui.Brush("#9BD5DFF0"),
+                body.Children.Add(new Border { Height = 1, Background = Ui.Brush("#E7E9ED"),
                     Margin = new Thickness(0, 4, 0, 4) });
                 AddMetric(body, target, left, right, "유효 측정 수", "valid", "회");
                 AddMetric(body, target, left, right, "손실률", "loss_pct", "%");
