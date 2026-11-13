@@ -86,6 +86,8 @@ if (Test-Path $g5Dir) {
     foreach ($k in 'crossfade', 'sharedmove') { foreach ($p in '0', '0.5', '1') { $required += "matrix-m5-transition-$k-$p" } }
     $missing = @($required | Where-Object { -not (Test-Path (Join-Path $g5Dir "$_.json")) })
     $matrix = @(Get-ChildItem $g5Dir -Filter 'matrix-*.json' | Sort-Object Name)
+    # M2 회귀 매트릭스는 따로 센다: M5 결과가 합쳐져 M2 캡처 누락을 가리지 않게 (G4 M5 1라운드 C3)
+    $m2Matrix = @($matrix | Where-Object { -not $_.Name.StartsWith('matrix-m5-') })
     $captures = @(Get-ChildItem $env:NETPULSE_UITEST_OUT -Filter *.png | Sort-Object Name | ForEach-Object { [ordered]@{ file = "ui/captures/$($_.Name)"; sha256 = Get-Sha256Text $_.FullName } })
     $bench = & $read 'bench'
     $g5 = [ordered]@{
@@ -94,7 +96,8 @@ if (Test-Path $g5Dir) {
         uiTestsPassed  = $result.passed
         missing        = $missing
         matrixCount    = $matrix.Count
-        passed         = [bool]($result.passed -and $missing.Count -eq 0 -and $matrix.Count -ge $MatrixExpected)
+        m2MatrixCount  = $m2Matrix.Count
+        passed         = [bool]($result.passed -and $missing.Count -eq 0 -and $m2Matrix.Count -ge $MatrixExpected)
         bench          = $bench
         benchMeasure   = & $read 'bench-measure'
         m5Scenes       = $sceneIds.Count
@@ -108,7 +111,7 @@ if (Test-Path $g5Dir) {
     }
     $g5 | ConvertTo-Json -Depth 8 | Set-Content $g5Path -Encoding UTF8
     if ($bench) { Write-BenchSummary $bench.bench (Join-Path $uiDir 'bench.md') }
-    if (-not $g5.passed) { Write-Warning "G5 미완료: 누락 $($missing -join ', '), 매트릭스 $($matrix.Count)/$MatrixExpected" }
+    if (-not $g5.passed) { Write-Warning "G5 미완료: 누락 $($missing -join ', '), M2 매트릭스 $($m2Matrix.Count)/$MatrixExpected" }
 }
 if (-not $result.passed) { throw "UI 테스트 실패: $failed" }
 if ((Test-Path $g5Path) -and -not (Get-Content $g5Path -Encoding UTF8 -Raw | ConvertFrom-Json).passed) { throw 'G5 묶음이 완전하지 않습니다.' }

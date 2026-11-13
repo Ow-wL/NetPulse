@@ -40,6 +40,10 @@ public sealed partial class MeasurementSession
 
     /// <summary>시험 전용: 큐 넣기에 실패한 직후(넘침 등록 전, 잠금 안)에 부른다.</summary>
     internal Action? TestHookAfterLinkEnqueueFailed { get; set; }
+    /// <summary>시험 전용: 표본이 들어와 잠금을 잡기 직전 (재관측 생산자의 진입 신호, G4 M5 1라운드 C1).</summary>
+    internal Action? TestHookLinkSampleArrived { get; set; }
+    /// <summary>시험 전용: 처리 작업이 큐에서 표본을 꺼낸 직후, 잠금 전 (소비자의 배출 신호).</summary>
+    internal Action? TestHookLinkDequeued { get; set; }
     private readonly Dictionary<string, AdapterTrack> adapterTracks = [];   // Key → 추적 (처리 작업 또는 끝에서만, linkGate 안)
     private readonly Dictionary<string, long> overflowByKey = [];
     private readonly object linkGate = new();
@@ -88,6 +92,7 @@ public sealed partial class MeasurementSession
     private void OnLinkSample(LinkSample sample)
     {
         if (linkClosed || directCapability != LinkCapability.Supported) return;
+        TestHookLinkSampleArrived?.Invoke();
         lock (linkGate)
         {
             var item = new LinkItem(sample, (long)clock.Elapsed.TotalMilliseconds, clock.Now, linkOverflow);
@@ -123,7 +128,11 @@ public sealed partial class MeasurementSession
     /// <summary>큐에 쌓인 링크 표본을 처리한다 (처리 작업, 또는 처리 작업이 멈춘 뒤 끝에서).</summary>
     private void DrainLinks()
     {
-        while (linkQueue.Reader.TryRead(out var item)) ProcessLink(item);
+        while (linkQueue.Reader.TryRead(out var item))
+        {
+            TestHookLinkDequeued?.Invoke();
+            ProcessLink(item);
+        }
     }
 
     /// <summary>측정 끝 경계 (경과 ms). 끝낼 때 정리 전에 고정한다. 그 뒤 표본은 큐에 있어도 버린다.</summary>

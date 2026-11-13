@@ -126,7 +126,8 @@ public sealed class HomeScreen : Screen
         Grid.SetColumn(recentCard, 1);
         grid.Children.Add(recentCard);
         // 최근 측정이 바뀌면 큰 카드(지난 측정)도 함께 다시 그린다
-        Context.Recent.Changed += () => DispatcherQueue.TryEnqueue(() => { if (Parent is not null) Render(Context.Host.Snapshot); });
+        // 보이는 화면만 그린다 (화면은 숨겨 두므로 부모 유무로는 알 수 없다). 닫는 중이면 요소를 건드리지 않는다
+        Context.Recent.Changed += () => DispatcherQueue.TryEnqueue(() => { if (!Context.IsClosing() && Visibility == Visibility.Visible) Render(Context.Host.Snapshot); });
     }
 
     public override IReadOnlyList<UIElement> Parts => [header, heroCard, mapCard, chartCard, recentCard];

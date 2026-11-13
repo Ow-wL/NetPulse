@@ -41,6 +41,8 @@ public sealed record HostOptions
 {
     /// <summary>실시간 전달 읽기 간격 (설계 4.4: 250 ms)</summary>
     public TimeSpan PollInterval { get; init; } = TimeSpan.FromMilliseconds(250);
+    /// <summary>중지·종료 때 메모 초안 저장을 기다리는 한도 (넘으면 초안은 남기고 진행).</summary>
+    public TimeSpan DraftFlushLimit { get; init; } = TimeSpan.FromSeconds(2);
     /// <summary>잠정 분석 간격 (설계 4.4: 5초)</summary>
     public TimeSpan AnalysisInterval { get; init; } = TimeSpan.FromSeconds(5);
     /// <summary>시험·캡처: 측정 시작 직전에 멈춘다 (시작 중 화면)</summary>
@@ -183,9 +185,11 @@ public sealed class MeasurementHost : IAsyncDisposable
             Publish();
             return true;
         }
-        catch (SessionStartException ex)
+        catch (Exception ex)
         {
-            lock (gate) { state = HostState.Idle; startError = ex.InnerException is null ? ex.Message : ex.Message; }
+            // 어떤 시작 실패든 시작 중에 남지 않는다 (G4 M5 1라운드 A3). 예외 글에는 경로가 들어갈 수 있어 종류만 보인다
+            string message = ex is SessionStartException ? ex.Message : "측정을 시작하지 못했습니다 (" + ex.GetType().Name + ")";
+            lock (gate) { state = HostState.Idle; startError = message; }
             Publish();
             return false;
         }
@@ -203,7 +207,7 @@ public sealed class MeasurementHost : IAsyncDisposable
             state = HostState.Stopping;
         }
         Publish();
-        await FlushDraftsAsync().ConfigureAwait(false);
+        await FlushDraftsAsync(options.DraftFlushLimit).ConfigureAwait(false);
         if (s is not null) await s.StopAsync().ConfigureAwait(false);
         // 끝 처리(OnCompleted)가 장면을 확정한다
         await WaitIdleAsync().ConfigureAwait(false);
@@ -291,18 +295,25 @@ public sealed class MeasurementHost : IAsyncDisposable
             result = folder is null ? EventWriteState.Lost
                 : await notes.WriteAsync(folder, sessionId, mark, atMs, world.Now, memo).ConfigureAwait(false);
         }
-        if (result == EventWriteState.Saved) lock (drafts) drafts.Remove((sessionId, mark));
+        // 저장한 그 글일 때만 초안을 지운다: 기다리는 동안 새로 쓴 글은 남긴다 (G4 M5 1라운드 A5)
+        if (result == EventWriteState.Saved)
+            lock (drafts)
+                if (drafts.TryGetValue((sessionId, mark), out var current) && current == (memo ?? "")) drafts.Remove((sessionId, mark));
         if (live is null && result == EventWriteState.Saved) RefreshFinishedMarks(sessionId);
         Publish();
         return result;
     }
 
     /// <summary>모든 메모 초안을 넣는다 (중지·창 닫기).</summary>
-    public async Task FlushDraftsAsync()
+    public async Task FlushDraftsAsync(TimeSpan? limit = null)
     {
         (string Session, string Mark, string Text)[] list;
         lock (drafts) list = drafts.Select(d => (d.Key.Session, d.Key.Mark, d.Value)).ToArray();
-        foreach (var d in list) await SaveMemoAsync(d.Session, d.Mark, d.Text).ConfigureAwait(false);
+        // 모두 한 번에 넣고(측정 중이면 세션 통로, 끝났으면 노트 직렬 작업) 기한까지만 기다린다:
+        // 저장이 막혀도 중지·종료는 진행하고, 못 끝낸 초안은 남는다 (G4 M5 1라운드 A6)
+        var all = Task.WhenAll(list.Select(d => SaveMemoAsync(d.Session, d.Mark, d.Text)));
+        if (limit is { } l) await Task.WhenAny(all, Task.Delay(l)).ConfigureAwait(false);
+        else await all.ConfigureAwait(false);
     }
 
     /// <summary>요약이 있는 조각 폴더 (없으면 마지막 조각).</summary>
@@ -331,7 +342,7 @@ public sealed class MeasurementHost : IAsyncDisposable
     /// <summary>창 닫기: 초안을 넣고, 측정을 멈추고 저장하고, 노트 쓰기를 최대 3초 기다린다.</summary>
     public async Task ShutdownAsync()
     {
-        await FlushDraftsAsync().ConfigureAwait(false);
+        await FlushDraftsAsync(options.DraftFlushLimit).ConfigureAwait(false);
         await StopAsync().ConfigureAwait(false);
         await notes.DrainAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
     }
@@ -376,7 +387,8 @@ public sealed class MeasurementHost : IAsyncDisposable
             {
                 rounds = list;
                 events.Clear(); eventStates.Clear(); eventMarks.Clear();
-                foreach (var e in inputs.Events) AddEvent(e, null, EventWriteState.Saved);
+                // 이벤트 ID와 게시된 쓰기 상태까지 되살린다 (저장 못 한 표시가 저장된 것으로 보이지 않게, 뒤의 상태 변경이 맞는 표시를 찾게)
+                for (int i = 0; i < inputs.Events.Count; i++) AddEvent(inputs.Events[i], inputs.EventStates[i].EventId, inputs.EventStates[i].State);
             }
             cursor = inputs.At;
             delta = s.Live.Read(cursor);

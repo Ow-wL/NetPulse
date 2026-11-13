@@ -51,7 +51,7 @@ public sealed class DemoAppWorld : IAppWorld
 
     public MeasurementSession StartSession(Profile profile, string appVersion)
     {
-        Directory.CreateDirectory(primary.Path!);
+        // 기본 위치 폴더는 세션의 저장 위치 선택이 만든다 (여기서 만들다 실패하면 대체 위치로 가지 못했다, G4 M5 1라운드 A3)
         MeasurementSession? session = null;
         // 처리 속도에 맞춘 진행: 엔진이 처리보다 20회차 넘게 앞서면 시간을 더 진행하지 않는다
         var run = world.NewRun(primary, fallback, rules, () => session is not { } s || s.Engine.State.Rounds - s.Status.Observed - s.Status.Unprocessed < 20);

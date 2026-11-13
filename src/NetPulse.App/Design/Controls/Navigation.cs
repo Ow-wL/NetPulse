@@ -180,6 +180,17 @@ public sealed class SegmentedChoice : GroupPanel
 {
     private readonly Dictionary<string, RadioButton> byValue = [];
 
+    /// <summary>읽기 전용 (측정 중 편집 화면): 마우스도 키보드도 고르지 못한다 (G4 M5 1라운드 B5).</summary>
+    public bool ReadOnly
+    {
+        get => !IsHitTestVisible;
+        set
+        {
+            IsHitTestVisible = !value;
+            foreach (var b in byValue.Values) b.IsEnabled = !value;
+        }
+    }
+
     public SegmentedChoice(Ui ui, string automationId, string label, IReadOnlyList<(string Value, string Label)> options, string initial)
         : base(automationId, label)
     {

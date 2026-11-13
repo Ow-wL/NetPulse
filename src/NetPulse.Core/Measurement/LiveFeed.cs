@@ -105,7 +105,10 @@ public static class DirectSummary
 /// <see cref="At"/>·<see cref="ElapsedMs"/>로 그 시점을 식별한다 (같은 범위로 기록을 다시 분석해 비교할 때).
 /// </summary>
 public sealed record AnalysisInputs(RecordHeader Header, IReadOnlyList<RoundData> Rounds, IReadOnlyList<GapSpan> Gaps, IReadOnlyList<JsonObject> Events,
-    LinkLive Links, long ElapsedMs, DateTimeOffset Wall, LiveCursor At);
+    LinkLive Links, long ElapsedMs, DateTimeOffset Wall, LiveCursor At, IReadOnlyList<EventRef> EventStates);
+
+/// <summary>사본의 이벤트 하나의 ID와 그 커서까지 게시된 쓰기 상태 (<see cref="AnalysisInputs.Events"/>와 같은 순서).</summary>
+public readonly record struct EventRef(string EventId, EventWriteState State);
 
 /// <summary>증상 표시를 받은 순간 확정한 값과, 첫 쓰기 시도의 결과 (M5 설계 3.1).</summary>
 /// <param name="Saved">처리 작업이 첫 쓰기를 시도하면 끝난다: 저장 / 대기(재시도 중, 이후 변화는 <see cref="StateItem"/>) / 유실</param>

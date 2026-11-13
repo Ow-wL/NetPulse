@@ -27,6 +27,9 @@ public sealed partial class MeasurementSession
     private readonly Dictionary<string, (LiveEvent Event, EventWriteState Published)> publishedEvents = [];   // sync 안
     private readonly Dictionary<string, TaskCompletionSource<EventWriteState>> tickets = [];
     private readonly List<LiveItem> liveItems = [];                              // sync 안
+    // 게시한 것만의 누적 (재동기화·잠정 분석 사본이 커서와 같은 경계를 갖게, G4 M5 1라운드 A2): 회차, 이벤트 ID (게시 순서)
+    private readonly List<RoundData> publishedRounds = [];                       // sync 안
+    private readonly List<string> publishedOrder = [];                           // sync 안
     private long liveFirstSeq, nextSeq, nextEventId;
     private readonly Channel<UserEvent> userEvents = Channel.CreateUnbounded<UserEvent>(new UnboundedChannelOptions { SingleReader = true });
     private bool userClosed;                                                      // sync 안
@@ -50,13 +53,15 @@ public sealed partial class MeasurementSession
     public SymptomTicket? MarkSymptom(string? memo = null)
     {
         var ticket = new TaskCompletionSource<EventWriteState>(TaskCreationOptions.RunContinuationsAsynchronously);
+        // 엔진 상태는 sync 밖에서 읽는다: 엔진은 자기 잠금 안에서 회차를 넘기고, 큐가 차면 그 경로가 sync를 잡는다 (교착, G4 M5 1라운드 A1)
+        long engineLatest = engine.State.Latest?.Tick.Index ?? -1;
         lock (sync)
         {
             if (userClosed || Volatile.Read(ref ending) != 0) return null;
             long atMs = (long)clock.Elapsed.TotalMilliseconds;
             var wall = clock.Now;
             var mark = "s" + (++markSeq);
-            long latest = Math.Max(lastRound, engine.State.Latest?.Tick.Index ?? -1);
+            long latest = Math.Max(lastRound, engineLatest);
             long? round = latest >= 0 ? latest : null;
             issuedMarks[mark] = atMs;
             var line = RecordSchema.EventLine(Id, SymptomMarks.MarkType, round, atMs, wall, SymptomMarks.MarkFields(mark, memo));
@@ -179,6 +184,8 @@ public sealed partial class MeasurementSession
         lock (sync)
         {
             var events = related.Select(ToLive).ToArray();
+            publishedRounds.Add(data);
+            publishedOrder.AddRange(related);
             AddLive(new RoundItem(nextSeq, data, events));
         }
     }
@@ -186,7 +193,11 @@ public sealed partial class MeasurementSession
     /// <summary>따로 생긴 이벤트를 게시한다.</summary>
     private void PublishEvent(string eventId)
     {
-        lock (sync) AddLive(new EventItem(nextSeq, ToLive(eventId)));
+        lock (sync)
+        {
+            publishedOrder.Add(eventId);
+            AddLive(new EventItem(nextSeq, ToLive(eventId)));
+        }
     }
 
     // ---------------- 읽기 (아무 스레드) ----------------
@@ -215,8 +226,11 @@ public sealed partial class MeasurementSession
         lock (sync)
         {
             var links = SnapshotLinks();
-            return new AnalysisInputs(header, observed.ToArray(), gapSpans.ToArray(), analysisEvents.Select(e => e.DeepClone().AsObject()).ToArray(),
-                links, (long)clock.Elapsed.TotalMilliseconds, clock.Now, new LiveCursor(Id, nextSeq));
+            // 커서(nextSeq)까지 게시한 것만: 처리 중인 회차(관측은 됐지만 아직 게시 전)와 그 이벤트는 커서 뒤의 전달로 온다
+            var events = publishedOrder.Select(id => analysisEvents[(int)(long.Parse(id.AsSpan(1)) - 1)].DeepClone().AsObject()).ToArray();
+            var states = publishedOrder.Select(id => new EventRef(id, publishedEvents[id].Published)).ToArray();
+            return new AnalysisInputs(header, publishedRounds.ToArray(), gapSpans.ToArray(), events,
+                links, (long)clock.Elapsed.TotalMilliseconds, clock.Now, new LiveCursor(Id, nextSeq), states);
         }
     }
 

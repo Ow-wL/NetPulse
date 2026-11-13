@@ -23,6 +23,8 @@ public sealed class ScreenContext
     public required Action QueueDiag { get; init; }
     /// <summary>테마 원형 전환의 시작점.</summary>
     public required Action<FrameworkElement?> SetRevealOrigin { get; init; }
+    /// <summary>창을 닫는 중 (그 뒤 큐에서 도는 작업은 화면 요소를 건드리지 않는다: 닫힌 뒤 요소를 읽으면 앱이 죽었다).</summary>
+    public required Func<bool> IsClosing { get; init; }
     public DateTimeOffset Now => Host.World.Now;
 }
 

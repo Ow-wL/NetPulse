@@ -18,6 +18,14 @@ public sealed class M5LiveRunTests
     [Fact]
     public void RealDetectionMeasureMarkStopAndRelaunch()
     {
+        // 이 PC의 주소가 찍히는 캡처·로그는 저장소의 .loop/ 아래로만 (공개 안 함). 아니면 실행하지 않는다 (G4 M5 1라운드 C2)
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "NetPulse.slnx"))) root = root.Parent;
+        Assert.True(root is not null, "저장소 루트를 찾지 못했습니다");
+        string loop = Path.GetFullPath(Path.Combine(root!.FullName, ".loop")) + Path.DirectorySeparatorChar;
+        string output = Path.GetFullPath(AppDriver.OutputDirectory) + Path.DirectorySeparatorChar;
+        Assert.True(output.StartsWith(loop, StringComparison.OrdinalIgnoreCase), "실측 시험의 출력(NETPULSE_UITEST_OUT)은 .loop/ 아래여야 합니다");
+
         var userData = AppDriver.NewUserData();
         string sessionId;
         try

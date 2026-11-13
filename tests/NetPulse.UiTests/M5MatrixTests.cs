@@ -171,8 +171,12 @@ public sealed class M5MatrixTests
         Thread.Sleep(700);
         using var shot = app.CaptureBitmap();
         var path = app.Save(shot, "matrix-" + name);
-        Record("matrix-" + name, new { name, scene = sceneId, extra, file = Path.GetFileName(path), diag = app.Diag() });
+        // 추가 장면도 같은 배치 검사 (G4 M5 1라운드 C4)
+        var problems = LayoutProblems(app.LayoutNow());
+        Record("matrix-" + name, new { name, scene = sceneId, extra, file = Path.GetFileName(path), layoutProblems = problems, diag = app.Diag() });
         Assert.Equal((Size.WindowWidth, Size.WindowHeight), (shot.Width, shot.Height));
+        Assert.True(problems.Count == 0, string.Join("\n", problems));
+        Assert.True(app.ReadLog().All(e => e.GetProperty("kind").GetString() is not ("unhandled" or "renderFailed" or "diagFailed")), "앱 기록에 오류");
         app.Close();
     }
 

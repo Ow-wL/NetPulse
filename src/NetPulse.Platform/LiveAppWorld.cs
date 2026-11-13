@@ -31,7 +31,7 @@ public sealed class LiveAppWorld(string userData) : IAppWorld
 
     public MeasurementSession StartSession(Profile profile, string appVersion)
     {
-        Directory.CreateDirectory(primary.Path!);
+        // 기본 위치 폴더는 세션의 저장 위치 선택이 만든다 (여기서 만들다 실패하면 대체 위치로 가지 못했다, G4 M5 1라운드 A3)
         return MeasurementSession.Start(new SessionOptions
         {
             Profile = profile, Clock = new SystemClock(), ProbeFor = t => ProbeFactory.For(t, profile.Timeout),

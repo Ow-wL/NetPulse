@@ -97,7 +97,7 @@ public sealed partial class AppShell : Window
         var context = new ScreenContext
         {
             Ui = ui, Host = host, Recent = recent, Toasts = toasts, Dialog = dialog, Options = options, Log = log,
-            Navigate = Navigate, QueueDiag = QueueDiag, SetRevealOrigin = SetRevealOrigin,
+            Navigate = Navigate, QueueDiag = QueueDiag, SetRevealOrigin = SetRevealOrigin, IsClosing = () => closing,
         };
         screens.Register("home", () => new HomeScreen(context));
         screens.Register("measure", () => new MeasureScreen(context));
@@ -267,7 +267,8 @@ public sealed partial class AppShell : Window
         if (outage != lastOutage)
         {
             ui.Lights.SetState(outage);
-            if (outage) toasts.Show(ToastKind.Warning, "끊김을 감지했습니다", "응답 없음이 이어지고 있습니다. 끊김을 느꼈다면 증상을 표시하세요 (Ctrl+M).");
+            // 띠는 관측이지 판정이 아니다: 알림도 관측으로 말한다 (끊김 여부·원인은 잠정 분석이 홈·측정 화면에서 말한다, G4 M5 1라운드 B4)
+            if (outage) toasts.Show(ToastKind.Warning, "외부 응답 없음 관측", "모든 외부 대상이 응답하지 않는 회차가 이어지고 있습니다. 끊김을 느꼈다면 증상을 표시하세요 (Ctrl+M).");
             else if (s.Measuring) toasts.Show(ToastKind.Success, "응답이 돌아왔습니다", "응답 없음이 끝났습니다.");
             lastOutage = outage;
         }
@@ -287,7 +288,7 @@ public sealed partial class AppShell : Window
     {
         (string top, string bottom, Brush dot) = s.State switch
         {
-            HostState.Measuring when lastOutage => ("끊김 감지", "응답 없음이 이어지는 중", ui.Brushes.Bad),
+            HostState.Measuring when lastOutage => ("응답 없음 관측", "외부 응답 없음이 이어지는 중", ui.Brushes.Bad),
             HostState.Measuring => ("측정 중", TimelineModel.Seconds(s.ElapsedMs) + " 경과", ui.Brushes.Ok),
             HostState.Stopping => ("측정 중", "멈추는 중", ui.Brushes.Warn),
             HostState.Starting => ("측정", "시작하는 중", ui.Brushes.Warn),

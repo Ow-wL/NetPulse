@@ -17,7 +17,7 @@ public sealed record RecentItem(RecordEntry Entry, bool Analyzing, GradeBadge? B
 public sealed class RecentRecords(Func<IReadOnlyList<string>> roots, int max = 3, bool holdAnalysis = false)
 {
     private readonly object gate = new();
-    private readonly Dictionary<(string Id, RecordLifecycle Life, EndReason? End), RecentItem> cache = [];
+    private readonly Dictionary<(string Id, RecordLifecycle Life, EndReason? End, long Notes), RecentItem> cache = [];
     private IReadOnlyList<RecentItem> items = [];
     private int generation;
 
@@ -55,7 +55,25 @@ public sealed class RecentRecords(Func<IReadOnlyList<string>> roots, int max = 3
         }
     });
 
-    private static (string, RecordLifecycle, EndReason?) Key(RecordEntry e) => (e.Id, e.Lifecycle, e.EndReason);
+    /// <summary>
+    /// 캐시 열쇠. 끝난 뒤 메모(노트)가 바뀌면 다시 읽도록 노트 파일의 마지막 쓰기 시각도 넣는다 (G4 M5 1라운드 A7).
+    /// </summary>
+    private static (string, RecordLifecycle, EndReason?, long) Key(RecordEntry e) => (e.Id, e.Lifecycle, e.EndReason, NotesStamp(e));
+
+    private static long NotesStamp(RecordEntry e)
+    {
+        long stamp = 0;
+        foreach (var folder in e.Segments)
+        {
+            try
+            {
+                var f = new FileInfo(Path.Combine(folder, RecordNotes.FileName));
+                if (f.Exists) stamp = Math.Max(stamp, f.LastWriteTimeUtc.Ticks ^ f.Length);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { }
+        }
+        return stamp;
+    }
 
     private static RecentItem Pending(RecordEntry e) => e.Lifecycle == RecordLifecycle.Running || e.Integrity == RecordIntegrity.Unreadable
         ? new RecentItem(e, false, null, null, null, null, null, null, null, e.Integrity == RecordIntegrity.Unreadable ? "기록을 읽지 못했습니다" : null)

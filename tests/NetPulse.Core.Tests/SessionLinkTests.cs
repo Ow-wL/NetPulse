@@ -238,12 +238,24 @@ public sealed class SessionLinkTests : IDisposable
         var lost = Task.Run(() => links.Notify(LinkState.Up), TestContext.Current.CancellationToken);            // 2.7초 업 → 넘침, 등록 전(잠금 안)에 멈춤
         Assert.True(entered.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken), "넘침 지점 진입");
         s.TestHookAfterLinkEnqueueFailed = null;
+        // 원래 경쟁을 겹친다 (G4 M5 1라운드 C1): 넘침 등록이 멈춘 동안 ① 처리 작업이 2.5초 다운을 꺼내 큐에 자리가 나고
+        // ② 재관측 생산자(3.0초 다운)가 들어온다. 둘 다 진입을 신호로 확인한 뒤 등록을 풀어 준다
+        var dequeued = new ManualResetEventSlim(false);
+        var arrived = new ManualResetEventSlim(false);
+        s.TestHookLinkDequeued = () => dequeued.Set();
+        await AdvanceWhenWaiting(clock, TimeSpan.FromMilliseconds(300));  // 회차 3 (3.0초): 처리 작업이 2.5초 다운을 꺼냄
+        Assert.True(dequeued.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken), "소비자가 꺼냄 (큐에 자리)");
+        Assert.Equal(0, s.LinkQueueCount);
+        s.TestHookLinkSampleArrived = () => arrived.Set();
+        var reobserved = Task.Run(() => links.Notify(LinkState.Down), TestContext.Current.CancellationToken);    // 3.0초 다운 재관측
+        Assert.True(arrived.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken), "재관측 생산자 진입");
+        Assert.False(reobserved.IsCompleted, "넘침 등록 전에는 큐에 들어가지 못한다");
+        s.TestHookLinkSampleArrived = null;
+        s.TestHookLinkDequeued = null;
         release.Set();
         await lost;                                                       // 넘침 등록 끝
-        await AdvanceWhenWaiting(clock, TimeSpan.FromMilliseconds(300));  // 회차 3: 처리 작업이 2.5초 다운을 배출
-        await Eventually(() => s.Status.Observed == 4 && s.LinkQueueCount == 0, "회차 3 처리와 2.5초 다운 배출");
-        links.Notify(LinkState.Down);                                     // 3.0초 다운 재관측 (넘침 뒤, 큐에 자리 있음)
-        Assert.Equal(1, s.LinkQueueCount);
+        await reobserved;                                                 // 그 뒤에야 재관측이 큐에 (넘침 순번을 싣고)
+        await Eventually(() => s.Status.Observed == 4, "회차 3 처리");
         await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));         // 회차 4: 재관측 처리
         await Eventually(() => s.Status.Observed == 5 && s.LinkQueueCount == 0, "회차 4 처리와 재관측 배출");
         clock.Advance(TimeSpan.FromMilliseconds(500));

@@ -185,7 +185,14 @@ public sealed class ProfileEditor : Screen
         {
             var p = profiles[i];
             var b = new GlassButton(Ui, p.Id == currentId ? ButtonKind.Primary : ButtonKind.Secondary, $"profile.select.{i}", p.Name.Length == 0 ? "(이름 없음)" : p.Name);
-            b.Click += (_, _) => { currentId = p.Id; Rebuild(); };
+            b.Click += (_, _) =>
+            {
+                if (currentId == p.Id) return;
+                currentId = p.Id;
+                // 고른 프로필이 다음 측정에 쓰이려면 저장해야 한다: 저장된 마지막 사용과 다르면 변경으로 (G4 M5 1라운드 B2)
+                if (Context.Host.Profiles?.LastUsedId != currentId) dirty = true;
+                Rebuild();
+            };
             row.Children.Add(b);
         }
         var add = new GlassButton(Ui, ButtonKind.Ghost, "profile.add", "새 프로필", Icons.Plus);
@@ -258,8 +265,8 @@ public sealed class ProfileEditor : Screen
         }
         stack.Children.Add(minutesRow);
         var expected = new SegmentedChoice(Ui, "profile.expected", "예상 연결", [("any", "상관없음"), ("wired", "유선"), ("wireless", "Wi‑Fi")],
-            d.Expected switch { ExpectedConnection.Wired => "wired", ExpectedConnection.Wireless => "wireless", _ => "any" }) { IsHitTestVisible = !locked };
-        expected.Changed += v => { d.Expected = v switch { "wired" => ExpectedConnection.Wired, "wireless" => ExpectedConnection.Wireless, _ => ExpectedConnection.Any }; Changed(); };
+            d.Expected switch { ExpectedConnection.Wired => "wired", ExpectedConnection.Wireless => "wireless", _ => "any" }) { ReadOnly = locked };
+        expected.Changed += v => { if (locked) return; d.Expected = v switch { "wired" => ExpectedConnection.Wired, "wireless" => ExpectedConnection.Wireless, _ => ExpectedConnection.Any }; Changed(); };
         var expectedBox = new StackPanel { Spacing = Space.S1 };
         expectedBox.Children.Add(Fonts.Text("예상 연결 (다르면 판단을 보류합니다)", Typography.Label, Ui.Brushes.Muted));
         expectedBox.Children.Add(expected);
@@ -329,8 +336,8 @@ public sealed class ProfileEditor : Screen
         enabled.Checked += (_, _) => { t.Enabled = true; Changed(); };
         enabled.Unchecked += (_, _) => { t.Enabled = false; Changed(); };
         second.Children.Add(enabled);
-        var role = new SegmentedChoice(Ui, $"profile.target.{i}.role", "역할", [("local", "로컬"), ("external", "외부")], t.Role == TargetRole.Local ? "local" : "external") { IsHitTestVisible = !locked };
-        role.Changed += v => { t.Role = v == "local" ? TargetRole.Local : TargetRole.External; Changed(); };
+        var role = new SegmentedChoice(Ui, $"profile.target.{i}.role", "역할", [("local", "로컬"), ("external", "외부")], t.Role == TargetRole.Local ? "local" : "external") { ReadOnly = locked };
+        role.Changed += v => { if (locked) return; t.Role = v == "local" ? TargetRole.Local : TargetRole.External; Changed(); };
         second.Children.Add(role);
         second.Children.Add(Field($"profile.target.{i}.provider", "사업자 (선택)", t.Provider, Size.FieldM, v => t.Provider = v));
         if (t.Method.Kind == ProbeMethodKind.Tcp)

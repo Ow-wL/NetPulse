@@ -37,6 +37,25 @@ public sealed class MeasureScreen : Screen
     private readonly RepresentativeCache reps = new();
     private string? drawnKey;
     private long drawnFrom, drawnTo;
+    private TimelineFrame? drawnFrame;
+    private int drawnRounds;
+
+    /// <summary>
+    /// 그린 뒤 온 회차의 지연이 마지막으로 그린 칸의 범위(최솟값~최댓값)나 세로축을 벗어나거나 선을 끊는지 (G4 M5 1라운드 B3:
+    /// 넓은 보기에서 손실 없이 지연만 급증하면 다시 그리기를 건너뛰어 수십 초 동안 안 보였다).
+    /// </summary>
+    private bool NewValuesStandOut(HostSnapshot s, RecordHeader h)
+    {
+        if (drawnFrame is not { } f || s.Rounds.Count < drawnRounds) return true;
+        reps.Update(s.Rounds, h.Targets);
+        TimelinePoint? lastRouter = f.Router.Count > 0 && f.Router[^1].Count > 0 ? f.Router[^1][^1] : null;
+        TimelinePoint? lastInternet = f.Internet.Count > 0 && f.Internet[^1].Count > 0 ? f.Internet[^1][^1] : null;
+        static bool Out(double? v, TimelinePoint? last, double axis) =>
+            v is not double x ? last is not null : last is not { } p || x > p.MaxMs || x < p.MinMs || x > axis;
+        for (int i = drawnRounds; i < reps.Count; i++)
+            if (Out(reps.Router(i), lastRouter, f.AxisMaxMs) || Out(reps.Internet(i), lastInternet, f.AxisMaxMs)) return true;
+        return false;
+    }
     private readonly Dictionary<string, CardTexts> cardTexts = [];
     private readonly Grid cards = new() { ColumnSpacing = Space.S4, RowSpacing = Space.S4 };
     private readonly GroupPanel memoPanel;
@@ -222,7 +241,8 @@ public sealed class MeasureScreen : Screen
         var lastBand = s.Bands.Count == 0 ? null : s.Bands[^1];
         var drawKey = $"{s.SessionId}|{view.Label}|{view.Follow}|{view.IsAll}|{ended}|{timeline.Columns}|{s.Bands.Count}|{lastBand?.Kind}|{lastBand?.FromMs}|{lastBand?.OpenEnd}"
             + $"|{s.Marks.Count}|{(s.Marks.Count == 0 ? null : s.Marks[^1].Mark)}|{s.LinkDowns.Count}|{s.LinkDowns.Count(d => d.Ongoing)}|{s.Gaps.Count}";
-        bool unchanged = columnMs > 2 * h.IntervalMs && drawKey == drawnKey && Math.Abs(from - drawnFrom) < columnMs && Math.Abs(to - drawnTo) < columnMs;
+        bool unchanged = columnMs > 2 * h.IntervalMs && drawKey == drawnKey && Math.Abs(from - drawnFrom) < columnMs && Math.Abs(to - drawnTo) < columnMs
+            && !NewValuesStandOut(s, h);
         if (!unchanged)
         {
             var marks = s.Marks.Select(m => new SymptomMark(m.Mark, null, m.AtMs, m.Wall, m.Memo, null, m.Truncated)).ToArray();
@@ -230,7 +250,7 @@ public sealed class MeasureScreen : Screen
             RenderProfile.Time("measure.frame", () => frame = TimelineModel.Frame(s.Rounds, h.Targets, s.Gaps, marks, s.LinkDowns, s.Bands, from, to, timeline.Columns, h.IntervalMs,
                 view.Follow && !view.IsAll ? $"최근 {view.Label}" : $"{label(from)}~{label(to)}", reps));
             RenderProfile.Time("measure.draw", () => timeline.Show(frame, label, view.Follow && !ended, $"{label(from)}부터 {label(to)}까지 ({view.Label})"));
-            (drawnKey, drawnFrom, drawnTo) = (drawKey, from, to);
+            (drawnKey, drawnFrom, drawnTo, drawnFrame, drawnRounds) = (drawKey, from, to, frame, s.Rounds.Count);
         }
         range.Text = $"{label(from)} ~ {(view.Follow && !ended ? "지금" : label(to))} · {view.Label}";
         AutomationProperties.SetName(range, range.Text);
@@ -510,6 +530,9 @@ public sealed class MeasureScreen : Screen
         memoSave.IsEnabled = false;
         var result = await Context.Host.SaveMemoAsync(m.Session, m.Mark, text);
         memoSave.IsEnabled = true;
+        // 기다리는 동안 다른 표시를 열었거나 글을 고쳤으면 그 패널·글은 그대로 둔다 (G4 M5 1라운드 B1).
+        // 고친 글은 호스트의 초안으로 남아 있다 (저장한 그 글일 때만 초안을 지운다)
+        if (memo is not { } now || now.Session != m.Session || now.Mark != m.Mark || memoBox.Text != text) { Context.QueueDiag(); return; }
         if (result == EventWriteState.Lost)
         {
             memoBox.SetError("메모를 저장하지 못했습니다. 메모는 지우지 않았으니 다시 저장해 보세요.");
@@ -517,6 +540,8 @@ public sealed class MeasureScreen : Screen
             return;
         }
         if (result == EventWriteState.Pending) Context.Toasts.Show(ToastKind.Info, "메모를 받았습니다", "저장소가 회복되면 기록에 씁니다.");
+        // 끝난 측정의 메모(노트)는 최근 측정의 첫 메모를 바꿀 수 있다: 목록을 다시 읽는다 (캐시 열쇠에 노트 시각, G4 M5 1라운드 A7)
+        if (!Context.Host.Snapshot.Measuring) _ = Context.Recent.RefreshAsync(Context.Host.RunningId);
         CloseMemo(skip: false);
     }
 

@@ -122,6 +122,55 @@ public sealed class M5SessionTests : IDisposable
     }
 
     [Fact]
+    public async Task AnalysisInputsHoldOnlyWhatWasPublishedUpToTheCursor()
+    {
+        // 관측은 됐지만 쓰기 중이라 아직 게시 전인 회차는 사본에 없고, 사본의 커서 뒤 전달로 한 번만 온다 (G4 M5 1라운드 A2)
+        var clock = new ManualClock(Start);
+        var inWrite = new ManualResetEventSlim(false);
+        var release = new ManualResetEventSlim(false);
+        bool block = false;
+        primary.DelayFor = n =>
+        {
+            if (block && n.StartsWith("rounds", StringComparison.Ordinal)) { block = false; inWrite.Set(); release.Wait(TimeSpan.FromSeconds(10)); }
+            return TimeSpan.Zero;
+        };
+        var s = MeasurementSession.Start(Options(clock));
+        await Rounds(clock, s, 2);
+        block = true;
+        await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));
+        Assert.True(inWrite.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken), "회차 쓰기에 들어감");
+        var inputs = s.Live.AnalysisInputs();
+        Assert.Equal(4, s.Status.Observed);                              // 0~3회차 관측
+        Assert.Equal([0L, 1, 2], inputs.Rounds.Select(r => r.Round));    // 게시한 것만
+        release.Set();
+        await Eventually(() => s.Live.Read(inputs.At).Items.OfType<RoundItem>().Any(), "남은 회차 게시");
+        var after = s.Live.Read(inputs.At).Items.OfType<RoundItem>().Select(r => r.Round.Round).ToArray();
+        Assert.Equal([3L], after);                                       // 다시 만든 목록 + 전달 = 중복 없음
+        await s.StopAsync();
+    }
+
+    [Fact]
+    public async Task AnalysisInputsKeepEventIdsAndTheirPublishedWriteState()
+    {
+        // 사본은 이벤트 ID와 게시된 쓰기 상태를 함께 준다: 저장하지 못한 표시가 다시 만들 때 저장된 것으로 바뀌지 않는다 (G4 M5 1라운드 A4)
+        var clock = new ManualClock(Start);
+        primary.Next = n => n.StartsWith("events", StringComparison.Ordinal) ? Fault.FlushFails : Fault.None;
+        var s = MeasurementSession.Start(Options(clock));
+        await Rounds(clock, s, 1);
+        var t = s.MarkSymptom("저장 못 함");
+        Assert.Equal(EventWriteState.Pending, await t!.Saved.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+        var inputs = s.Live.AnalysisInputs();
+        Assert.Equal(inputs.Events.Count, inputs.EventStates.Count);
+        int i = inputs.Events.ToList().FindIndex(e => (string?)e["type"] == SymptomMarks.MarkType);
+        Assert.True(i >= 0);
+        Assert.Equal(EventWriteState.Pending, inputs.EventStates[i].State);
+        var delta = s.Live.Read(new LiveCursor(s.Id, 0));
+        Assert.Contains(delta.Items.OfType<EventItem>(), e => e.Event.EventId == inputs.EventStates[i].EventId);
+        primary.Next = _ => Fault.None;
+        await s.StopAsync();
+    }
+
+    [Fact]
     public async Task EventsOverTheLimitAreLostAndReportedAsSuch()
     {
         var clock = new ManualClock(Start);
