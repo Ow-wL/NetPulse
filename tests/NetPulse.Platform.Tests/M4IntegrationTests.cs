@@ -127,6 +127,20 @@ public sealed class M4IntegrationTests : IDisposable
         Assert.Equal(Grade.Insufficient, analysis.Grade.Grade);
     }
 
+    [Theory]
+    [InlineData("e2fexpress", 27, true, "down")]
+    [InlineData("e2fnexpress", 32, true, "up")]
+    [InlineData("e1dexpress", 27, false, null)]      // 확인하지 않은 공급자는 해석하지 않는다
+    [InlineData("e2fexpress", 33, false, null)]
+    public void CatalogParsesOnlyVerifiedProviders(string provider, int id, bool parsed, string? state)
+    {
+        var result = LinkCatalog.ParseDriver(provider, id, ["", "어댑터 설명", "x"]);
+        Assert.Equal(parsed, result is not null);
+        if (parsed) Assert.Equal(state, LinkEvidenceBuilder.Text(result!.Value.State));
+        Assert.Null(LinkCatalog.ParseDriver("e2fexpress", 27, [""]));          // 필드 없음
+        Assert.Null(LinkCatalog.ParseDriver("e2fexpress", 27, ["", 42]));      // 자료형 다름
+    }
+
     [Fact]
     public void ThisPcLinkLogReadGivesDefinedState()
     {

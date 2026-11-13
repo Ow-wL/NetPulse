@@ -171,7 +171,7 @@ public static class LinkEvidenceBuilder
 {
     private sealed class Track
     {
-        public readonly List<(LinkState State, long First)> Steps = [];
+        public readonly List<(LinkState State, long First, bool Physical)> Steps = [];
         public readonly Dictionary<int, long> LastSeen = [];   // Steps 인덱스 → 그 상태의 마지막 관측
     }
 
@@ -181,7 +181,7 @@ public static class LinkEvidenceBuilder
         if (links.Length == 0) return LinkEvidence.None;
         var adapters = new Dictionary<string, AdapterAt>();
         var direct = new Dictionary<string, Track>();
-        var log = new Dictionary<string, List<(LinkState State, long Ms)>>();
+        var log = new Dictionary<string, List<(LinkState State, long Ms, bool Physical)>>();
         var raw = new Dictionary<(string, LinkSource), (LinkCapability Capability, string? Code, double? Coverage)>();
         int unmapped = 0, unlinked = 0;
 
@@ -200,16 +200,18 @@ public static class LinkEvidenceBuilder
                     if (match is "historical") break;
                     if (Long(e, "eventMs") is not long ms) { unmapped++; break; }
                     var state = Parse(collection);
+                    // 물리 어댑터인지는 그 이벤트 자체의 유형·가상 여부로 (나중 줄이 덮어쓰지 않게)
+                    bool physical = !(Bool(e, "virtual") ?? false) && Str(e, "kind") is "wired" or "wireless";
                     if (source == LinkSource.Direct)
                     {
                         if (!direct.TryGetValue(alias, out var t)) direct[alias] = t = new Track();
                         if (t.Steps.Count > 0 && Long(e, "prevLastMs") is long pl) t.LastSeen[t.Steps.Count - 1] = pl;
-                        t.Steps.Add((state, ms));
+                        t.Steps.Add((state, ms, physical));
                     }
                     else
                     {
                         if (!log.TryGetValue(alias, out var l)) log[alias] = l = [];
-                        l.Add((state, ms));
+                        l.Add((state, ms, physical));
                     }
                     break;
                 case "summary":
@@ -228,25 +230,23 @@ public static class LinkEvidenceBuilder
         var downs = new List<DownSpan>();
         foreach (var (alias, t) in direct)
         {
-            bool physical = adapters.TryGetValue(alias, out var ad) && ad.Physical;
             for (int i = 0; i < t.Steps.Count; i++)
             {
                 var cur = t.Steps[i];
                 if (cur.State is not (LinkState.Down or LinkState.Removed)) continue;
                 long to = i + 1 < t.Steps.Count && t.Steps[i + 1].State == LinkState.Up ? t.Steps[i + 1].First
                     : t.LastSeen.TryGetValue(i, out var seen) ? seen : cur.First;
-                downs.Add(new DownSpan(alias, LinkSource.Direct, cur.First, Math.Max(cur.First, to), physical));
+                downs.Add(new DownSpan(alias, LinkSource.Direct, cur.First, Math.Max(cur.First, to), cur.Physical));
             }
         }
         foreach (var (alias, list) in log)
         {
-            bool physical = adapters.TryGetValue(alias, out var ad) && ad.Physical;
             var ordered = list.OrderBy(x => x.Ms).ToArray();
             for (int i = 0; i < ordered.Length; i++)
             {
                 if (ordered[i].State != LinkState.Down) continue;
                 long to = ordered.Skip(i + 1).Where(x => x.State == LinkState.Up).Select(x => x.Ms).DefaultIfEmpty(ordered[i].Ms).First();
-                downs.Add(new DownSpan(alias, LinkSource.Log, ordered[i].Ms, to, physical));
+                downs.Add(new DownSpan(alias, LinkSource.Log, ordered[i].Ms, to, ordered[i].Physical));
             }
         }
 
@@ -285,8 +285,33 @@ public static class LinkEvidenceBuilder
     };
 
     private static string? Str(JsonObject o, string name) => o[name] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
-    private static long? Long(JsonObject o, string name) => o[name] is JsonValue v && v.TryGetValue<long>(out var x) ? x : null;
-    private static int? Int(JsonObject o, string name) => o[name] is JsonValue v && v.TryGetValue<int>(out var x) ? x : null;
+    private static long? Long(JsonObject o, string name) => Json.Long(o[name]);
+    private static int? Int(JsonObject o, string name) => Json.Long(o[name]) is long x && x is >= int.MinValue and <= int.MaxValue ? (int)x : null;
     private static bool? Bool(JsonObject o, string name) => o[name] is JsonValue v && v.TryGetValue<bool>(out var x) ? x : null;
-    private static double? Double(JsonObject o, string name) => o[name] is JsonValue v && v.TryGetValue<double>(out var x) ? x : null;
+    private static double? Double(JsonObject o, string name) => Json.Double(o[name]);
+}
+
+/// <summary>
+/// JSON 숫자 읽기. 파일에서 읽은 값(JsonElement)과 메모리에서 만든 값(int·long·double)을 같게 다룬다
+/// (메모리 값은 TryGetValue&lt;long&gt;가 int를 받아 주지 않는다).
+/// </summary>
+public static class Json
+{
+    public static long? Long(JsonNode? node)
+    {
+        if (node is not JsonValue v) return null;
+        if (v.TryGetValue<long>(out var l)) return l;
+        if (v.TryGetValue<int>(out var i)) return i;
+        if (v.TryGetValue<double>(out var d) && d == Math.Floor(d) && !double.IsInfinity(d)) return (long)d;
+        return null;
+    }
+
+    public static double? Double(JsonNode? node)
+    {
+        if (node is not JsonValue v) return null;
+        if (v.TryGetValue<double>(out var d)) return d;
+        if (v.TryGetValue<long>(out var l)) return l;
+        if (v.TryGetValue<int>(out var i)) return i;
+        return null;
+    }
 }

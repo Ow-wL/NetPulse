@@ -112,7 +112,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
         var probes = targets.ToDictionary(t => t.Id, options.ProbeFor);
         long limit = profile.Duration.Ticks / Profile.Interval.Ticks;
         engine = new MeasurementEngine(clock, new DispatchProbe(probes), targets.Select(t => t.ToProbeTarget()).ToArray(), Profile.Interval, limit,
-            options.Links is { } links ? new RoutesWithLinks(options.Routes, links) : options.Routes, Enqueue);
+            options.Links is { } links ? new RoutesWithLinks(options.Routes, links, () => directCapability == NetPulse.Core.Evidence.LinkCapability.Supported) : options.Routes, Enqueue);
         powerSubscription = options.Power?.Subscribe(() => gaps.OnSuspend(clock.Elapsed, clock.Now), () => gaps.OnResume(clock.Elapsed, clock.Now));
     }
 

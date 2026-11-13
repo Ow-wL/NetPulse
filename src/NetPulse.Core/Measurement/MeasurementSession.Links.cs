@@ -42,11 +42,12 @@ public sealed partial class MeasurementSession
     private string? directCode = "not-configured";
 
     /// <summary>엔진 회차에서: 경로를 보고, 경로가 쓰는 인터페이스를 감시에 넣고, 감시 어댑터를 읽는다.</summary>
-    private sealed class RoutesWithLinks(IRouteObserver? routes, ILinkObserver links) : IRouteObserver
+    private sealed class RoutesWithLinks(IRouteObserver? routes, ILinkObserver links, Func<bool> enabled) : IRouteObserver
     {
         public IReadOnlyList<RouteSample> Observe(IReadOnlyList<ProbeTarget> targets, long round)
         {
             var samples = routes?.Observe(targets, round) ?? [];
+            if (!enabled()) return samples;   // 알림 등록이 실패하면 직접 관측 전체를 끈다 (수집 능력과 기록이 어긋나지 않게)
             try
             {
                 var used = samples.Where(s => s.Ok && s.InterfaceIndex is not null).Select(s => s.InterfaceIndex!.Value).Distinct().ToArray();
@@ -73,7 +74,7 @@ public sealed partial class MeasurementSession
     /// <summary>관측기 표본 (아무 스레드). 시각을 붙여 큐에 넣는다. 닫힌 뒤 온 것은 버린다.</summary>
     private void OnLinkSample(LinkSample sample)
     {
-        if (linkClosed) return;
+        if (linkClosed || directCapability != LinkCapability.Supported) return;
         var item = new LinkItem(sample, (long)clock.Elapsed.TotalMilliseconds, clock.Now);
         if (linkQueue.Writer.TryWrite(item)) return;
         lock (linkGate)

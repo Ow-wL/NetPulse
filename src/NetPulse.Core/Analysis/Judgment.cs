@@ -95,8 +95,8 @@ public sealed class JudgeContext
         foreach (var e in events.Where(e => Str(e, "type") == "route"))
         {
             var target = Str(e, "target");
-            if (target is null || e["round"] is not JsonValue rv || !rv.TryGetValue<long>(out var round)) continue;
-            int? index = e["interfaceIndex"] is JsonValue iv && iv.TryGetValue<int>(out var i) ? i : null;
+            if (target is null || Json.Long(e["round"]) is not long round) continue;
+            int? index = Json.Long(e["interfaceIndex"]) is long i ? (int)i : null;
             var route = new RouteAt(Str(e, "status") == "ok", index, Str(e, "kind"));
             if (!routes.TryGetValue(target, out var list)) routes[target] = list = [];
             list.Add((round, route));
@@ -136,6 +136,7 @@ public static class RoundJudge
         if (end is null) notes.Add("end-estimated");
         // 대상마다: 쓰던 어댑터(경로 조회가 실패했으면 마지막으로 성공한 경로의 것)에 확정 물리 다운이 겹치는지
         var linkDownFor = new HashSet<string>();
+        var linkNearFor = new HashSet<string>();   // 물리 다운이 겹칠 수 있거나 ±1초 인접 (확정은 아님)
         foreach (var t in lost)
         {
             var route = ctx.RouteOf(t, r.Round);
@@ -148,9 +149,17 @@ public static class RoundJudge
                 bool adjacent = d.FromMs <= endBound + 1000 && d.ToMs >= start - 1000;
                 if (overlapConfirmed && d.Physical) linkDownFor.Add(t);
                 else if (overlapConfirmed && !d.Physical) Add(notes, "link-down-virtual");
-                else if (overlapPossible || adjacent) Add(notes, "link-adjacent");
+                else if (overlapPossible || adjacent)
+                {
+                    Add(notes, "link-adjacent");
+                    if (d.Physical) linkNearFor.Add(t);
+                }
             }
         }
+        // 경로 조회 실패 + 쓰던 물리 어댑터의 다운이 같은 무렵(겹칠 수 있음·±1초) 관측 → 링크 다운으로 설명된다.
+        // (직접 관측은 회차가 끝난 뒤 읽으므로 첫 다운 회차와는 "인접"으로만 잡힌다. 경로 조회도 같은 순간 실패한 것이 함께 근거)
+        foreach (var t in lost)
+            if (ctx.RouteOf(t, r.Round) is { Ok: false } && linkNearFor.Contains(t)) linkDownFor.Add(t);
         bool linkOverlap = linkDownFor.Count > 0;
 
         // 1. 경로 보류: 유형이 예상과 다르면 링크 근거와 무관하게 보류.

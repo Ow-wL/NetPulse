@@ -25,8 +25,12 @@ public static partial class SiteCheck
         if (text.Contains(':')) return (null, "port-or-ipv6");
         if (IPAddress.TryParse(text, out _)) return (null, "ip-address");
         string ascii;
-        try { ascii = new IdnMapping().GetAscii(text).ToLowerInvariant(); }
-        catch (ArgumentException) { return (null, "invalid-idn"); }
+        if (text.All(char.IsAscii)) ascii = text.ToLowerInvariant();   // ASCII는 아래 레이블 규칙으로 검사한다
+        else
+        {
+            try { ascii = new IdnMapping().GetAscii(text).ToLowerInvariant(); }
+            catch (ArgumentException) { return (null, "invalid-idn"); }
+        }
         if (ascii.Length > 253) return (null, "too-long");
         var labels = ascii.Split('.');
         if (labels.Length < 2) return (null, "no-dot");
