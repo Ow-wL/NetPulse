@@ -48,19 +48,20 @@ public static class RecordReader
         var empty = new DamageCounts(0, 0, 0, 0, 0, 0, 0, 0, 0);
         var headers = new List<(RecordHeader Header, string Folder)>();
         bool unsupported = false;
+        int badHeaders = 0;   // 머리가 없거나 읽지 못한 조각 폴더 (번호를 몰라도 불완전 복구로 표시한다)
         foreach (var folder in segmentFolders)
         {
             var path = Path.Combine(folder, "measurement.json");
             try
             {
-                if (!File.Exists(path)) continue;
+                if (!File.Exists(path)) { badHeaders++; continue; }
                 var (h, notSupported) = RecordSchema.ParseHeader(ReadShared(path));
                 if (notSupported) { unsupported = true; continue; }
                 headers.Add((h!, folder));
             }
             catch (Exception ex) when (IsAccessFailure(ex) || IsDataFailure(ex))
             {
-                // 이 조각의 머리를 읽지 못함: 다른 조각으로 읽고, 번호가 비면 누락 조각으로 표시된다
+                badHeaders++;   // 다른 조각으로 읽는다
             }
         }
         if (headers.Count == 0)
@@ -142,7 +143,7 @@ public static class RecordReader
             else badEvents++;
         }
 
-        var damage = new DamageCounts(malformed, wrongId, unknownTarget, badCombo, unknownValue, duplicate, outOfOrder, truncated, badEvents, unreadable);
+        var damage = new DamageCounts(malformed, wrongId, unknownTarget, badCombo, unknownValue, duplicate, outOfOrder, truncated, badEvents, unreadable + badHeaders);
         var stats = StatsCalculator.Compute(rounds, header.Targets.Select(t => t.Id).ToArray(), gaps);
         var end = summary?.EndReason ?? EndReason.Interrupted;
         string? notice = null;
@@ -150,6 +151,7 @@ public static class RecordReader
         if (summary is not null && summary.Observed != valid)
             notice = $"기록 일부 누락: 관측 {summary.Observed}회차 중 원본 {valid}회차";
         if (missing.Length > 0) notice = (notice is null ? "" : notice + " ") + $"찾지 못한 조각 {missing.Length}개";
+        if (badHeaders > 0) notice = (notice is null ? "" : notice + " ") + $"열지 못한 조각 {badHeaders}개";
         var status = damage.Total > 0 || missing.Length > 0 || damage.DamagedEvents > 0 ? RecordStatus.Damaged : RecordStatus.Ok;
         return new MeasurementRecord(status, null, header, rounds, gaps, events, summary, end, damage, missing, stats, notice);
     }

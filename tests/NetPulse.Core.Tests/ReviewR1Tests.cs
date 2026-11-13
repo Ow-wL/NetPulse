@@ -94,7 +94,8 @@ public sealed class ReviewR1Tests : IDisposable
         primary.DelayFor = name => Volatile.Read(ref slow) && name.StartsWith("rounds", StringComparison.Ordinal) ? TimeSpan.FromMilliseconds(150) : TimeSpan.Zero;
         var s = MeasurementSession.Start(Options(clock));
         await Rounds(clock, s, 11);
-        await Eventually(() => s.Status.Observed == 12, "관측 12");
+        // 처리 작업이 회차 11의 (실패한) 쓰기 시도까지 마쳤을 때 단계를 바꾼다 (관측 수만으로는 쓰기 완료를 보장하지 못함)
+        await Eventually(() => s.Status.Observed == 12 && primary.Writes("rounds") == 12, "회차 쓰기 시도 12");
         Volatile.Write(ref slow, true);
         Volatile.Write(ref failing, false);
         var watch = Stopwatch.StartNew();
@@ -116,7 +117,7 @@ public sealed class ReviewR1Tests : IDisposable
         primary.DelayFor = name => { if (Volatile.Read(ref stuck) && name.StartsWith("rounds", StringComparison.Ordinal)) release.Wait(TimeSpan.FromSeconds(10)); return TimeSpan.Zero; };
         var s = MeasurementSession.Start(Options(clock) with { SealTimeout = TimeSpan.FromMilliseconds(300) });
         await Rounds(clock, s, 2);
-        await Eventually(() => s.Status.Pending == 3, "대기 3");
+        await Eventually(() => s.Status.Pending == 3 && primary.Writes("rounds") == 3, "회차 쓰기 시도 3");
         Volatile.Write(ref stuck, true);
         Volatile.Write(ref failing, false);
         var watch = Stopwatch.StartNew();
@@ -201,6 +202,8 @@ public sealed class ReviewR1Tests : IDisposable
     [InlineData("\"intervalMs\": 1000", "\"intervalMs\": 0")]
     [InlineData("\"id\": \"20261113T000000Z_test01\"", "\"id\": \"\"")]
     [InlineData("\"utcOffsetMinutes\": 540", "\"utcOffsetMinutes\": 99999")]
+    [InlineData("\"appVersion\": \"0.5.0\"", "\"appVersion\": \"\"")]          // 2라운드 지적 5
+    [InlineData("\"name\": \"A\"", "\"name\": \" \"")]
     public void SemanticallyBrokenHeaderIsUnreadable(string from, string to)
     {
         var folder = primaryDir.Sub("h" + Math.Abs(to.GetHashCode()));
@@ -297,6 +300,95 @@ public sealed class ReviewR1Tests : IDisposable
         Assert.Equal(ProfileLoadStatus.Invalid, status);
         Assert.Null(set);
         Assert.True(File.Exists(Path.Combine(primaryDir.Path, moved!)), "원본은 지우지 않고 옮겨 둔다");
+    }
+
+    // ================ 2라운드 지적 ================
+
+    // 2-1: 요약 쓰기 자체가 멈췄다가 마감 실패 반환 뒤 풀려도 요약을 게시하지 않는다
+    [Fact]
+    public async Task StuckSummaryWriteIsNeverPublishedAfterSealFailure()
+    {
+        var clock = new ManualClock(Start);
+        var release = new ManualResetEventSlim(false);
+        primary.DelayFor = name => { if (name == "summary.json") release.Wait(TimeSpan.FromSeconds(10)); return TimeSpan.Zero; };
+        var s = MeasurementSession.Start(Options(clock) with { SealTimeout = TimeSpan.FromMilliseconds(300) });
+        await Rounds(clock, s, 2);
+        await Eventually(() => s.Status.Committed == 3, "확정 3");
+        var result = await s.StopAsync();
+        Assert.True(result.SealFailed);
+        Assert.Null(result.Summary);
+        release.Set();
+        await Task.Delay(500, TestContext.Current.CancellationToken);
+        Assert.False(File.Exists(Path.Combine(primaryDir.Path, Id, "summary.json")), "포기한 뒤 풀린 요약 쓰기는 게시하지 않는다");
+        Assert.False(File.Exists(Path.Combine(primaryDir.Path, Id, "summary.json.tmp")), "임시 요약도 남기지 않는다");
+        Assert.Same(result, await s.Completion);
+        Assert.Equal(EndReason.Interrupted, Reread().EndReason);
+    }
+
+    // 2-2: 절전 알림 뒤(실제로 잠들기 전) 시작한 표본이 있어도 복귀 뒤 첫 표본에서 기준을 다시 잡는다
+    [Fact]
+    public void SampleTakenWhileSuspendingDoesNotLeaveFalseClockChangeAfterResume()
+    {
+        var g = new GapTracker(TimeSpan.FromSeconds(1));
+        Assert.Null(g.CheckClock(TimeSpan.Zero, W0));
+        g.OnSuspend(TimeSpan.FromMilliseconds(900), W0.AddMilliseconds(900));
+        Assert.Null(g.CheckClock(TimeSpan.FromMilliseconds(1000), W0.AddMilliseconds(1000)));             // 잠들기 전 표본
+        g.OnResume(TimeSpan.FromMilliseconds(1010), W0.AddHours(1));
+        Assert.Null(g.CheckClock(TimeSpan.FromMilliseconds(2000), W0.AddHours(1).AddMilliseconds(990)));  // 복귀 경계를 지난 첫 표본
+        Assert.Null(g.CheckClock(TimeSpan.FromMilliseconds(3000), W0.AddHours(1).AddMilliseconds(1990)));
+        Assert.Equal(-20_000, g.CheckClock(TimeSpan.FromMilliseconds(4000), W0.AddHours(1).AddMilliseconds(2990 - 20_000)));   // 진짜 변경은 그대로 잡는다
+    }
+
+    // 2-3: 마지막 조각의 머리를 못 읽으면 누락 번호를 몰라도 불완전 복구로 표시한다
+    [Fact]
+    public void UnreadableLastSegmentIsFlagged()
+    {
+        WriteSegment(primaryDir, 0, [Line(0), Line(1)]);
+        WriteSegment(fallbackDir, 1, [Line(2), Line(3)]);
+        using (new FileStream(Path.Combine(fallbackDir.Path, Id, "measurement.json"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            var rec = Reread();
+            Assert.Equal(RecordStatus.Damaged, rec.Status);
+            Assert.Contains("열지 못한 조각 1개", rec.MissingNotice);
+            Assert.Equal([0L, 1], rec.Rounds.Select(r => r.Round));
+        }
+        // 머리 파일이 아예 없는 조각 폴더도 같다
+        File.Delete(Path.Combine(fallbackDir.Path, Id, "measurement.json"));
+        Assert.Contains("열지 못한 조각 1개", Reread().MissingNotice);
+    }
+
+    // 2-4: 마감으로 미처리가 된 회차는 공백 상태를 건드리지 않는다: 닫히지 않은 절전 공백은 끝에서 닫혀 남는다
+    [Fact]
+    public async Task SuspendGapSurvivesWhenRoundsAfterResumeAreSealedAsUnprocessed()
+    {
+        var clock = new ManualClock(Start);
+        var release = new ManualResetEventSlim(false);
+        var power = new FakePower();
+        bool block = false;
+        primary.DelayFor = name => { if (Volatile.Read(ref block) && name.StartsWith("rounds", StringComparison.Ordinal)) release.Wait(TimeSpan.FromSeconds(10)); return TimeSpan.Zero; };
+        var s = MeasurementSession.Start(Options(clock) with
+        {
+            Power = power, DrainTimeout = TimeSpan.FromMilliseconds(200), SealTimeout = TimeSpan.FromSeconds(5),
+        });
+        await Rounds(clock, s, 2);
+        await Eventually(() => s.Status.Committed == 3, "확정 3");
+        Volatile.Write(ref block, true);
+        await Rounds(clock, s, 1);               // 회차 3: 쓰기에서 막힘
+        await Eventually(() => primary.Writes("rounds") == 4, "회차 3 쓰기 진입");
+        power.Suspend();
+        power.Resume();
+        await Rounds(clock, s, 3);               // 회차 4~6: 큐에서 기다리다 마감되면 미처리
+        var stopping = s.StopAsync();
+        await Task.Delay(400, TestContext.Current.CancellationToken);
+        Volatile.Write(ref block, false);
+        release.Set();
+        var result = await stopping;
+        Assert.False(result.SealFailed);
+        Assert.Equal(3, result.Summary!.Unprocessed);
+        var gap = Assert.Single(Reread().Gaps);
+        Assert.Equal(GapReason.Suspend, gap.Reason);
+        Assert.Null(gap.FirstRoundAfter);      // 복귀 뒤 회차는 관측되지 않았다
+        Assert.Equal(3, gap.LastRoundBefore);
     }
 
     // ---------------- 도우미 ----------------

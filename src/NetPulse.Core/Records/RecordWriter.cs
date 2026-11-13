@@ -17,8 +17,11 @@ public interface IRecordFolder
 {
     string Kind { get; }
     IAppendFile OpenAppend(string name);
-    /// <summary>임시 파일에 쓴 뒤 바꾼다.</summary>
-    void WriteAllText(string name, string text);
+    /// <summary>
+    /// 임시 파일에 다 쓴 뒤 이름을 바꿔 게시한다. 게시 직전에 <paramref name="mayCommit"/>가 false를 주면
+    /// 임시 파일을 지우고 게시하지 않는다 (false 반환). 이름 바꾸기가 게시 시점이다.
+    /// </summary>
+    bool WriteAllText(string name, string text, Func<bool>? mayCommit = null);
 }
 
 /// <summary>파일 시스템 조각 폴더.</summary>
@@ -33,13 +36,19 @@ public sealed class DiskRecordFolder(string path, string kind) : IRecordFolder
         return new DiskAppendFile(new FileStream(System.IO.Path.Combine(Path, name), FileMode.Append, FileAccess.Write, FileShare.Read));
     }
 
-    public void WriteAllText(string name, string text)
+    public bool WriteAllText(string name, string text, Func<bool>? mayCommit = null)
     {
         Directory.CreateDirectory(Path);
         var target = System.IO.Path.Combine(Path, name);
         var temp = target + ".tmp";
         File.WriteAllText(temp, text, new UTF8Encoding(false));
+        if (mayCommit is not null && !mayCommit())
+        {
+            try { File.Delete(temp); } catch (IOException) { }
+            return false;
+        }
         File.Move(temp, target, overwrite: true);
+        return true;
     }
 
     private sealed class DiskAppendFile(FileStream stream) : IAppendFile

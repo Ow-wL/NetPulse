@@ -110,10 +110,12 @@ public static class RecordSchema
         static void Require(bool ok, string what) { if (!ok) throw new FormatException("기록 머리 손상: " + what); }
         Require(!string.IsNullOrWhiteSpace(h.Id), "id");
         Require(h.Segment is >= 0 and <= MaxSegment, "segment");
-        Require(h.AppVersion is not null, "appVersion");
+        Require(!string.IsNullOrWhiteSpace(h.AppVersion), "appVersion");
         Require(h.UtcOffsetMinutes is >= -14 * 60 and <= 14 * 60, "utcOffsetMinutes");
         Require(h.Targets.Count > 0, "targets");
         Require(h.Targets.All(t => !string.IsNullOrWhiteSpace(t.Id)), "target id");
+        Require(h.Targets.All(t => !string.IsNullOrWhiteSpace(t.Name)), "target name");
+        Require(!string.IsNullOrWhiteSpace(h.LocationKind), "location");
         Require(h.Targets.Select(t => t.Id).Distinct(StringComparer.Ordinal).Count() == h.Targets.Count, "target id 중복");
         Require(h.IntervalMs > 0 && h.TimeoutMs > 0 && h.PlannedMs > 0, "시간 설정");
     }

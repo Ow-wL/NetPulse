@@ -138,7 +138,11 @@ public sealed class GapTracker(TimeSpan interval)
         {
             long now = Ms(elapsed);
             var offset = wall.UtcDateTime - DateTime.UnixEpoch - elapsed;
-            bool crossed = suspends.Any(s => (s.FromMs >= lastClockMs && s.FromMs <= now) || (s.FromMs <= now && (s.ToMs is null || now < s.ToMs)));
+            // 직전 표본과 이 표본 사이에 절전 시작 또는 복귀가 있었거나, 이 표본이 절전 중이면 기준만 다시 잡는다
+            bool crossed = suspends.Any(s =>
+                (s.FromMs >= lastClockMs && s.FromMs <= now)
+                || (s.ToMs is long to && to > lastClockMs && to <= now)
+                || (s.FromMs <= now && (s.ToMs is null || now < s.ToMs)));
             lastClockMs = now;
             if (clockBaseline is null || crossed)
             {

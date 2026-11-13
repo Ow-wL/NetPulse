@@ -258,28 +258,33 @@ public sealed class MeasurementSession : IAsyncDisposable
     {
         long startMs = (long)s.Tick.Actual.TotalMilliseconds;
         long endMs = (long)(s.Completed == default ? s.Tick.Actual : s.Completed).TotalMilliseconds;
-        var verdict = gaps.OnRound(s.Tick.Index, s.Tick.SkippedBefore, startMs, endMs, s.At);
         var results = s.Results.Select(x => new TargetResult(x.Target.Id, x.Result.Outcome,
             x.Result.Outcome == ProbeOutcome.Success ? x.Result.RttMs : null,
             x.Result.Outcome == ProbeOutcome.Error ? (string.IsNullOrEmpty(x.Result.Status) ? "error" : x.Result.Status) : null)).ToArray();
-        var data = new RoundData(s.Tick.Index, (long)s.Tick.Scheduled.TotalMilliseconds, startMs, s.At, verdict.Skipped, verdict.Gap, results);
-        long? clockDelta = gaps.CheckClock(s.Tick.Actual, s.At);
+        GapVerdict verdict;
+        long? clockDelta;
+        RoundData data;
 
+        // 회차 수용 여부와 공백·시각 상태 변경을 같은 마감 경계 안에서 정한다 (디스크 쓰기만 밖에서)
         lock (sync)
         {
             if (sealedOff)
             {
-                // 마감 뒤에 분류되는 회차는 통계·요약에 넣지 않고 미처리로 센다
+                // 마감 뒤에 분류되는 회차는 통계·요약에 넣지 않고 미처리로 센다. 공백 상태도 건드리지 않는다
                 unprocessed++;
-                AddRange(unprocessedRanges, data.Round);
+                AddRange(unprocessedRanges, s.Tick.Index);
                 return;
             }
+            verdict = gaps.OnRound(s.Tick.Index, s.Tick.SkippedBefore, startMs, endMs, s.At);
+            clockDelta = gaps.CheckClock(s.Tick.Actual, s.At);
+            data = new RoundData(s.Tick.Index, (long)s.Tick.Scheduled.TotalMilliseconds, startMs, s.At, verdict.Skipped, verdict.Gap, results);
             observed.Add(data);
+            gapSpans.AddRange(verdict.Closed);
             lastRound = data.Round;
             pending.AddLast((data.Round, RecordSchema.RoundLine(Id, data)));
         }
 
-        foreach (var g in verdict.Closed) WriteGapEvent(g);
+        foreach (var g in verdict.Closed) WriteGapLine(g);
         if (s.Routes is not null) WriteRouteChanges(s.Tick.Index, startMs, s.At, s.Routes);
         if (clockDelta is long delta)
             WriteEvent(RecordSchema.EventLine(Id, "clock", s.Tick.Index, startMs, s.At, new JsonObject { ["deltaMs"] = delta }));
@@ -418,6 +423,11 @@ public sealed class MeasurementSession : IAsyncDisposable
     private void WriteGapEvent(GapSpan g)
     {
         lock (sync) gapSpans.Add(g);
+        WriteGapLine(g);
+    }
+
+    private void WriteGapLine(GapSpan g)
+    {
         var fields = new JsonObject
         {
             ["reason"] = g.Reason == GapReason.Stall ? "stall" : "suspend",
@@ -510,16 +520,22 @@ public sealed class MeasurementSession : IAsyncDisposable
             var finishing = Task.Run(() => FinishWrites(reason, error, endMs, endElapsed, endWall));
             if (!await Within(finishing, options.RetryTimeout + options.SealTimeout).ConfigureAwait(false))
             {
+                // 포기와 요약 게시는 같은 잠금에서 하나만 이긴다. 게시(이름 바꾸기)가 이미 시작됐으면 그 결과를 기다린다.
+                bool gaveUp;
                 long left;
                 lock (sync)
                 {
-                    abandoned = true;
+                    gaveUp = !publishing;
+                    if (gaveUp) abandoned = true;
                     stats = StatsCalculator.Compute(observed.ToArray(), targets.Select(t => t.Id).ToArray(), gapSpans.ToArray());
                     left = pending.Count;
                 }
-                var stuck = new SessionResult(Id, reason, null, true, true, left, stats, root.Kind, error ?? "기록 마감 실패");
-                completion.TrySetResult(stuck);
-                return stuck;
+                if (gaveUp)
+                {
+                    var stuck = new SessionResult(Id, reason, null, true, true, left, stats, root.Kind, error ?? "기록 마감 실패");
+                    completion.TrySetResult(stuck);
+                    return stuck;
+                }
             }
             var (summary, summaryFailed, finalError) = await finishing.ConfigureAwait(false);
             lock (sync) stats = StatsCalculator.Compute(observed.ToArray(), targets.Select(t => t.Id).ToArray(), gapSpans.ToArray());
@@ -539,7 +555,8 @@ public sealed class MeasurementSession : IAsyncDisposable
         }
     }
 
-    private bool abandoned;
+    private bool abandoned;    // 종료 쪽이 끝 쓰기를 포기함 (sync 안)
+    private bool publishing;   // 요약 게시를 시작함 (sync 안)
 
     /// <summary>끝 쓰기. 대기 회차 재시도는 RetryTimeout 안에서 줄마다 기한을 확인한다 (단조 시계).</summary>
     private (RecordSummary Summary, bool Failed, string? Error) FinishWrites(EndReason reason, string? error, long endMs, TimeSpan endElapsed, DateTimeOffset endWall)
@@ -567,17 +584,23 @@ public sealed class MeasurementSession : IAsyncDisposable
             summary = new RecordSummary(Id, reason, endWall, observed.Count, committed, pending.Count, dropped, unprocessed, lastCommittedRound, false, error);
         try
         {
-            bool gaveUp;
-            lock (sync) gaveUp = abandoned;
-            if (gaveUp)
+            // 게시 직전에 포기 여부를 확인하고, 아니면 게시 중으로 표시한다 (그 뒤로는 종료 쪽이 포기하지 않는다)
+            bool published = folder.WriteAllText("summary.json", RecordSchema.SummaryJson(summary), () =>
             {
-                // 세션이 이미 "기록 마감 실패"로 끝났다: 요약은 쓰지 않고 파일만 닫는다
+                lock (sync)
+                {
+                    if (abandoned) return false;
+                    publishing = true;
+                    return true;
+                }
+            });
+            if (!published)
+            {
+                // 세션이 이미 "기록 마감 실패"로 끝났다: 요약은 게시하지 않고 파일만 닫는다
                 rounds.Dispose();
                 events.Dispose();
-                return (summary, true, error);
             }
-            folder.WriteAllText("summary.json", RecordSchema.SummaryJson(summary));
-            return (summary, false, error);
+            return (summary, !published, error);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return (summary, true, error); }
     }
