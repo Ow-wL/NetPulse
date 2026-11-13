@@ -82,7 +82,7 @@ public sealed partial class AppShell
         {
             switch (options.SelfTest)
             {
-                case "layout": log.Write("selftest", new { kind = "layout", screen = screens.CurrentId, report = LayoutProbe.Report(root, diag) }); break;
+                case "layout": log.Write("selftest", new { kind = "layout", screen = screens.CurrentId, report = LayoutProbe.Report(root, diag, [toasts]) }); break;
                 default: log.Write("selftest", new { kind = options.SelfTest, error = "unknown" }); break;
             }
         }

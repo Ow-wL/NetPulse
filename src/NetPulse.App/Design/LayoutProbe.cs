@@ -14,10 +14,12 @@ namespace NetPulse.App.Design;
 /// </summary>
 public static class LayoutProbe
 {
-    public static object Report(FrameworkElement root, DependencyObject? skip)
+    /// <param name="overlays">겹쳐 뜨는 층(알림 등): 그 안의 요소는 그 층 안의 요소끼리만 겹침을 본다 (내용 위에 뜨는 것이 설계이므로)</param>
+    public static object Report(FrameworkElement root, DependencyObject? skip, IReadOnlyList<DependencyObject>? overlays = null)
     {
         var items = new List<object>();
-        var interactive = new List<(string Id, Rect Bounds)>();
+        var interactive = new List<(string Id, Rect Bounds, int Layer)>();
+        int layer = 0;
         var trimmed = new List<string>();
         var rootRect = new Rect(0, 0, root.ActualWidth, root.ActualHeight);
         void Walk(DependencyObject node, Rect clip, bool inScroll)
@@ -38,7 +40,7 @@ public static class LayoutProbe
                 {
                     var visible = Intersect(bounds, clip);
                     items.Add(new { id, x = bounds.X, y = bounds.Y, w = bounds.Width, h = bounds.Height, vw = visible.Width, vh = visible.Height, inScroll });
-                    if (fe is ButtonBase or ToggleButton or TextBox) interactive.Add((id, bounds));
+                    if (fe is ButtonBase or ToggleButton or TextBox) interactive.Add((id, bounds, layer));
                 }
                 if (fe is ScrollViewer sv)
                 {
@@ -46,13 +48,17 @@ public static class LayoutProbe
                     inScroll = true;
                 }
             }
+            int saved = layer;
+            if (overlays is not null && overlays.Any(o => ReferenceEquals(o, node))) layer = overlays.ToList().FindIndex(o => ReferenceEquals(o, node)) + 1;
             for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++) Walk(VisualTreeHelper.GetChild(node, i), clip, inScroll);
+            layer = saved;
         }
         Walk(root, rootRect, false);   // 오버레이(대화상자, 알림)까지 포함
         var overlaps = new List<string>();
         for (int a = 0; a < interactive.Count; a++)
             for (int b = a + 1; b < interactive.Count; b++)
             {
+                if (interactive[a].Layer != interactive[b].Layer) continue;
                 var r = Intersect(interactive[a].Bounds, interactive[b].Bounds);
                 if (r.Width > 1 && r.Height > 1) overlaps.Add(interactive[a].Id + "|" + interactive[b].Id);
             }

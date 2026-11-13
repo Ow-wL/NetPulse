@@ -45,8 +45,17 @@ public sealed class HomeScreen : Screen
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        Grid.SetRow(grid, 1);
-        Children.Add(grid);
+        // 넓은 창에서는 화면을 채우고(아래 줄이 남은 높이를 가짐), 좁으면(배율 150%) 세로로 스크롤한다.
+        // 머리(칩)는 스크롤 밖이라 보통 유리 밑으로 내용이 지나가지 않는다
+        var scroll = new ScrollViewer { Content = grid, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        AutomationProperties.SetAutomationId(scroll, "home.scroll");
+        scroll.SizeChanged += (_, e) =>
+        {
+            grid.MinHeight = e.NewSize.Height;
+            Arrange(grid, e.NewSize.Width >= Size.HomeTwoColumns);
+        };
+        Grid.SetRow(scroll, 1);
+        Children.Add(scroll);
 
         // 큰 카드
         ring = new GradeRing(Ui, "home.grade");
@@ -115,6 +124,37 @@ public sealed class HomeScreen : Screen
     }
 
     public override IReadOnlyList<UIElement> Parts => [header, heroCard, mapCard, chartCard, recentCard];
+
+    private bool? twoColumns;
+
+    /// <summary>두 열(기준 이미지) 또는 한 열(좁은 창). 한 열이면 위에서부터 큰 카드, 경로 맵, 최근 2분, 최근 측정.</summary>
+    private void Arrange(Grid grid, bool two)
+    {
+        if (twoColumns == two) return;
+        twoColumns = two;
+        grid.ColumnDefinitions.Clear();
+        grid.RowDefinitions.Clear();
+        if (two)
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            Place(heroCard, 0, 0); Place(mapCard, 0, 1); Place(chartCard, 1, 0); Place(recentCard, 1, 1);
+        }
+        else
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            for (int i = 0; i < 4; i++) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Place(heroCard, 0, 0); Place(mapCard, 1, 0); Place(chartCard, 2, 0); Place(recentCard, 3, 0);
+        }
+    }
+
+    private static void Place(FrameworkElement e, int row, int column)
+    {
+        Grid.SetRow(e, row);
+        Grid.SetColumn(e, column);
+    }
     public override FrameworkElement? SharedTarget => null;
     public FrameworkElement ChartCard => chartCard;
 

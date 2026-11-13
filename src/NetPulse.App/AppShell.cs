@@ -168,11 +168,14 @@ public sealed partial class AppShell : Window
     {
         if (options.UiScale <= 1) return root;
         var box = new Viewbox { Stretch = Stretch.Fill, Child = root };
-        SizeChanged += (_, e) =>
+        void Fit(double w, double h)
         {
-            root.Width = e.Size.Width / options.UiScale;
-            root.Height = e.Size.Height / options.UiScale;
-        };
+            root.Width = w / options.UiScale;
+            root.Height = h / options.UiScale;
+        }
+        SizeChanged += (_, e) => Fit(e.Size.Width, e.Size.Height);
+        // 처음 크기 알림이 오지 않는 경우가 있어(관측: 루트가 내용의 자연 크기로 배치됨) 그릇이 배치될 때도 창 크기에 맞춘다
+        box.Loaded += (_, _) => Fit(Bounds.Width, Bounds.Height);
         return box;
     }
 

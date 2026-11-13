@@ -60,15 +60,19 @@ public static class ScreenParts
         var stack = new Grid { RowSpacing = Space.S3 };
         stack.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         stack.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        // 제목이 먼저 자리를 갖고, 남은 폭에 작은 글(줄임표)과 행동을 둔다 (좁은 창에서 제목이 사라지지 않게)
         var head = new Grid { ColumnSpacing = Space.S3 };
-        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var t = Fonts.Text(title, Typography.Headline, ui.Brushes.Ink);
         t.VerticalAlignment = VerticalAlignment.Center;
         head.Children.Add(t);
         var n = Fonts.Text(note ?? "", Typography.Caption, ui.Brushes.Muted);
         n.VerticalAlignment = VerticalAlignment.Center;
+        n.HorizontalAlignment = HorizontalAlignment.Right;
+        n.TextTrimming = TextTrimming.CharacterEllipsis;
+        AutomationProperties.SetName(n, note ?? "");
         AutomationProperties.SetAutomationId(n, id + ".note");
         Grid.SetColumn(n, 1);
         head.Children.Add(n);
@@ -108,5 +112,9 @@ public sealed class CardBody : Grid
         if (state is not null && Parent is FrameworkElement) AutomationProperties.SetItemStatus(this, state);
     }
 
-    public void SetNote(string text) => note.Text = text;
+    public void SetNote(string text)
+    {
+        note.Text = text;
+        AutomationProperties.SetName(note, text);
+    }
 }
