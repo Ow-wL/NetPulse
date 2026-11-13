@@ -3,6 +3,7 @@
   "name": "link-drop",
   "seed": 11,
   "durationRounds": 180,
+  "startAt": "2026-11-13T13:20:00+09:00",
   "targets": [
     {
       "id": "gateway",

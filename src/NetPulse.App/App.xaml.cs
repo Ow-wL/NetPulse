@@ -57,7 +57,9 @@ public partial class App : Application
         {
             var scenario = Scenario.Load(ResolveScenario(demo));
             var timeBase = new DemoTimeBase(scenario.StartAt ?? DateTimeOffset.Now, options.DemoSpeed);
-            world = new DemoAppWorld(new DemoWorld(scenario, timeBase), options.UserData, new DemoRunRules(options.DemoHold, options.DemoSpeedAfter));
+            // 데모의 대체 위치도 사용자 폴더 안에 둔다 (공용 임시 폴더면 다른 실행의 데모 기록이 최근 측정에 섞인다)
+            world = new DemoAppWorld(new DemoWorld(scenario, timeBase), options.UserData, new DemoRunRules(options.DemoHold, options.DemoSpeedAfter),
+                Path.Combine(options.UserData, "demo-fallback"));
         }
         else world = new LiveAppWorld(options.UserData);
         host = new MeasurementHost(world, options.UserData, new HostOptions { AppVersion = version, HoldStart = options.HoldStart });

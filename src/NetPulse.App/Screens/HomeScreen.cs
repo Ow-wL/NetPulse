@@ -65,6 +65,11 @@ public sealed class HomeScreen : Screen
         AutomationProperties.SetAutomationId(numbers, "home.numbers");
         status = Fonts.Text("", Typography.Caption, Ui.Brushes.Muted);
         AutomationProperties.SetAutomationId(status, "home.status");
+        if (Context.Options.HideMeasuredText)
+        {
+            // 실측 대비 시험 (M5 설계 7.4): 측정 대상 글자만 투명하게 그려 그 뒤 배경을 찍는다 (공유 브러시는 바꾸지 않는다)
+            headline.Foreground = numbers.Foreground = status.Foreground = Ui.Brushes.Transparent;
+        }
         start = new GlassButton(Ui, ButtonKind.Primary, "home.start", "측정 시작", Icons.Play);
         stop = new GlassButton(Ui, ButtonKind.Primary, "home.stop", "측정 중지", Icons.Stop);
         firstRun = new GlassButton(Ui, ButtonKind.Primary, "home.firstrun", "첫 실행 안내 열기", Icons.Play);

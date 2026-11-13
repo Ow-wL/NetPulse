@@ -30,6 +30,10 @@ public sealed record StartupOptions
     public bool HoldAnalysis { get; init; }
     /// <summary>측정 시작 직전에 멈춘다 (시작 중 화면)</summary>
     public bool HoldStart { get; init; }
+    /// <summary>데모: 지금 측정이 이 회차에 닿으면 증상을 표시하고 메모를 붙인다 (캡처에서 표시가 멈춘 시각 가장자리에 오지 않게)</summary>
+    public long? DemoMark { get; init; }
+    /// <summary>한 번 도는 모션을 이 진행도(0~1)에서 멈춘다 (화면 전환 캡처)</summary>
+    public double? MotionHold { get; init; }
 
     /// <summary>부품 전시 화면 (M2)</summary>
     public bool Showcase { get; init; }
@@ -78,6 +82,8 @@ public sealed record StartupOptions
                 "--demo-speed-after" => o with { DemoSpeedAfter = ParseSpeedAfter(Next()) },
                 "--hold-analysis" => o with { HoldAnalysis = true },
                 "--hold-start" => o with { HoldStart = true },
+                "--demo-mark" => o with { DemoMark = long.Parse(Next(), CultureInfo.InvariantCulture) },
+                "--motion-hold" => o with { MotionHold = double.Parse(Next(), CultureInfo.InvariantCulture) },
                 "--showcase" => o with { Showcase = true },
                 "--theme" => o with
                 {

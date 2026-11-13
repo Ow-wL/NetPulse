@@ -168,6 +168,46 @@ public sealed class AppDriver : IDisposable
     public void Invoke(string automationId) =>
         ((InvokePattern)Find(automationId).GetCurrentPattern(InvokePattern.Pattern)).Invoke();
 
+    /// <summary>글 상자에 값을 넣는다 (값 패턴, 키 입력 없음).</summary>
+    public void SetText(string automationId, string text) =>
+        ((ValuePattern)Find(automationId).GetCurrentPattern(ValuePattern.Pattern)).SetValue(text);
+
+    /// <summary>요소가 지금 있는지 (기다리지 않음).</summary>
+    public bool Exists(string automationId) =>
+        Window.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, automationId)) is not null;
+
+    /// <summary>열린 알림을 모두 닫는다 (캡처에서 알림이 화면을 가리지 않게).</summary>
+    public void CloseToasts()
+    {
+        // 닫는 사이 새 알림이 올 수 있어 몇 번 되풀이한다
+        for (int attempt = 0; attempt < 5; attempt++)
+        {
+            var all = Window.FindAll(TreeScope.Descendants, Condition.TrueCondition);
+            foreach (AutomationElement e in all)
+            {
+                string id;
+                try { id = e.Current.AutomationId; } catch (ElementNotAvailableException) { continue; }
+                if (id.StartsWith("toast.", StringComparison.Ordinal) && id.EndsWith(".close", StringComparison.Ordinal))
+                    try { ((InvokePattern)e.GetCurrentPattern(InvokePattern.Pattern)).Invoke(); } catch (ElementNotAvailableException) { }
+            }
+            try
+            {
+                WaitFor(() => Diag().GetProperty("toasts").GetInt32(), n => n == 0, "알림 닫힘", TimeSpan.FromSeconds(3));
+                return;
+            }
+            catch (TimeoutException) when (attempt < 4) { }
+        }
+    }
+
+    /// <summary>지금 화면의 배치 검사를 남기고 그 결과를 읽는다 (시험 전용 단추 diag.layout).</summary>
+    public JsonElement LayoutNow()
+    {
+        int before = ReadLog().Count(e => e.GetProperty("kind").GetString() == "selftest");
+        Invoke("diag.layout");
+        return WaitFor(() => ReadLog().Where(e => e.GetProperty("kind").GetString() == "selftest").Skip(before).FirstOrDefault(),
+            e => e.ValueKind == JsonValueKind.Object, "배치 검사").GetProperty("data");
+    }
+
     public void Toggle(string automationId) =>
         ((TogglePattern)Find(automationId).GetCurrentPattern(TogglePattern.Pattern)).Toggle();
 

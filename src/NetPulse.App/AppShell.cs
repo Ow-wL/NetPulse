@@ -38,6 +38,7 @@ public sealed partial class AppShell : Window
     private readonly ToastHost toasts;
     private readonly DialogHost dialog;
     private readonly TextBlock diag;
+    private readonly Button layoutProbe;
     private readonly RowButton statusPill;
     private readonly TextBlock statusTop, statusBottom;
     private readonly Microsoft.UI.Xaml.Shapes.Ellipse statusDot;
@@ -88,6 +89,10 @@ public sealed partial class AppShell : Window
         dialog = new DialogHost(ui, appGrid);
         diag = new TextBlock { Opacity = 0, IsHitTestVisible = false, Width = 0, Height = 0, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
         AutomationProperties.SetAutomationId(diag, "diag.state");
+        // 시험 전용: 누르면 지금 화면의 배치 검사를 기록에 남긴다 (캡처한 그 장면 그대로, M5 G5)
+        layoutProbe = new Button { Opacity = 0, Width = 0, Height = 0, IsTabStop = false, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
+        AutomationProperties.SetAutomationId(layoutProbe, "diag.layout");
+        layoutProbe.Click += (_, _) => log.Write("selftest", new { kind = "layout", screen = screens.CurrentId, report = LayoutProbe.Report(root, diag, [toasts]) });
 
         var context = new ScreenContext
         {
@@ -113,6 +118,17 @@ public sealed partial class AppShell : Window
 
         rail.Selected += id => { if (!navigating) Navigate(id, null); };
         host.Changed += QueueRender;
+        if (options.DemoMark is long markRound && options.Demo is not null)
+        {
+            // 재현 인수: 그 회차에 한 번 증상 표시 + 메모 (실제 버튼과 같은 호스트 경로)
+            bool marked = false;
+            host.Changed += () =>
+            {
+                if (marked || host.Snapshot.State != HostState.Measuring || host.Snapshot.Rounds.Count <= markRound) return;
+                marked = true;
+                if (host.MarkSymptom() is { } t && host.Snapshot.SessionId is { } sid) _ = host.SaveMemoAsync(sid, t.Mark, "화상회의 중 끊김");
+            };
+        }
         host.Finished += f => DispatcherQueue.TryEnqueue(() => OnFinished(f));
         recent.Changed += QueueDiag;
         ui.Effects.Changed += (_, _) => QueueDiag();
@@ -161,6 +177,7 @@ public sealed partial class AppShell : Window
         root.Children.Add(toasts);
         root.Children.Add(dialog);
         root.Children.Add(diag);
+        root.Children.Add(layoutProbe);
     }
 
     /// <summary>150% 상당 배치 (M2 설계 5.8와 같음).</summary>

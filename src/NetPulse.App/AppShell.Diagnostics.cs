@@ -37,6 +37,7 @@ public sealed partial class AppShell
             screen = screens.CurrentId,
             host = s.State.ToString(),
             world = host.World.Kind,
+            held = host.World is DemoAppWorld dw && dw.World.TimeBase.Held,
             session = s.SessionId,
             rounds = s.Rounds.Count,
             elapsedMs = s.ElapsedMs,

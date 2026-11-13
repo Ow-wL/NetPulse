@@ -1,0 +1,35 @@
+# M5 캡처 장면 목록 (설계 7.4). 시험(M5MatrixTests)과 build/ui-test.ps1이 같은 파일을 읽는다.
+# 형식: 장면ID|준비|앱 인수|동작 (동작은 ;로 나눔)
+# 준비: none, profile[:시나리오], records3, recorderror, unreadable
+# 동작: wait:screen=ID, wait:host=상태, wait:held, wait:analysis, wait:recentListed, wait:recentReady, wait:firstrun=상태, wait:detecting,
+#       wait:startError, wait:finished, wait:dialog, wait:memo, invoke:ID, select:ID, text:ID=값
+firstrun-detecting|none|--demo tests:detect-slow|wait:screen=firstrun;wait:detecting
+firstrun-detected|none|--demo vpn|wait:firstrun=Ok
+firstrun-nonetwork|none|--demo no-network|wait:firstrun=NoNetwork
+firstrun-detectfail|none|--demo tests:detect-fail|wait:firstrun=Unknown
+firstrun-unreadable|unreadable|--demo steady|wait:firstrun=Ok
+home-noprofile|none|--demo steady --screen home|wait:screen=home
+home-empty|profile|--demo steady --screen home|wait:recentListed
+home-recent-loading|records3|--demo steady --screen home --hold-analysis|wait:recentListed
+home-recent|records3|--demo steady --screen home|wait:recentReady
+home-recent-error|recorderror|--demo steady --screen home|wait:recentReady
+home-measuring|profile|--demo steady --demo-speed 600 --demo-hold 150 --start --screen home|wait:held;wait:analysis
+home-outage|profile:outage-long|--demo outage-long --demo-speed 600 --demo-hold 120 --start --screen home|wait:held;wait:analysis
+home-firstminute|profile|--demo steady --demo-speed 600 --demo-hold 20 --start --screen home|wait:held
+measure-starting|profile|--demo steady --hold-start --start|wait:host=Starting
+measure-live|profile|--demo steady --demo-speed 600 --demo-hold 150 --start|wait:held;wait:analysis
+measure-outage|profile:outage-long|--demo outage-long --demo-speed 600 --demo-hold 125 --demo-mark 110 --start|wait:held;wait:analysis;wait:marksaved
+measure-linkdrop|profile:link-drop-long|--demo link-drop-long --demo-speed 600 --demo-hold 110 --start|wait:held;wait:analysis
+measure-memo|profile|--demo steady --demo-speed 600 --demo-hold 60 --start|wait:held;invoke:measure.mark;wait:memo;text:measure.memo.text=화상회의 중 끊김
+measure-zoomed|profile|--demo steady --demo-speed 600 --demo-hold 2000 --start|wait:held;invoke:measure.zoomout;invoke:measure.zoomout;invoke:measure.zoomout;invoke:measure.left
+measure-gap|profile:gap|--demo gap --demo-speed 600 --demo-hold 150 --start|wait:held;wait:analysis
+measure-storagefail|profile|--demo tests:storage-fail --demo-speed 600 --demo-hold 130 --start|wait:held
+measure-startfail|profile|--demo tests:storage-start-fail --start|wait:startError
+measure-done|profile:outage-long|--demo outage-long --demo-speed 600 --start|wait:finished
+measure-done-unsaved|profile:outage-long|--demo tests:storage-fail-end --demo-speed 600 --start|wait:finished
+profile-ok|profile|--demo steady --screen profile|wait:screen=profile
+profile-invalid|profile|--demo steady --screen profile|wait:screen=profile;invoke:profile.target.2.remove;text:profile.target.1.address=300.1.1
+profile-locked|profile|--demo steady --demo-speed 600 --demo-hold 30 --start --screen profile|wait:held
+settings|profile|--demo steady --screen settings|wait:screen=settings
+pending-diagnose|profile|--demo steady --screen diagnose|wait:screen=diagnose
+dialog-unsaved|profile|--demo steady --screen profile|wait:screen=profile;text:profile.name=바뀐 이름;wait:dirty;invoke:profile.back;wait:dialog

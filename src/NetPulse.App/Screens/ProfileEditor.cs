@@ -80,6 +80,8 @@ public sealed class ProfileEditor : Screen
     public override void Render(HostSnapshot s)
     {
         bool nowLocked = s.State is HostState.Measuring or HostState.Stopping or HostState.Starting;
+        // 화면 호스트는 Entered 전에 한 번 그린다: 초안을 아직 읽지 않았으면 잠금 상태만 기억한다 (빈 목록에서 다시 만들다 앱이 멈췄다)
+        if (profiles.Count == 0) { locked = nowLocked; return; }
         if (nowLocked != locked) { locked = nowLocked; Rebuild(); }
     }
 
@@ -227,7 +229,15 @@ public sealed class ProfileEditor : Screen
     {
         var f = new GlassTextBox(Ui, id, label, value, placeholder, width);
         f.Box.IsReadOnly = locked;
-        f.Box.TextChanged += (_, _) => { set(f.Text); Changed(); };
+        // 글 상자는 처음 그려질 때도 바뀜 알림을 낸다: 값이 실제로 바뀐 때만 초안을 바꾼다 (변경 없이 "저장하지 않은 변경"이 되던 문제)
+        string last = value;
+        f.Box.TextChanged += (_, _) =>
+        {
+            if (f.Text == last) return;
+            last = f.Text;
+            set(f.Text);
+            Changed();
+        };
         fields[id] = f;
         return f;
     }

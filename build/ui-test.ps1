@@ -75,6 +75,13 @@ if (Test-Path $g5Path) { Remove-Item $g5Path }
 if (Test-Path $g5Dir) {
     $read = { param($n) $f = Join-Path $g5Dir "$n.json"; if (Test-Path $f) { Get-Content $f -Encoding UTF8 -Raw | ConvertFrom-Json } else { $null } }
     $required = @('bench', 'contrast-dark', 'contrast-light', 'reduced-surface', 'fidelity-dark-overview', 'fidelity-light-overview', 'fidelity-dark-toasts', 'fidelity-light-toasts', 'switch-dark-to-light', 'switch-light-to-dark', 'boundary-dark-to-light', 'boundary-light-to-dark')
+    # M5 (설계 7.4): 개수가 아니라 필수 장면 ID × 테마 × 배율의 결과가 모두 있는지 본다. 목록은 시험과 같은 파일
+    $required += @('flow-firstrun-to-stop', 'flow-first-measurement-actions', 'flow-theme-close-cleanup', 'bench-measure', 'reducedmotion-home', 'contrast-home-dark', 'contrast-home-light')
+    $sceneIds = @(Get-Content (Join-Path $root 'tests\NetPulse.UiTests\m5-scenes.txt') -Encoding UTF8 | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | ForEach-Object { ($_ -split '\|')[0] })
+    foreach ($id in $sceneIds) { foreach ($t in 'dark', 'light') { foreach ($s in '100', '150') { $required += "matrix-m5-$id-$t-$s" } } }
+    $required += @('hc-aquatic', 'hc-desert') | ForEach-Object { "matrix-m5-home-outage-$_"; "matrix-m5-measure-outage-$_" }
+    $required += @('matrix-m5-home-outage-dark-reduced', 'matrix-m5-home-outage-light-reduced', 'matrix-m5-measure-live-dark-reducedmotion', 'matrix-m5-measure-live-light-reducedmotion')
+    foreach ($k in 'crossfade', 'sharedmove') { foreach ($p in '0', '0.5', '1') { $required += "matrix-m5-transition-$k-$p" } }
     $missing = @($required | Where-Object { -not (Test-Path (Join-Path $g5Dir "$_.json")) })
     $matrix = @(Get-ChildItem $g5Dir -Filter 'matrix-*.json' | Sort-Object Name)
     $captures = @(Get-ChildItem $env:NETPULSE_UITEST_OUT -Filter *.png | Sort-Object Name | ForEach-Object { [ordered]@{ file = "ui/captures/$($_.Name)"; sha256 = Get-Sha256Text $_.FullName } })
@@ -87,7 +94,10 @@ if (Test-Path $g5Dir) {
         matrixCount    = $matrix.Count
         passed         = [bool]($result.passed -and $missing.Count -eq 0 -and $matrix.Count -ge $MatrixExpected)
         bench          = $bench
-        contrast       = [ordered]@{ dark = & $read 'contrast-dark'; light = & $read 'contrast-light' }
+        benchMeasure   = & $read 'bench-measure'
+        m5Scenes       = $sceneIds.Count
+        flow           = & $read 'flow-firstrun-to-stop'
+        contrast       = [ordered]@{ dark = & $read 'contrast-dark'; light = & $read 'contrast-light'; homeDark = & $read 'contrast-home-dark'; homeLight = & $read 'contrast-home-light' }
         reducedSurface = & $read 'reduced-surface'
         fidelity       = @('dark-overview', 'light-overview', 'dark-toasts', 'light-toasts' | ForEach-Object { [ordered]@{ case = $_; result = & $read "fidelity-$_" } })
         runtimeSwitch  = [ordered]@{ darkToLight = & $read 'switch-dark-to-light'; lightToDark = & $read 'switch-light-to-dark' }

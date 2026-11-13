@@ -28,6 +28,7 @@ public static class LayoutProbe
             // 자동화에서 빠진 하위 트리(대화상자 뒤 화면, 장식)는 검사하지 않는다
             if (node is UIElement ue && !ReferenceEquals(node, root) && AutomationProperties.GetAccessibilityView(ue) == AccessibilityView.Raw) return;
             if (ReferenceEquals(node, skip)) return;   // 진단 출력용 글자는 화면 요소가 아니다
+            if (node is FrameworkElement { Width: 0, Height: 0 }) return;   // 크기 0인 시험 전용 요소
             if (node is FrameworkElement fe && fe.ActualWidth > 0)
             {
                 // 명시적 Clip도 보이는 영역을 줄인다 (G4 M2 1라운드 지적 6)
@@ -40,7 +41,8 @@ public static class LayoutProbe
                 {
                     var visible = Intersect(bounds, clip);
                     items.Add(new { id, x = bounds.X, y = bounds.Y, w = bounds.Width, h = bounds.Height, vw = visible.Width, vh = visible.Height, inScroll });
-                    if (fe is ButtonBase or ToggleButton or TextBox) interactive.Add((id, bounds, layer));
+                    // 겹침은 보이는 부분끼리 본다 (스크롤로 가려진 요소가 머리 아래에 겹쳐 보이는 거짓 겹침을 빼려고)
+                    if (fe is ButtonBase or ToggleButton or TextBox && visible.Width > 0 && visible.Height > 0) interactive.Add((id, visible, layer));
                 }
                 if (fe is ScrollViewer sv)
                 {

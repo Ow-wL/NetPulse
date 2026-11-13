@@ -3,6 +3,7 @@
   "name": "outage",
   "seed": 7,
   "durationRounds": 3600,
+  "startAt": "2026-11-13T13:20:00+09:00",
   "targets": [
     {
       "id": "gateway",

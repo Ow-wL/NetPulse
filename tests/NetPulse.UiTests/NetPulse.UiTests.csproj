@@ -15,5 +15,12 @@
     <Using Include="Xunit" />
     <!-- 토큰 색과 대비 계산 (G5 실측 대비가 같은 함수로 판정한다) -->
     <ProjectReference Include="..\..\src\NetPulse.Design\NetPulse.Design.csproj" />
+    <!-- M5: 시험이 기록을 다시 분석해 화면 값과 비교하고, 데모 기록·프로필을 준비한다 -->
+    <ProjectReference Include="..\..\src\NetPulse.Core\NetPulse.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\demo\scenarios\*.json" Link="scenarios\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="scenarios\*.json" Link="scenarios\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="m5-scenes.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

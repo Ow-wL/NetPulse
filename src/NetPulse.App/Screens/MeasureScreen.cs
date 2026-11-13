@@ -29,6 +29,7 @@ public sealed class MeasureScreen : Screen
     private readonly GlassButton zoomIn, zoomOut, all, now, left, right;
     private readonly TimelineView view = new();
     private readonly StackPanel timelineStack = new() { Spacing = Space.S3 };
+    private readonly TextBlock range;
     private readonly StackPanel content = new() { Spacing = Space.S5 };
     private readonly StackPanel banners = new() { Spacing = Space.S2 };
     private readonly Grid cards = new() { ColumnSpacing = Space.S4, RowSpacing = Space.S4 };
@@ -92,6 +93,10 @@ public sealed class MeasureScreen : Screen
         all.Click += (_, _) => OnTimeline(TimelineCommand.ShowAll);
         now.Click += (_, _) => OnTimeline(TimelineCommand.ToNow);
         (timelineCard, timelineBody) = ScreenParts.Card(Ui, "measure.timelinecard", "타임라인", "", left, right, zoomOut, zoomIn, all, now);
+        // 보이는 범위는 카드 머리가 아니라 본문 위 한 줄 (좁은 창에서 머리의 조작 버튼과 다투지 않게)
+        range = Fonts.Text("", Typography.Caption, Ui.Brushes.Muted);
+        AutomationProperties.SetAutomationId(range, "measure.timeline.range");
+        timelineStack.Children.Add(range);
         timelineStack.Children.Add(timeline);
         timelineStack.Children.Add(Legend());
         timelineBody.Set(timelineStack);
@@ -191,7 +196,6 @@ public sealed class MeasureScreen : Screen
     {
         if (s.Header is not { } h || s.Rounds.Count == 0)
         {
-            timelineBody.SetNote("");
             var empty = ScreenParts.Message(Ui, "measure.timeline.empty", Icons.Chart, Ui.Brushes.Muted,
                 s.State == HostState.Starting ? "측정을 시작하는 중입니다" : "측정하지 않는 중", "측정을 시작하면 지연과 응답 없음, 증상 표시가 한 축에 그려집니다.");
             timelineBody.Set(empty, "empty");
@@ -207,7 +211,8 @@ public sealed class MeasureScreen : Screen
             view.Follow && !view.IsAll ? $"최근 {view.Label}" : $"{label(from)}~{label(to)}");
         bool ended = !s.Measuring;
         timeline.Show(frame, label, view.Follow && !ended, $"{label(from)}부터 {label(to)}까지 ({view.Label})");
-        timelineBody.SetNote($"{label(from)} ~ {(view.Follow && !ended ? "지금" : label(to))} · {view.Label}");
+        range.Text = $"{label(from)} ~ {(view.Follow && !ended ? "지금" : label(to))} · {view.Label}";
+        AutomationProperties.SetName(range, range.Text);
         zoomIn.IsEnabled = view.StepIndex > 0 || view.IsAll;
         zoomOut.IsEnabled = !view.IsAll;
         all.IsEnabled = !view.IsAll;

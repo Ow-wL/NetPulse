@@ -26,6 +26,7 @@ public sealed class FirstRunScreen : Screen
     private readonly GlassTextBox minutes;
     private readonly GlassButton startButton, edit, retry, manual;
     private readonly ContentControl notice = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch };
+    private readonly StackPanel durationRow;
     private readonly DispatcherQueueTimer slowTimer;
     private DetectionResult? result;
     private bool detecting, slow;
@@ -49,7 +50,7 @@ public sealed class FirstRunScreen : Screen
         minutes = new GlassTextBox(Ui, "firstrun.minutes", "측정 시간 (분, 1~720)", "10", null, Size.FieldS) { Visibility = Visibility.Collapsed };
         duration.Changed += v => { selectedDuration = v; minutes.Visibility = v == "custom" ? Visibility.Visible : Visibility.Collapsed; Validate(); };
         minutes.Box.TextChanged += (_, _) => Validate();
-        var durationRow = new StackPanel { Spacing = Space.S2 };
+        durationRow = new StackPanel { Spacing = Space.S2 };
         durationRow.Children.Add(Fonts.Text("측정 시간", Typography.Label, Ui.Brushes.Muted));
         durationRow.Children.Add(duration);
         durationRow.Children.Add(minutes);
@@ -118,8 +119,9 @@ public sealed class FirstRunScreen : Screen
     /// <summary>시작할 프로필: 저장된 구성이 있으면 그것, 없으면 탐지 제안 (측정 시간은 고른 값).</summary>
     private Profile? Proposal()
     {
-        var saved = Context.Host.CurrentProfile;
-        var p = saved ?? result?.Proposal;
+        // 저장한 구성이 있으면 그 측정 시간을 그대로 쓴다 (편집에서 바꾼 시간이 첫 실행의 고른 시간에 덮이던 문제)
+        if (Context.Host.CurrentProfile is { } saved) return saved;
+        var p = result?.Proposal;
         if (p is null) return null;
         return Minutes() is int m ? p with { Duration = TimeSpan.FromMinutes(m) } : p;
     }
@@ -180,7 +182,9 @@ public sealed class FirstRunScreen : Screen
         stack.Children.Add(Row("firstrun.local", "로컬 대상", local is null ? "찾지 못함 (공유기를 측정하지 않습니다)" : $"{local.Name} {local.Address}"));
         var externals = proposal.ActiveTargets.Where(t => t.Role == TargetRole.External).ToArray();
         stack.Children.Add(Row("firstrun.external", "외부 대상", externals.Length == 0 ? "없음" : string.Join(", ", externals.Select(t => t.Name))));
-        if (Context.Host.CurrentProfile is not null) stack.Children.Add(Row("firstrun.saved", "측정 구성", $"저장한 구성 \"{proposal.Name}\"을 씁니다"));
+        if (Context.Host.CurrentProfile is { } savedProfile)
+            stack.Children.Add(Row("firstrun.saved", "측정 구성", $"저장한 구성 \"{savedProfile.Name}\" · 측정 시간 {NetPulse.Core.Presentation.TimelineModel.Seconds((long)savedProfile.Duration.TotalMilliseconds)}"));
+        durationRow.Visibility = Context.Host.CurrentProfile is null ? Visibility.Visible : Visibility.Collapsed;
         body.Set(stack, "normal");
         var notes = new StackPanel { Spacing = Space.S2 };
         if (result.Virtual == Tristate.Yes)

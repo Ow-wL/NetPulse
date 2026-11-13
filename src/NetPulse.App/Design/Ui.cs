@@ -17,7 +17,7 @@ public sealed class Ui
         Options = options;
         Log = log;
         Brushes = new TokenBrushes(Palette.Dark);
-        Motion = new Motion(window.Compositor) { Frozen = options.FreezeMotion };
+        Motion = new Motion(window.Compositor) { Frozen = options.FreezeMotion, HoldAt = options.MotionHold };
         Glass = new Glass(Brushes, Motion);
         Lights = new Lights(Motion);
         Lights.Prepare();
