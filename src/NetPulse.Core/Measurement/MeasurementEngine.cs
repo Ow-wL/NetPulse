@@ -1,9 +1,17 @@
+using NetPulse.Core.Records;
 using NetPulse.Core.Timing;
 
 namespace NetPulse.Core.Measurement;
 
-/// <summary>회차 하나의 결과.</summary>
-public sealed record RoundSnapshot(RoundTick Tick, DateTimeOffset At, IReadOnlyList<(ProbeTarget Target, ProbeResult Result)> Results);
+/// <summary>회차 하나의 결과. Completed는 측정 공급자 결과를 모두 받은 경과 시간, Routes는 그 직후 같은 회차에서 본 경로 (M3 설계 6.4).</summary>
+public sealed record RoundSnapshot(RoundTick Tick, DateTimeOffset At, IReadOnlyList<(ProbeTarget Target, ProbeResult Result)> Results,
+    TimeSpan Completed = default, IReadOnlyList<RouteSample>? Routes = null);
+
+/// <summary>대상별 Windows 경로를 본다 (M3 설계 6.4). 엔진의 회차 안에서 부르므로 빨라야 하고 예외를 던지지 않아야 한다.</summary>
+public interface IRouteObserver
+{
+    IReadOnlyList<RouteSample> Observe(IReadOnlyList<ProbeTarget> targets, long round);
+}
 
 /// <summary>엔진의 현재 상태. 화면은 이것만 구독한다.</summary>
 public sealed record EngineState(bool Running, long Rounds, long Skipped, TimeSpan MaxLate, RoundSnapshot? Latest, bool Finished)
@@ -35,14 +43,28 @@ public sealed class MeasurementEngine : IAsyncDisposable
     private int delivering;        // 배달 작업이 돌고 있음 (0/1)
     private bool stopped;
     private Task? stopCompletion;  // 취소 처리와 측정 작업이 모두 끝나면 완료 (첫 StopAsync가 만든다)
+    private readonly IRouteObserver? routes;
+    private readonly Action<RoundSnapshot>? onRound;
+    private readonly TaskCompletionSource finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public MeasurementEngine(IClock clock, IProbe probe, IReadOnlyList<ProbeTarget> targets, TimeSpan interval, long? roundLimit = null)
+    /// <param name="routes">회차마다 경로를 본다 (없으면 경로 없음)</param>
+    /// <param name="onRound">
+    /// 회차 출력 (M3 설계 6.1). 회차가 끝날 때마다 측정 작업에서 순서대로 부른다. 기다리면 안 된다(제한 큐에 넣기만).
+    /// 멈춘 뒤 도착한 결과는 내지 않는다. 화면용 상태 구독과 별개다.
+    /// </param>
+    public MeasurementEngine(IClock clock, IProbe probe, IReadOnlyList<ProbeTarget> targets, TimeSpan interval, long? roundLimit = null,
+        IRouteObserver? routes = null, Action<RoundSnapshot>? onRound = null)
     {
         this.clock = clock;
         this.probe = probe;
         this.targets = targets;
+        this.routes = routes;
+        this.onRound = onRound;
         scheduler = new RoundScheduler(clock, interval, roundLimit);
     }
+
+    /// <summary>회차 상한까지 다 돌고 끝나면 완료된다 (멈춤으로 끝나면 완료되지 않는다).</summary>
+    public Task Finished => finished.Task;
 
     public EngineState State { get { lock (gate) return state; } }
 
@@ -133,10 +155,19 @@ public sealed class MeasurementEngine : IAsyncDisposable
                 var at = clock.Now;
                 var probes = targets.Select(t => SafeProbe(t, tick.Index, token)).ToArray();
                 var results = await Task.WhenAll(probes).ConfigureAwait(false);
-                var snapshot = new RoundSnapshot(tick, at, targets.Zip(results, (t, r) => (t, r)).ToArray());
+                var completed = clock.Elapsed;
+                IReadOnlyList<RouteSample>? routeSamples = null;
+                if (routes is not null)
+                {
+                    try { routeSamples = routes.Observe(targets, tick.Index); }
+                    catch (Exception ex) { routeSamples = targets.Select(t => new RouteSample(t.Id, null, null, false, "observer-exception:" + ex.GetType().Name)).ToArray(); }
+                }
+                var snapshot = new RoundSnapshot(tick, at, targets.Zip(results, (t, r) => (t, r)).ToArray(), completed, routeSamples);
                 lock (gate)
                 {
                     if (stopped) return;   // 멈춘 뒤 도착한 결과는 버린다
+                    // 회차 출력은 gate 안에서 부른다: 멈춤과의 경계를 정확히 하려고 (onRound는 큐에 넣기만 해서 빠르다)
+                    try { onRound?.Invoke(snapshot); } catch (Exception) { /* 출력 쪽 오류가 측정을 멈추지 않게 한다 */ }
                     SetState(state with
                     {
                         Rounds = state.Rounds + 1,
@@ -154,6 +185,7 @@ public sealed class MeasurementEngine : IAsyncDisposable
                 SetState(state with { Running = false, Finished = true, Skipped = state.Skipped + scheduler.TrailingSkipped });
             }
             RequestDelivery();
+            finished.TrySetResult();
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
     }
