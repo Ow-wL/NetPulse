@@ -77,6 +77,7 @@ public sealed partial class MeasurementSession
     {
         if (linkClosed || directCapability != LinkCapability.Supported) return;
         var item = new LinkItem(sample, (long)clock.Elapsed.TotalMilliseconds, clock.Now);
+        if (item.Ms > Volatile.Read(ref linkCutoffMs)) return;   // 고정한 측정 끝 뒤의 표본은 받지 않는다 (G4 3라운드 2)
         if (linkQueue.Writer.TryWrite(item)) return;
         lock (linkGate)
         {
@@ -93,8 +94,12 @@ public sealed partial class MeasurementSession
         while (linkQueue.Reader.TryRead(out var item)) ProcessLink(item);
     }
 
+    /// <summary>측정 끝 경계 (경과 ms). 끝낼 때 정리 전에 고정한다. 그 뒤 표본은 큐에 있어도 버린다.</summary>
+    private long linkCutoffMs = long.MaxValue;
+
     private void ProcessLink(LinkItem item)
     {
+        if (item.Ms > Volatile.Read(ref linkCutoffMs)) return;
         AdapterTrack track;
         lock (linkGate)
         {
@@ -115,8 +120,11 @@ public sealed partial class MeasurementSession
                 if (!determinate) { track.UnknownFrom ??= item.Ms; track.UnknownLast = item.Ms; }
                 else CloseUnknown(track);
             }
-            // 같은 상태가 이어지면 줄을 쓰지 않는다. 단 번호가 바뀌면 이력용으로 쓴다 (G4 1라운드 5)
-            if (track.State == state && !reindexed) { track.Last = item.Ms; return; }
+            // 직전 표본과 이 표본 사이에 넘침이 있었으면 상태가 같아도 연속으로 보지 않는다:
+            // 넘침 전 마지막 관측과 넘침 뒤 재관측을 따로 남긴다 (G4 3라운드 1)
+            bool afterOverflow = track.State is not null && overflowSpans.Any(o => o.To >= track.Last && o.From <= item.Ms);
+            // 같은 상태가 이어지면 줄을 쓰지 않는다. 단 번호가 바뀌거나 넘침을 건넜으면 쓴다 (G4 1라운드 5)
+            if (track.State == state && !reindexed && !afterOverflow) { track.Last = item.Ms; return; }
         }
         var fields = AdapterFields(track);
         fields["collection"] = LinkEvidenceBuilder.Text(item.Sample.State);

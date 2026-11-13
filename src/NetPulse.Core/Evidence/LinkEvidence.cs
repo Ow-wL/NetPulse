@@ -216,7 +216,8 @@ public static class LinkEvidenceBuilder
             if (alias is not null && Int(e, "interfaceIndex") is int idx)
             {
                 adapters[alias] = new AdapterAt(alias, idx, Str(e, "kind"), Bool(e, "virtual") ?? false);
-                if (source == LinkSource.Direct)   // 로그 줄의 번호는 지금(끝) 번호라 과거 시점의 근거가 아니다
+                // 이력은 직접 관측의 식별 표본(상태 줄)으로만. 로그 줄 번호는 끝 시점 번호, 요약 줄은 관측이 아니다 (G4 2·3라운드)
+                if (source == LinkSource.Direct && Str(e, "collection") is "up" or "down" or "unknown" or "removed")
                 {
                     long when = Long(e, "eventMs") ?? Long(e, "at") ?? 0;
                     if (!history.TryGetValue(alias, out var h)) history[alias] = h = [];

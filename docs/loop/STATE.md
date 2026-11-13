@@ -7,10 +7,10 @@
 | 항목 | 값 |
 | --- | --- |
 | 마일스톤 | M4 근거와 분석 엔진 |
-| 단계 | ③ 구현 |
+| 단계 | 멈춤: G4 3라운드 미승인 (사용자 결정 대기) |
 | 브랜치 | `loop/m4-analysis` (base `loop/m3-engine`) |
 | 설계 검토 라운드 | 2 / 2 (Claude 판정으로 3판 확정) |
-| diff 리뷰 라운드 | 0 / 3 |
+| diff 리뷰 라운드 | 3 / 3 (3라운드 REVISE, 차단 2 → 로컬 수정, 미승인) |
 | 누적 실패 | 4 / 8 |
 | PR | 없음 |
 
@@ -42,7 +42,7 @@
 | M1 골격 | `loop/m1-skeleton` | Ow-wL/NetPulse#2 (base M0) | 열림, 사용자 머지 대기. CI 성공 |
 | M2 디자인 시스템 | `loop/m2-design-system` | Ow-wL/NetPulse#3 (base M1) | 열림, 사용자 머지 대기. CI 실행 43415674372 성공 (PR head `085f382`) |
 | M3 측정 엔진 | `loop/m3-engine` | Ow-wL/NetPulse#4 (base M2) | 병합됨 (`loop/m2-design-system`) |
-| M0~M3 통합 | `loop/m2-design-system` | Ow-wL/NetPulse#7 (base `main`) | 열림, 사용자 승인 대기 |
+| M0~M3 통합 | `loop/m2-design-system` | Ow-wL/NetPulse#7 (base `main`) | `main`에 병합됨 (병합 커밋 `2af5dfe`) |
 
 ## 미해결 지적 (M2 G4 3라운드, 차단 아님 → M5에서 처리. M3에는 화면이 없어 그대로 둔다)
 
@@ -59,5 +59,5 @@
 
 ## 다음 할 일
 
-1. M4 설계 3판대로 구현 (근거 수집 → 판정 → 빠른 진단)
-2. 구현 (M3 이월 지적 1~3 포함) → G1·G2, G3(화면 없는 통합 시나리오, 이 PC 실측) → G4 → 마감 (`close-milestone.ps1 -UiOptional`)
+1. 사용자 결정: M4 diff 리뷰를 한 라운드 더 받을지 (3라운드 차단 2건은 로컬에서 고침, 미승인·미푸시)
+2. 승인되면 기록 전용 커밋 → `close-milestone.ps1 -UiOptional` (base `loop/m3-engine` 또는 `main`)

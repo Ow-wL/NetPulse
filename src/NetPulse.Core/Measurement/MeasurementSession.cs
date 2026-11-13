@@ -496,6 +496,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
         // 측정 끝 경계는 정리(엔진 정지·배출·마감)를 기다리기 전에 고정한다 (M4 G4 2라운드 4)
         var stopElapsed = clock.Elapsed;
         var stopWall = clock.Now;
+        Volatile.Write(ref linkCutoffMs, (long)stopElapsed.TotalMilliseconds);
         try
         {
             await engine.StopAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);

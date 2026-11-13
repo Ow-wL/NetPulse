@@ -158,6 +158,23 @@ public sealed class SessionLinkTests : IDisposable
     }
 
     [Fact]
+    public async Task SamplesAfterFixedEndAreIgnored()
+    {
+        // G4 3라운드 2: 끝 경계를 고정한 뒤(엔진 정지를 기다리는 동안) 온 표본은 판정에 들어가지 않는다
+        var clock = new ManualClock(Start);
+        var links = new FakeLinks();
+        var s = MeasurementSession.Start(Options(clock, links));
+        await Rounds(clock, s, 3);
+        var stopping = s.StopAsync();          // 끝 경계 = 3초
+        clock.Advance(TimeSpan.FromMilliseconds(600));
+        links.Notify(LinkState.Down);          // 3.6초 다운 (끝 뒤)
+        await stopping;
+        var ev = LinkEvidenceBuilder.FromEvents(Reread().Events);
+        Assert.Empty(ev.Downs);
+        Assert.DoesNotContain(Links(Reread()), e => (string?)e["collection"] == "down");
+    }
+
+    [Fact]
     public async Task NoInterfaceAndStartFailureAreExplicit()
     {
         var clock = new ManualClock(Start);

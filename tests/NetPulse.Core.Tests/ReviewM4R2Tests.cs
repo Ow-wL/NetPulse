@@ -51,6 +51,33 @@ public sealed class ReviewM4R2Tests : IDisposable
         Assert.Equal((1000L, 1000L), (d.FromMs, d.ToMs));   // 1~6초 전체가 아니다
     }
 
+    // 3라운드 1: 넘침 뒤 같은 다운을 다시 봐도 넘침 전 구간과 잇지 않는다
+    [Fact]
+    public void ReobservedDownAfterOverflowIsSeparate()
+    {
+        var events = new[]
+        {
+            Direct("up", 0),
+            Direct("down", 1000, extra: new JsonObject { ["prevState"] = "up", ["prevFirstMs"] = 0, ["prevLastMs"] = 0 }),
+            // 2초 업 표본 유실(넘침) → 3초 다운 재관측: 세션은 넘침을 건넌 줄을 따로 쓴다 (앞 다운의 마지막 관측 1초)
+            Direct("down", 3000, extra: new JsonObject { ["prevState"] = "down", ["prevFirstMs"] = 1000, ["prevLastMs"] = 1000 }),
+            Direct("up", 6000, extra: new JsonObject { ["prevState"] = "down", ["prevFirstMs"] = 3000, ["prevLastMs"] = 3000 }),
+            new JsonObject { ["id"] = "m", ["type"] = "link", ["at"] = 9000, ["wall"] = RecordSchema.Iso(W0), ["source"] = "direct", ["collection"] = "overflow",
+                ["count"] = 1, ["spans"] = new JsonArray(new JsonArray(2000, 2000)) },
+            Summary(),
+        };
+        var downs = LinkEvidenceBuilder.FromEvents(events).Downs.Select(d => (d.FromMs, d.ToMs)).ToArray();
+        Assert.Equal([(1000L, 1000L), (3000L, 6000L)], downs);   // 2초는 확정 다운이 아니다
+    }
+
+    [Fact]
+    public void SummaryLineDoesNotReopenRemovedIndex()
+    {
+        var events = new List<JsonObject> { Direct("up", 0, 7, "a1"), Direct("removed", 3000, 7, "a1"), Summary("a1"), Direct("up", 7000, 7, "a2"), Summary("a2") };
+        var ev = LinkEvidenceBuilder.FromEvents(events);
+        Assert.Equal("a2", ev.AdapterFor(7, 9500));   // 끝 요약이 제거된 a1의 번호 7을 다시 열지 않는다 (충돌 없음)
+    }
+
     // 3: 로그 줄의 (끝 시점) 번호가 과거 번호 이력을 오염시키지 않는다
     [Fact]
     public void LogLinesDoNotPolluteIndexHistory()
@@ -199,15 +226,17 @@ public sealed class ReviewM4R2Tests : IDisposable
         });
         for (int i = 0; i < 3; i++) await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));
         await Eventually(() => s.Status.Committed == 4, "확정 4");
-        clock.Advance(TimeSpan.FromMilliseconds(500));   // 3.5초에 중지
         Volatile.Write(ref block, true);
-        await AdvanceWhenWaiting(clock, TimeSpan.Zero);
+        await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));                       // 회차 4: 쓰기에서 막힘
+        await Eventually(() => primary.Writes("rounds") == 5, "회차 4 쓰기 진입");      // 배출할 것이 실제로 남아 있다 (G4 3라운드 4)
+        clock.Advance(TimeSpan.FromMilliseconds(500));                                  // 4.5초에 중지
         var stopping = s.StopAsync();
         await Task.Delay(100, TestContext.Current.CancellationToken);
-        clock.Advance(TimeSpan.FromSeconds(10));          // 정리하는 동안 시간이 흐름
+        Assert.False(stopping.IsCompleted, "배출이 막혀 있는 동안 종료가 끝나면 안 된다");
+        clock.Advance(TimeSpan.FromSeconds(10));                                         // 정리하는 동안 시간이 흐름
         Volatile.Write(ref block, false);
         release.Set();
         var result = await stopping;
-        Assert.Equal(3500, result.Summary!.EndMs);
+        Assert.Equal(4500, result.Summary!.EndMs);
     }
 }
