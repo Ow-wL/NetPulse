@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using NetPulse.App.Design;
 using NetPulse.App.Design.Controls;
 using NetPulse.Core.Live;
+using NetPulse.Design.Tokens;
 
 namespace NetPulse.App.Screens;
 
@@ -81,14 +82,24 @@ public sealed class ScreenHost : Grid
     }
 
     /// <summary>
-    /// 화면을 미리 만들어 숨겨 둔다 (시작 직후 한가할 때, 홈·측정). 처음 이동할 때 만드는 비용이 한 프레임 예산(50 ms)을 넘었다 (M5 bench).
+    /// 화면을 미리 만들고 한 번 배치해 둔 뒤 숨긴다 (시작 직후 한가할 때, 홈·측정). 처음 이동할 때 만들고 배치하는 비용이
+    /// 한 프레임 예산(50 ms)을 넘었다 (M5 bench). 숨긴 채로는 배치가 일어나지 않으므로 배치 한 번은 투명·입력 없음으로 보인 채 한다.
     /// </summary>
     public void Prepare(string id)
     {
         var s = Get(id);
         if (Children.Contains(s)) return;
-        s.Visibility = Visibility.Collapsed;
-        Children.Add(s);
+        s.Opacity = 0;
+        s.IsHitTestVisible = false;
+        Children.Insert(0, s);   // 지금 화면 뒤
+        void Done(object? sender, object e)
+        {
+            s.LayoutUpdated -= Done;
+            if (!ReferenceEquals(s, Current)) s.Visibility = Visibility.Collapsed;
+            s.Opacity = Emphasis.Full;
+            s.IsHitTestVisible = true;
+        }
+        s.LayoutUpdated += Done;
     }
 
     public void Show(string id, HostSnapshot snapshot, FrameworkElement? from)
