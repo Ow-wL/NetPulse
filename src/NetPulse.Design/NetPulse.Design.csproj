@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 디자인 토큰의 값과 계산 (M2 설계 3절). WinUI에 의존하지 않아 로직 테스트·CI에서 돈다. 앱은 이 값을 브러시로 옮긴다. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>NetPulse.Design</RootNamespace>
+  </PropertyGroup>
+</Project>

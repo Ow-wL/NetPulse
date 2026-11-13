@@ -45,7 +45,7 @@ try {
     # ---- 3. 로직·통합 테스트 (UI 테스트는 build/ui-test.ps1) ----
     $testDir = Join-Path $work 'tests'
     $tests = [ordered]@{}
-    foreach ($project in 'NetPulse.Core.Tests', 'NetPulse.Platform.Tests') {
+    foreach ($project in 'NetPulse.Core.Tests', 'NetPulse.Design.Tests', 'NetPulse.Platform.Tests') {
         $out = Join-Path $testDir $project
         $commands += Invoke-Step "test-$project" 300 'dotnet' @('test', '--project', "tests/$project", '-c', 'Release', '--no-build',
             '--report-xunit-trx', '--results-directory', $out) $work
