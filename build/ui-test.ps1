@@ -52,7 +52,8 @@ try {
 $trx = Get-ChildItem $trxDir -Filter *.trx -ErrorAction SilentlyContinue | Select-Object -First 1
 $summary = if ($trx) { $neutral = Join-Path $uiDir 'ui-tests.trx'; Move-Item $trx.FullName $neutral; Read-TrxSummary $neutral } else { $null }
 
-$scenarios = @($expected | Where-Object { $_.path -like 'demo/scenarios/*' } | ForEach-Object { [ordered]@{ path = $_.path; sha256 = $_.sha256 } })
+# 데모 시나리오는 실행 파일 안에 묶인다. 묶인 원본(이 커밋의 파일)의 해시를 적는다.
+$scenarios = @(Get-ChildItem (Join-Path $root 'demo\scenarios') -Filter *.json | Sort-Object Name | ForEach-Object { [ordered]@{ path = "demo/scenarios/$($_.Name)"; sha256 = Get-Sha256Text $_.FullName } })
 $result = [ordered]@{
     sourceCommit   = $head
     manifestSha256 = Get-Sha256Text $manifestPath

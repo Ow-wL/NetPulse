@@ -40,7 +40,12 @@ public partial class App : Application
             engine = new MeasurementEngine(new SystemClock(), new IcmpProbe(TimeSpan.FromMilliseconds(800)), [], TimeSpan.FromSeconds(1));
             mode = "live";
         }
-        log.Write("startup", new { mode, speed = options.DemoSpeed, version = typeof(App).Assembly.GetName().Version?.ToString() });
+        var resources = new
+        {
+            fonts = File.Exists(Path.Combine(AppContext.BaseDirectory, "Fonts", "Pretendard-Bold.otf")),
+            scenarios = Directory.Exists(Path.Combine(AppContext.BaseDirectory, "demo", "scenarios")),
+        };
+        log.Write("startup", new { mode, speed = options.DemoSpeed, version = typeof(App).Assembly.GetName().Version?.ToString(), resources });
         engine.Start();
 
         window = new ShellWindow(engine, mode, options.RunSeconds);

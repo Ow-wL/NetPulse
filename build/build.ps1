@@ -62,8 +62,8 @@ try {
     $commands += Invoke-Step 'publish' 300 'dotnet' @('publish', 'src/NetPulse.App/NetPulse.App.csproj', '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
         '-p:EnableMsixTooling=true', '-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true', '-o', $app) $work
     Get-ChildItem $app -Recurse -Filter *.pdb | Remove-Item
-    # 실행 파일 옆에 있어야 하는 파일 (단일 파일 안에 묶이면 앱이 찾지 못한다)
-    foreach ($required in 'NetPulse.exe', 'App.xbf', 'NetPulse.pri', 'Fonts\Pretendard-Regular.otf', 'Fonts\Pretendard-Bold.otf', 'Fonts\OFL-Pretendard.txt', 'demo\scenarios\steady.json') {
+    # 실행 파일 옆에 있어야 하는 파일. 글꼴·데모 시나리오는 실행 파일 안에 묶이고, 앱이 찾는지는 G3가 시작 기록으로 확인한다.
+    foreach ($required in 'NetPulse.exe', 'App.xbf', 'NetPulse.pri') {
         if (-not (Test-Path (Join-Path $app $required))) { throw "배포 폴더에 $required 이(가) 없습니다." }
     }
 

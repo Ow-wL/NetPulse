@@ -21,7 +21,10 @@ public sealed class ShellTests
 
         Assert.Equal(0, app.Close());
         var log = app.ReadLog();
-        Assert.Contains(log, e => e.GetProperty("kind").GetString() == "startup" && e.GetProperty("data").GetProperty("mode").GetString() == "demo:steady");
+        var startup = Assert.Single(log, e => e.GetProperty("kind").GetString() == "startup").GetProperty("data");
+        Assert.Equal("demo:steady", startup.GetProperty("mode").GetString());
+        Assert.True(startup.GetProperty("resources").GetProperty("fonts").GetBoolean(), "배포된 앱이 글꼴을 찾아야 한다");
+        Assert.True(startup.GetProperty("resources").GetProperty("scenarios").GetBoolean(), "배포된 앱이 데모 시나리오를 찾아야 한다");
         var shutdown = Assert.Single(log, e => e.GetProperty("kind").GetString() == "shutdown");
         Assert.True(shutdown.GetProperty("data").GetProperty("stopCompleted").GetBoolean(), "측정 작업이 제한시간 안에 끝나야 한다");
         Assert.DoesNotContain(log, e => e.GetProperty("kind").GetString() == "unhandled");
