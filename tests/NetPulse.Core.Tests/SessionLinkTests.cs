@@ -132,8 +132,15 @@ public sealed class SessionLinkTests : IDisposable
         var s = MeasurementSession.Start(Options(clock, links));
         await Rounds(clock, s, 2);
         await s.StopAsync();
-        var overflow = Assert.Single(Links(Reread()), e => (string?)e["collection"] == "overflow");
+        var rec = Reread();
+        var overflow = Assert.Single(Links(rec), e => (string?)e["collection"] == "overflow");
         Assert.True((long)overflow["count"]! > 0);
+        Assert.NotEmpty(overflow["spans"]!.AsArray());
+        // 알림 표본만 넘쳐도 끊김 없음(정상)으로 말하지 않는다 (G4 1라운드 7)
+        var direct = LinkEvidenceBuilder.FromEvents(rec.Events).Summaries.Single(x => x.Source == LinkSource.Direct);
+        Assert.True(direct.Partial);
+        Assert.Contains("overflow", direct.Secondary);
+        Assert.NotEqual(LinkDisplay.ObservedNone, direct.Display);
     }
 
     [Fact]
@@ -191,7 +198,8 @@ public sealed class SessionLinkTests : IDisposable
         var ev = LinkEvidenceBuilder.FromEvents(rec.Events);
         var logDown = Assert.Single(ev.Downs, d => d.Source == LinkSource.Log);
         Assert.Equal((2500L, 2700L), (logDown.FromMs, logDown.ToMs));
-        Assert.Equal(1, ev.Unmapped);
+        Assert.Equal(0, ev.Unmapped);   // 측정 밖 이벤트는 환산하지 않고 참고(historical)로만 (G4 1라운드 3)
+        Assert.Single(Links(rec), e => (string?)e["link"] == "historical");
         Assert.Equal(1, ev.Unlinked);
         Assert.Equal(LinkDisplay.Down, ev.Summaries.Single(x => x.Source == LinkSource.Log && x.Adapter == "a1").Display);
         Assert.Contains(Links(rec), e => (string?)e["source"] == "log" && e["unparsed"] is not null);
@@ -219,7 +227,11 @@ public sealed class SessionLinkTests : IDisposable
         await Rounds(clock, s, 10);
         var result = await s.StopAsync();
         Assert.True(result.Summary!.EventsDropped > 0, "버린 이벤트 " + result.Summary.EventsDropped);
-        Assert.Equal(result.Summary.EventsDropped, Reread().Summary!.EventsDropped);
+        var rec = Reread();
+        Assert.Equal(result.Summary.EventsDropped, rec.Summary!.EventsDropped);
+        // 버린 이벤트는 다시 읽을 때 이벤트 손상으로 표시된다 (G4 1라운드 8)
+        Assert.Equal(RecordStatus.Damaged, rec.Status);
+        Assert.Contains("이벤트 유실", rec.MissingNotice);
     }
 }
 

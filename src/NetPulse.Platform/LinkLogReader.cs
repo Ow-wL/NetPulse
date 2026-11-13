@@ -21,10 +21,13 @@ public sealed class LinkLogReader : ILinkLogSource
         var events = new List<LogLinkEvent>();
         int unparsed = 0;
         var perAdapter = new Dictionary<string, (LinkCapability, string?)>();
+        var window = new Cap(MaxWindowEvents);
+        var lookbackCap = new Cap(MaxLookbackEvents);
+        var wlanCap = new Cap(MaxWindowEvents);
         try
         {
             // 유선 드라이버
-            foreach (var record in Query("System", LinkCatalog.SystemQuery(fromUtc, toUtc), watch, timeout))
+            foreach (var record in Query("System", LinkCatalog.SystemQuery(fromUtc, toUtc), watch, timeout, window))
             {
                 var parsed = LinkCatalog.ParseDriver(record.ProviderName, record.Id, record.Properties.Select(p => p.Value).ToArray());
                 if (parsed is null) { unparsed++; continue; }
@@ -32,7 +35,7 @@ public sealed class LinkLogReader : ILinkLogSource
                 events.Add(new LogLinkEvent(key, match, parsed.Value.State, Utc(record)));
             }
             // 무선
-            foreach (var record in Query("Microsoft-Windows-WLAN-AutoConfig/Operational", LinkCatalog.WlanQuery(fromUtc, toUtc), watch, timeout, optional: true))
+            foreach (var record in Query("Microsoft-Windows-WLAN-AutoConfig/Operational", LinkCatalog.WlanQuery(fromUtc, toUtc), watch, timeout, wlanCap, optional: true))
             {
                 var guid = NamedData(record, "InterfaceGuid");
                 var state = LinkCatalog.WlanState(record.Id);
@@ -43,7 +46,7 @@ public sealed class LinkLogReader : ILinkLogSource
             // 어댑터별 지원 여부 (2-1): 유선은 지난 30일 해석표 공급자 이벤트가 그 어댑터에 유일하게 대응된 적이 있어야
             var lookback = DateTimeOffset.UtcNow - LinkCatalog.SupportLookback;
             var supportedWired = new HashSet<string>();
-            foreach (var record in Query("System", LinkCatalog.SystemQuery(lookback, DateTimeOffset.UtcNow), watch, timeout, maxEvents: 2000))
+            foreach (var record in Query("System", LinkCatalog.SystemQuery(lookback, DateTimeOffset.UtcNow), watch, timeout, lookbackCap))
             {
                 var parsed = LinkCatalog.ParseDriver(record.ProviderName, record.Id, record.Properties.Select(p => p.Value).ToArray());
                 if (parsed is null) continue;
@@ -53,11 +56,14 @@ public sealed class LinkLogReader : ILinkLogSource
             bool wlanReadable = LogReadable("Microsoft-Windows-WLAN-AutoConfig/Operational");
             foreach (var a in adapters)
             {
-                if (a.Kind == "wired") perAdapter[a.Key] = supportedWired.Contains(a.Key) ? (LinkCapability.Supported, null) : (LinkCapability.Unsupported, "no-known-driver");
+                if (a.Kind == "wired") perAdapter[a.Key] = supportedWired.Contains(a.Key) ? (LinkCapability.Supported, null)
+                    : (LinkCapability.Unsupported, lookbackCap.Hit ? "lookback-truncated" : "no-known-driver");
                 else if (a.Kind == "wireless") perAdapter[a.Key] = wlanReadable ? (LinkCapability.Supported, null) : (LinkCapability.Unsupported, "wlan-log-unavailable");
                 else perAdapter[a.Key] = (LinkCapability.Unsupported, "no-known-driver");
             }
             if (watch.Elapsed > timeout) return new LinkLogResult(perAdapter, events, unparsed, LinkCapability.Unsupported, "timeout");
+            // 상한에 닿으면 조회가 끝까지 되지 않은 것: 완전한 조회로 보고하지 않는다 (G4 1라운드 9)
+            if (window.Hit || wlanCap.Hit) return new LinkLogResult(perAdapter, events, unparsed, LinkCapability.Unsupported, "truncated");
             return new LinkLogResult(perAdapter, events, unparsed, LinkCapability.Supported, null);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or SecurityException)
@@ -74,7 +80,16 @@ public sealed class LinkLogReader : ILinkLogSource
         }
     }
 
-    private static IEnumerable<EventRecord> Query(string log, string xpath, Stopwatch watch, TimeSpan timeout, bool optional = false, int maxEvents = 5000)
+    private const int MaxWindowEvents = 50_000, MaxLookbackEvents = 5_000;
+
+    /// <summary>조회 상한과 도달 여부.</summary>
+    private sealed class Cap(int max)
+    {
+        public int Max { get; } = max;
+        public bool Hit { get; set; }
+    }
+
+    private static IEnumerable<EventRecord> Query(string log, string xpath, Stopwatch watch, TimeSpan timeout, Cap cap, bool optional = false)
     {
         EventLogReader reader;
         try { reader = new EventLogReader(new EventLogQuery(log, PathType.LogName, xpath)); }
@@ -82,8 +97,9 @@ public sealed class LinkLogReader : ILinkLogSource
         using (reader)
         {
             int n = 0;
-            while (n++ < maxEvents)
+            while (true)
             {
+                if (n++ >= cap.Max) { cap.Hit = true; yield break; }
                 if (watch.Elapsed > timeout) throw new TimeoutException();
                 EventRecord? record;
                 try { record = reader.ReadEvent(); }

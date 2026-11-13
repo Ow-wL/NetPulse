@@ -87,9 +87,22 @@ public sealed record LinkEvidence(
 {
     public static readonly LinkEvidence None = new([], [], new Dictionary<string, AdapterAt>(), 0, 0);
 
-    /// <summary>그 인터페이스 번호를 쓰던 어댑터 별칭.</summary>
-    public string? AdapterFor(int interfaceIndex) =>
-        Adapters.Values.Where(a => a.InterfaceIndex == interfaceIndex).Select(a => a.Alias).FirstOrDefault();
+    /// <summary>별칭별 (시각 ms, 인터페이스 번호) 이력. 번호는 재활성화 때 바뀔 수 있다 (G4 1라운드 5).</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<(long Ms, int Index)>> IndexHistory { get; init; } =
+        new Dictionary<string, IReadOnlyList<(long Ms, int Index)>>();
+
+    /// <summary>그 시각에 그 인터페이스 번호를 쓰던 어댑터 별칭. 이력이 없으면 마지막 번호로.</summary>
+    public string? AdapterFor(int interfaceIndex, long atMs)
+    {
+        foreach (var (alias, history) in IndexHistory)
+        {
+            if (history.Count == 0) continue;
+            var at = history.LastOrDefault(h => h.Ms <= atMs);
+            int index = at == default ? history[0].Index : at.Index;
+            if (index == interfaceIndex) return alias;
+        }
+        return IndexHistory.Count > 0 ? null : Adapters.Values.Where(a => a.InterfaceIndex == interfaceIndex).Select(a => a.Alias).FirstOrDefault();
+    }
 
     /// <summary>
     /// "링크 근거가 있다"고 말할 수 있는지: 직접·로그 중 하나라도 어떤 어댑터에서 down 또는 (부분 아닌) observed-none.
@@ -104,9 +117,10 @@ public static class LinkDisplayRule
     public const double MinCoverage = 0.9;
 
     /// <param name="coverage">직접 관측의 관측 범위 (판별된 표본 비율). 로그 경로는 null</param>
-    public static (LinkDisplay Display, bool Partial) Decide(LinkCapability capability, bool anyDown, double? coverage)
+    /// <param name="forcePartial">관측 범위와 별개로 부분 수집인 경우 (예: 알림 큐 넘침, G4 1라운드 7)</param>
+    public static (LinkDisplay Display, bool Partial) Decide(LinkCapability capability, bool anyDown, double? coverage, bool forcePartial = false)
     {
-        bool partial = coverage is double c && c < MinCoverage;
+        bool partial = forcePartial || coverage is double c && c < MinCoverage;
         if (anyDown) return (LinkDisplay.Down, partial);
         if (capability == LinkCapability.Denied) return (LinkDisplay.Denied, partial);
         if (capability == LinkCapability.Unsupported || partial) return (LinkDisplay.Unsupported, partial);
@@ -115,45 +129,43 @@ public static class LinkDisplayRule
 }
 
 /// <summary>
-/// UTC → 측정 경과 시간 (M4 설계 A6, 2-3). 회차 표본(경과 ms, 벽시계)으로 대응 구간을 만든다:
-/// 이웃한 두 회차의 "벽시계 − 경과"가 1초 안에서 같으면 그 사이는 한 구간. 다르면(절전·시각 변경) 그 사이는 불확실이다
-/// (변경이 정확히 언제인지 모르므로 앞뒤 어느 대응도 쓰지 않음).
-/// 로그 시각이 정확히 한 구간에만 들면 환산, 아니면(불확실·여러 구간 겹침·측정 밖) null.
+/// UTC → 측정 경과 시간 (M4 설계 A6, 2-3, G4 1라운드 2·3).
+/// 회차 표본(경과 ms, 벽시계)을 "벽시계 − 경과"가 1초 안에서 같은 이웃끼리 묶어 대응 구간을 만든다.
+/// 구간마다 그 오프셋으로 후보 경과 시각을 구한다: 그 구간의 회차 범위 안이면 확정 후보, 이웃 구간과의 사이(변경이 일어난 곳)면 불확실 후보.
+/// 불확실 후보가 하나라도 있거나 확정 후보가 정확히 하나가 아니면 환산하지 않는다(null). 측정 범위 [0, 끝] 밖도 null.
 /// </summary>
 public static class TimeMapping
 {
     private static readonly TimeSpan Tolerance = TimeSpan.FromSeconds(1);
-    private static readonly TimeSpan Edge = TimeSpan.FromSeconds(3);
 
-    public static long? ToElapsedMs(IReadOnlyList<RoundData> rounds, DateTimeOffset wall)
+    /// <param name="endMs">측정 끝 경과 ms (모르면 마지막 회차)</param>
+    public static long? ToElapsedMs(IReadOnlyList<RoundData> rounds, DateTimeOffset wall, long? endMs = null)
     {
         if (rounds.Count == 0) return null;
-        var hits = new HashSet<long>();
-        bool uncertain = false;
-        for (int i = 0; i + 1 < rounds.Count; i++)
+        long measurementEnd = Math.Max(endMs ?? rounds[^1].AtMs, rounds[^1].AtMs);
+        // 대응 구간: (첫 회차 인덱스, 마지막 회차 인덱스, 오프셋)
+        var segments = new List<(int First, int Last, DateTimeOffset Offset)>();
+        for (int i = 0; i < rounds.Count; i++)
         {
-            var a = rounds[i];
-            var b = rounds[i + 1];
-            var offA = a.Wall - TimeSpan.FromMilliseconds(a.AtMs);
-            var offB = b.Wall - TimeSpan.FromMilliseconds(b.AtMs);
-            bool same = (offA - offB).Duration() <= Tolerance;
-            // 시각 변경·절전 사이: 그 두 회차의 벽시계 사이 어딘가 (또는 역행이면 뒤집힌 범위)는 불확실
-            var lo = a.Wall < b.Wall ? a.Wall : b.Wall;
-            var hi = a.Wall < b.Wall ? b.Wall : a.Wall;
-            if (!same)
-            {
-                if (wall >= lo && wall <= hi) uncertain = true;
-                continue;
-            }
-            if (wall >= a.Wall && wall <= b.Wall) hits.Add(a.AtMs + (long)(wall - a.Wall).TotalMilliseconds);
+            var off = rounds[i].Wall - TimeSpan.FromMilliseconds(rounds[i].AtMs);
+            if (segments.Count > 0 && (off - (rounds[segments[^1].Last].Wall - TimeSpan.FromMilliseconds(rounds[segments[^1].Last].AtMs))).Duration() <= Tolerance)
+                segments[^1] = (segments[^1].First, i, segments[^1].Offset);
+            else segments.Add((i, i, off));
         }
-        var first = rounds[0];
-        if (wall < first.Wall && first.Wall - wall <= Edge) hits.Add(Math.Max(0, first.AtMs - (long)(first.Wall - wall).TotalMilliseconds));
-        var last = rounds[^1];
-        if (wall > last.Wall && wall - last.Wall <= Edge) hits.Add(last.AtMs + (long)(wall - last.Wall).TotalMilliseconds);
-        if (rounds.Count == 1 && wall == first.Wall) hits.Add(first.AtMs);
-        if (uncertain || hits.Count != 1) return null;
-        return hits.First();
+        int certain = 0;
+        long value = 0;
+        for (int k = 0; k < segments.Count; k++)
+        {
+            var (first, last, offset) = segments[k];
+            long e = (long)(wall - offset).TotalMilliseconds;
+            long coreFrom = k == 0 ? 0 : rounds[first].AtMs;                       // 첫 구간은 측정 시작부터
+            long coreTo = k == segments.Count - 1 ? measurementEnd : rounds[last].AtMs;   // 마지막 구간은 측정 끝까지
+            long zoneFrom = k == 0 ? 0 : rounds[segments[k - 1].Last].AtMs;        // 앞 구간과의 사이 (변경이 일어난 곳)
+            long zoneTo = k == segments.Count - 1 ? measurementEnd : rounds[segments[k + 1].First].AtMs;
+            if (e >= coreFrom && e <= coreTo) { certain++; value = e; }
+            else if (e > zoneFrom && e < zoneTo) return null;   // 변경 시각 불확실 구간에 들 수 있음
+        }
+        return certain == 1 ? value : null;
     }
 }
 
@@ -180,17 +192,27 @@ public static class LinkEvidenceBuilder
         var links = events.Where(e => Str(e, "type") == "link").ToArray();
         if (links.Length == 0) return LinkEvidence.None;
         var adapters = new Dictionary<string, AdapterAt>();
+        var history = new Dictionary<string, List<(long Ms, int Index)>>();
         var direct = new Dictionary<string, Track>();
         var log = new Dictionary<string, List<(LinkState State, long Ms, bool Physical)>>();
         var raw = new Dictionary<(string, LinkSource), (LinkCapability Capability, string? Code, double? Coverage)>();
         int unmapped = 0, unlinked = 0;
+        bool directOverflow = false;
 
         foreach (var e in links)
         {
             var source = Str(e, "source") == "log" ? LinkSource.Log : LinkSource.Direct;
             string? alias = Str(e, "adapter");
             if (alias is not null && Int(e, "interfaceIndex") is int idx)
+            {
                 adapters[alias] = new AdapterAt(alias, idx, Str(e, "kind"), Bool(e, "virtual") ?? false);
+                if (Str(e, "link") is not ("historical" or "unlinked" or "ambiguous"))
+                {
+                    long when = Long(e, "eventMs") ?? Long(e, "at") ?? 0;
+                    if (!history.TryGetValue(alias, out var h)) history[alias] = h = [];
+                    h.Add((when, idx));
+                }
+            }
             string collection = Str(e, "collection") ?? "";
             string? match = Str(e, "link");
             switch (collection)
@@ -220,6 +242,9 @@ public static class LinkEvidenceBuilder
                     raw[(alias, source)] = (cap, Str(e, "code"), Double(e, "coverage"));
                     if (source == LinkSource.Direct && direct.TryGetValue(alias, out var tr) && tr.Steps.Count > 0 && Long(e, "lastLastMs") is long ll)
                         tr.LastSeen[tr.Steps.Count - 1] = ll;
+                    break;
+                case "overflow":
+                    if (source == LinkSource.Direct) directOverflow = true;
                     break;
                 case "unsupported" or "denied":
                     raw[(alias ?? "*", source)] = (collection == "denied" ? LinkCapability.Denied : LinkCapability.Unsupported, Str(e, "code"), null);
@@ -260,14 +285,19 @@ public static class LinkEvidenceBuilder
         {
             var (alias, source) = kv.Key;
             bool anyDown = downs.Any(d => d.Adapter == alias && d.Source == source);
-            var (display, partial) = LinkDisplayRule.Decide(kv.Value.Capability, anyDown, kv.Value.Coverage);
+            bool overflow = source == LinkSource.Direct && directOverflow;
+            var (display, partial) = LinkDisplayRule.Decide(kv.Value.Capability, anyDown, kv.Value.Coverage, overflow);
             var secondary = new List<string>();
             if (partial) secondary.Add("partial");
+            if (overflow) secondary.Add("overflow");
             if (display == LinkDisplay.Down && kv.Value.Capability != LinkCapability.Supported) secondary.Add(kv.Value.Capability.ToString().ToLowerInvariant());
             if (kv.Value.Code is { } code) secondary.Add(code);
             return new LinkSummary(alias, source, display, kv.Value.Capability, kv.Value.Code, kv.Value.Coverage, partial, secondary);
         }).OrderBy(s => s.Adapter, StringComparer.Ordinal).ThenBy(s => s.Source).ToArray();
-        return new LinkEvidence(summaries, downs, adapters, unmapped, unlinked);
+        return new LinkEvidence(summaries, downs, adapters, unmapped, unlinked)
+        {
+            IndexHistory = history.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<(long, int)>)kv.Value.OrderBy(x => x.Ms).ToArray()),
+        };
     }
 
     public static LinkState Parse(string s) => s switch

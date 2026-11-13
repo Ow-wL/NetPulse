@@ -143,6 +143,8 @@ public static class RecordReader
             else badEvents++;
         }
 
+        // 쓰는 중에 버린 이벤트는 이벤트 손상으로 센다 (G4 1라운드 8)
+        if (summary?.EventsDropped is long droppedEvents && droppedEvents > 0) badEvents += (int)Math.Min(droppedEvents, int.MaxValue - badEvents);
         var damage = new DamageCounts(malformed, wrongId, unknownTarget, badCombo, unknownValue, duplicate, outOfOrder, truncated, badEvents, unreadable + badHeaders);
         var stats = StatsCalculator.Compute(rounds, header.Targets.Select(t => t.Id).ToArray(), gaps);
         var end = summary?.EndReason ?? EndReason.Interrupted;
@@ -152,6 +154,7 @@ public static class RecordReader
             notice = $"기록 일부 누락: 관측 {summary.Observed}회차 중 원본 {valid}회차";
         if (missing.Length > 0) notice = (notice is null ? "" : notice + " ") + $"찾지 못한 조각 {missing.Length}개";
         if (badHeaders > 0) notice = (notice is null ? "" : notice + " ") + $"열지 못한 조각 {badHeaders}개";
+        if (summary?.EventsDropped is long ed && ed > 0) notice = (notice is null ? "" : notice + " ") + $"이벤트 유실 {ed}개";
         var status = damage.Total > 0 || missing.Length > 0 || damage.DamagedEvents > 0 ? RecordStatus.Damaged : RecordStatus.Ok;
         return new MeasurementRecord(status, null, header, rounds, gaps, events, summary, end, damage, missing, stats, notice);
     }
@@ -233,7 +236,7 @@ public static class RecordReader
             };
             return new RecordSummary(id, reason, DateTimeOffset.Parse((string)o["endedAt"]!, CultureInfo.InvariantCulture),
                 (long)o["observed"]!, (long)o["committed"]!, (long)o["pending"]!, (long)o["dropped"]!, (long)o["unprocessed"]!,
-                (long?)o["lastCommittedRound"], (bool)o["sealFailed"]!, (string?)o["error"], (long?)o["eventsDropped"]);
+                (long?)o["lastCommittedRound"], (bool)o["sealFailed"]!, (string?)o["error"], (long?)o["eventsDropped"], (long?)o["endMs"]);
         }
         catch (Exception ex) when (IsDataFailure(ex)) { return null; }
     }

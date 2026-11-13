@@ -37,6 +37,7 @@ public sealed partial class MeasurementSession
     private readonly Dictionary<string, long> overflowByKey = [];
     private readonly object linkGate = new();
     private long linkOverflow;
+    private readonly List<(long From, long To)> overflowSpans = [];   // 넘친 시각 범위 (linkGate 안)
     private volatile bool linkClosed;
     private LinkCapability directCapability = LinkCapability.Unsupported;
     private string? directCode = "not-configured";
@@ -80,6 +81,8 @@ public sealed partial class MeasurementSession
         lock (linkGate)
         {
             linkOverflow++;
+            if (overflowSpans.Count > 0 && item.Ms - overflowSpans[^1].To <= 1000) overflowSpans[^1] = (overflowSpans[^1].From, item.Ms);
+            else if (overflowSpans.Count < MaxUnobservedSpans) overflowSpans.Add((item.Ms, item.Ms));
             if (sample.FromPoll) overflowByKey[sample.Adapter.Key] = overflowByKey.GetValueOrDefault(sample.Adapter.Key) + 1;
         }
     }
@@ -100,6 +103,7 @@ public sealed partial class MeasurementSession
                 track = new AdapterTrack { Alias = "a" + (adapterTracks.Count + 1), Info = item.Sample.Adapter };
                 adapterTracks[item.Sample.Adapter.Key] = track;
             }
+            bool reindexed = track.Info.InterfaceIndex != item.Sample.Adapter.InterfaceIndex;
             track.Info = item.Sample.Adapter;   // 번호·유형이 바뀌었을 수 있다
             var state = item.Sample.State;
             bool determinate = state is LinkState.Up or LinkState.Down or LinkState.Removed;
@@ -111,7 +115,8 @@ public sealed partial class MeasurementSession
                 if (!determinate) { track.UnknownFrom ??= item.Ms; track.UnknownLast = item.Ms; }
                 else CloseUnknown(track);
             }
-            if (track.State == state) { track.Last = item.Ms; return; }
+            // 같은 상태가 이어지면 줄을 쓰지 않는다. 단 번호가 바뀌면 이력용으로 쓴다 (G4 1라운드 5)
+            if (track.State == state && !reindexed) { track.Last = item.Ms; return; }
         }
         var fields = AdapterFields(track);
         fields["collection"] = LinkEvidenceBuilder.Text(item.Sample.State);
@@ -186,10 +191,14 @@ public sealed partial class MeasurementSession
                 WriteEvent(RecordSchema.EventLine(Id, "link", null, at, endWall, fields));
             }
             long totalOverflow;
-            lock (linkGate) totalOverflow = linkOverflow;
+            (long From, long To)[] spans;
+            lock (linkGate) { totalOverflow = linkOverflow; spans = overflowSpans.ToArray(); }
             if (totalOverflow > 0)
-                WriteEvent(RecordSchema.EventLine(Id, "link", null, at, endWall,
-                    new JsonObject { ["source"] = "direct", ["collection"] = "overflow", ["count"] = totalOverflow }));
+                WriteEvent(RecordSchema.EventLine(Id, "link", null, at, endWall, new JsonObject
+                {
+                    ["source"] = "direct", ["collection"] = "overflow", ["count"] = totalOverflow,
+                    ["spans"] = new JsonArray(spans.Select(x => (JsonNode)new JsonArray(x.From, x.To)).ToArray()),
+                }));
         }
 
         if (options.LinkLog is { } logSource) ReadLinkLog(logSource, tracks, at, endWall);
@@ -240,7 +249,9 @@ public sealed partial class MeasurementSession
                 fields["link"] = "linked";
             }
             else fields["link"] = e.Match == LinkMatch.Linked ? "unlinked" : e.Match.ToString().ToLowerInvariant();
-            if (TimeMapping.ToElapsedMs(rounds, e.Wall) is long ms) fields["eventMs"] = ms;
+            // 측정 전후 이벤트는 참고(historical)로만, 환산하지 않는다 (G4 1라운드 3)
+            if (e.Wall < header.StartedAt || e.Wall > endWall) fields["link"] = "historical";
+            else if (TimeMapping.ToElapsedMs(rounds, e.Wall, at) is long ms) fields["eventMs"] = ms;
             WriteEvent(RecordSchema.EventLine(Id, "link", null, at, endWall, fields));
         }
         foreach (var t in tracks)

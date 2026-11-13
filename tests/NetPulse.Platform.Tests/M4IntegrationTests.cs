@@ -141,6 +141,49 @@ public sealed class M4IntegrationTests : IDisposable
         Assert.Null(LinkCatalog.ParseDriver("e2fexpress", 27, ["", 42]));      // 자료형 다름
     }
 
+    public static TheoryData<HttpRequestException, TargetOutcome> HttpCases => new()
+    {
+        { new HttpRequestException(HttpRequestError.SecureConnectionError, "x", new System.Security.Authentication.AuthenticationException()), TargetOutcome.Fail },
+        { new HttpRequestException(HttpRequestError.NameResolutionError, "x"), TargetOutcome.Fail },
+        { new HttpRequestException(HttpRequestError.ConnectionError, "x", new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.ConnectionRefused)), TargetOutcome.Fail },
+        { new HttpRequestException(HttpRequestError.ConnectionError, "x", new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.TimedOut)), TargetOutcome.Fail },
+        { new HttpRequestException(HttpRequestError.ConnectionError, "x", new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.AccessDenied)), TargetOutcome.Error },
+        { new HttpRequestException(HttpRequestError.ConnectionError, "x", new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.NoBufferSpaceAvailable)), TargetOutcome.Error },
+        { new HttpRequestException(HttpRequestError.Unknown, "x"), TargetOutcome.Error },
+        { new HttpRequestException(HttpRequestError.InvalidResponse, "x"), TargetOutcome.Fail },
+    };
+
+    [Theory]
+    [MemberData(nameof(HttpCases))]
+    public void HttpErrorsSeparateDefiniteFailuresFromProbeErrors(HttpRequestException ex, TargetOutcome expected)
+    {
+        // G4 1라운드 11: 검사 자체의 오류를 확정 실패로 바꾸지 않는다
+        Assert.Equal(expected, HttpOutcome.Map(ex).Outcome);
+    }
+
+    private sealed class SlowLog : ILinkLogSource
+    {
+        public LinkLogResult Read(DateTimeOffset fromUtc, DateTimeOffset toUtc, IReadOnlyList<AdapterInfo> adapters, TimeSpan timeout)
+        {
+            Thread.Sleep(TimeSpan.FromSeconds(6));
+            return new LinkLogResult(new Dictionary<string, (LinkCapability, string?)>(), [], 0, LinkCapability.Supported, null);
+        }
+    }
+
+    [Fact]
+    public async Task SlowLogDoesNotLoseCurrentLinkState()
+    {
+        // G4 1라운드 10: 로그가 늦어도 이미 읽은 지금 상태를 돌려준다 (링크 검사 제한 3초 안에)
+        using var probes = new DiagnosticProbes(new SlowLog());
+        var watch = Stopwatch.StartNew();
+        var facts = await probes.LinkAsync(TestContext.Current.CancellationToken);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), $"{watch.Elapsed.TotalSeconds:F1}초");
+        if (facts.Code == "no-route") { Out?.WriteLine("외부 경로 없음: 지금 상태 확인 건너뜀"); return; }
+        Assert.Equal("log-timeout", facts.Code);
+        Assert.Equal(LinkCapability.Unsupported, facts.Log);
+        Assert.NotEqual(LinkState.Unknown, facts.Now);
+    }
+
     [Fact]
     public void ThisPcLinkLogReadGivesDefinedState()
     {

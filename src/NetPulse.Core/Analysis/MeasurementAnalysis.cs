@@ -89,8 +89,9 @@ public static class MeasurementAnalysis
         return Analyze(record.Header, record.Rounds, record.Gaps, record.Events, record.Summary, provisional);
     }
 
+    /// <param name="elapsedMs">측정 중(잠정) 분석이면 지금까지의 경과 ms. 끝난 기록은 요약의 끝 시각을 쓴다</param>
     public static AnalysisResult Analyze(RecordHeader header, IReadOnlyList<RoundData> rounds, IReadOnlyList<GapSpan> gaps,
-        IReadOnlyList<JsonObject> events, RecordSummary? summary, bool provisional = false)
+        IReadOnlyList<JsonObject> events, RecordSummary? summary, bool provisional = false, long? elapsedMs = null)
     {
         var ordered = rounds.OrderBy(r => r.Round).ToArray();
         var links = LinkEvidenceBuilder.FromEvents(events);
@@ -114,7 +115,7 @@ public static class MeasurementAnalysis
                     parts.Length == 0 ? 0 : parts.Average(p => (double)p.MinDurationMs), parts.Count(p => p.MaxDurationMs is null));
             }).ToArray();
 
-        var coverage = CoverageOf(header, ordered, gaps, summary, judgments, ctx);
+        var coverage = CoverageOf(header, ordered, gaps, summary, judgments, ctx, elapsedMs);
         var grade = GradeOf(coverage, stats, episodes, ctx, links, header, summary, startedDisconnected);
         return new AnalysisResult(AnalyzerVersion, provisional, judgments, episodes, stats, latency, coverage, grade, links, noBaseline, startedDisconnected);
     }
@@ -192,7 +193,7 @@ public static class MeasurementAnalysis
             {
                 var lostTarget = judgments[first].FailedTargets.FirstOrDefault();
                 var idx = lostTarget is null ? null : ctx.LastOkInterface(lostTarget, rounds[first].Round);
-                var alias = idx is int i ? ctx.Links.AdapterFor(i) : null;
+                var alias = idx is int i ? ctx.Links.AdapterFor(i, rounds[first].AtMs) : null;
                 var kind = alias is not null && ctx.Links.Adapters.TryGetValue(alias, out var a) ? a.Kind : null;
                 return new Candidate(CandidateKind.PcLink, null, kind);
             }
@@ -200,12 +201,17 @@ public static class MeasurementAnalysis
             {
                 var locals = ctx.BaselineLocals.Select(t => t.Id).ToArray();
                 if (locals.Length == 0) return new Candidate(CandidateKind.None, ctx.Targets.Any(t => t.Role == TargetRole.Local) ? "no-local-baseline" : "no-local");
-                // 같은 인터페이스 경로인지 (첫 회차 기준)
+                // 하위 구간 전체에서 관련 대상 모두가 성공한 경로로 같은 인터페이스를 썼다는 근거가 있어야 구간을 좁힌다 (G4 1라운드 4)
                 var ext = ctx.BaselineExternals.Select(t => t.Id).ToArray();
-                var r0 = rounds[first].Round;
-                var extIf = ext.Select(id => ctx.LastOkInterface(id, r0)).Distinct().ToArray();
-                var locIf = locals.Select(id => ctx.LastOkInterface(id, r0)).Distinct().ToArray();
-                if (extIf.Length != 1 || locIf.Length != 1 || extIf[0] != locIf[0]) return new Candidate(CandidateKind.None, "different-interface");
+                int? shared = null;
+                for (int k = first; k <= last; k++)
+                    foreach (var id in ext.Concat(locals))
+                    {
+                        var route = ctx.RouteOf(id, rounds[k].Round);
+                        if (route is not { Ok: true, InterfaceIndex: int idx }) return new Candidate(CandidateKind.None, route is null ? "no-route" : "route-failed");
+                        if (shared is null) shared = idx;
+                        else if (shared != idx) return new Candidate(CandidateKind.None, "different-interface");
+                    }
                 bool allOk = true, allLost = true;
                 for (int k = first; k <= last; k++)
                     foreach (var id in locals)
@@ -227,20 +233,23 @@ public static class MeasurementAnalysis
     // ---------------- 관측 충족과 등급 (B5) ----------------
 
     private static Coverage CoverageOf(RecordHeader header, RoundData[] rounds, IReadOnlyList<GapSpan> gaps, RecordSummary? summary,
-        RoundJudgment[] judgments, JudgeContext ctx)
+        RoundJudgment[] judgments, JudgeContext ctx, long? elapsedMs)
     {
         long lastIndex = rounds.Length == 0 ? -1 : rounds[^1].Round;
         if (summary?.LastCommittedRound is long lc && lc > lastIndex) lastIndex = lc;
+        // 측정 끝 경과 시각까지 지나간 회차 (끝부분의 미처리·미저장·건너뜀도 분모에 남긴다, G4 1라운드 1)
+        long? endMs = elapsedMs ?? summary?.EndMs;
+        if (endMs is long em && em >= 0) lastIndex = Math.Max(lastIndex, em / Math.Max(1, header.IntervalMs));
         // 관측해야 했던 회차: 0 ~ 마지막 지난 회차, 절전 공백에 든 회차만 뺀다 (2-5)
         long suspendRounds = gaps.Where(g => g.Reason == GapReason.Suspend).Sum(g => Math.Max(0, (g.ToMs - g.FromMs) / Math.Max(1, header.IntervalMs)));
         long nonGap = rounds.Count(r => !r.Gap);
         long expected = Math.Max(nonGap, lastIndex + 1 - suspendRounds);
 
         var ext = ctx.BaselineExternals.Select(t => t.Id).ToArray();
-        long judgeable = ext.Length == 0 ? 0 : rounds.Count(r => !r.Gap && ext.All(id => r.Results.Any(x => x.TargetId == id && x.Outcome != ProbeOutcome.Error)));
-        var stats = StatsCalculator.Compute(rounds, ext, gaps);
-        var rates = stats.Targets.Where(t => t.LossRate is not null).Select(t => t.LossRate!.Value).ToArray();
-        double? extLoss = rates.Length == 0 ? null : rates.Average();
+        var judgeableRounds = ext.Length == 0 ? [] : rounds.Where(r => !r.Gap && ext.All(id => r.Results.Any(x => x.TargetId == id && x.Outcome != ProbeOutcome.Error))).ToArray();
+        long judgeable = judgeableRounds.Length;
+        // 등급용 외부 손실률도 판정 가능한 회차에서만 (G4 1라운드 6)
+        double? extLoss = judgeable == 0 ? null : ext.Average(id => judgeableRounds.Count(r => r.Results.Any(x => x.TargetId == id && x.Outcome == ProbeOutcome.Lost)) / (double)judgeable);
         long latencyHigh = judgments.Count(j => j.Verdict == Verdict.LatencyHigh);
         long targetFailure = judgments.Count(j => j.Verdict == Verdict.TargetFailure);
         long undecidable = judgments.Count(j => j.Verdict is Verdict.RouteHold or Verdict.Insufficient);

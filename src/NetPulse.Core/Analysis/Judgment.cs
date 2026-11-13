@@ -141,7 +141,7 @@ public static class RoundJudge
         {
             var route = ctx.RouteOf(t, r.Round);
             int? idx = route is { Ok: true } ? route.InterfaceIndex : ctx.LastOkInterface(t, r.Round);
-            if (idx is not int i || ctx.Links.AdapterFor(i) is not string alias) continue;
+            if (idx is not int i || ctx.Links.AdapterFor(i, r.AtMs) is not string alias) continue;
             foreach (var d in ctx.Links.Downs.Where(d => d.Adapter == alias))
             {
                 bool overlapConfirmed = end is not null && d.FromMs <= end && d.ToMs >= start;

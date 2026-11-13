@@ -18,7 +18,7 @@ public enum EndReason { Completed, Stopped, Error, Interrupted }
 public sealed record RecordSummary(
     string Id, EndReason EndReason, DateTimeOffset EndedAt,
     long Observed, long Committed, long Pending, long Dropped, long Unprocessed,
-    long? LastCommittedRound, bool SealFailed, string? Error, long? EventsDropped = null);
+    long? LastCommittedRound, bool SealFailed, string? Error, long? EventsDropped = null, long? EndMs = null);
 
 /// <summary>
 /// 기록 형식 버전 1의 직렬화 규칙 (M3 설계 6.2~6.3). 줄 단위 JSON. 모르는 필드는 무시하고, 알려진 필드의 모르는 값은 손상으로 본다.
@@ -85,7 +85,7 @@ public static class RecordSchema
         ["format"] = Format, ["version"] = Version, ["id"] = s.Id, ["endReason"] = s.EndReason.ToString().ToLowerInvariant(),
         ["endedAt"] = Iso(s.EndedAt), ["observed"] = s.Observed, ["committed"] = s.Committed, ["pending"] = s.Pending, ["dropped"] = s.Dropped,
         ["unprocessed"] = s.Unprocessed, ["lastCommittedRound"] = s.LastCommittedRound, ["sealFailed"] = s.SealFailed, ["error"] = s.Error,
-        ["eventsDropped"] = s.EventsDropped,
+        ["eventsDropped"] = s.EventsDropped, ["endMs"] = s.EndMs,
     }.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
 
     public static string Iso(DateTimeOffset t) => t.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);

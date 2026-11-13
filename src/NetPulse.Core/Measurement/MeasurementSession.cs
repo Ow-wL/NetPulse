@@ -609,7 +609,8 @@ public sealed partial class MeasurementSession : IAsyncDisposable
         RecordSummary summary;
         lock (sync)
             summary = new RecordSummary(Id, reason, endWall, observed.Count, committed, pending.Count, dropped, unprocessed, lastCommittedRound, false, error,
-                eventsDropped + pendingEvents.Count);   // 끝까지 못 쓴 이벤트도 유실
+                eventsDropped + pendingEvents.Count,   // 끝까지 못 쓴 이벤트도 유실
+                endMs);                                // 측정 끝 경과 ms (관측해야 했던 회차의 분모, G4 1라운드 1)
         try
         {
             // 게시 직전에 포기 여부를 확인하고, 아니면 게시 중으로 표시한다 (그 뒤로는 종료 쪽이 포기하지 않는다)

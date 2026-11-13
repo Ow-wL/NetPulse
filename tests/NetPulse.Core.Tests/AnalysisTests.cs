@@ -83,7 +83,7 @@ public sealed class AnalysisTests
     [Fact]
     public void ExternalOutageWithRouterUpPointsAfterRouter()
     {
-        var a = Analyze(Build(P("ooooo", "ooxxo", "ooxxo")));
+        var a = Analyze(Build(P("ooooo", "ooxxo", "ooxxo")), Routes(0).ToList());
         Assert.Equal(Verdict.ExternalOutage, V(a, 2));
         var ep = Assert.Single(a.Episodes);
         Assert.False(ep.Mixed);
@@ -94,9 +94,62 @@ public sealed class AnalysisTests
     [Fact]
     public void EverythingLostPointsToPcOrRouter()
     {
-        var a = Analyze(Build(P("ooxxo", "ooxxo", "ooxxo")));
+        var a = Analyze(Build(P("ooxxo", "ooxxo", "ooxxo")), Routes(0).ToList());
         Assert.Equal(Verdict.ExternalOutage, V(a, 2));
         Assert.Equal(CandidateKind.PcToRouterOrRouter, a.Episodes[0].Parts[0].Candidate.Kind);
+    }
+
+    [Fact]
+    public void CandidateNeedsRouteEvidenceForTheWholeSubRun()
+    {
+        // 경로 관측이 없으면 구간을 좁히지 않는다 (G4 1라운드 4)
+        var none = Analyze(Build(P("ooooo", "ooxxo", "ooxxo")));
+        Assert.Equal((CandidateKind.None, "no-route"), (none.Episodes[0].Parts[0].Candidate.Kind, none.Episodes[0].Parts[0].Candidate.Reason));
+        // 하위 구간 중간에 공유기 경로만 다른 인터페이스로 바뀜
+        var changed = Routes(0).Concat([Route(3, "router", true, 9, "wired")]).ToList();
+        var a = Analyze(Build(P("ooooo", "ooxxo", "ooxxo")), changed);
+        Assert.Equal("different-interface", a.Episodes[0].Parts[0].Candidate.Reason);
+    }
+
+    [Fact]
+    public void LinkDownFoundThroughInterfaceIndexHistory()
+    {
+        // 같은 어댑터 번호가 7 → 9로 바뀜 (재활성화). 번호 7을 쓰던 회차의 다운이 사라지면 안 된다 (G4 1라운드 5)
+        var events = Routes(0).Concat(new[] { "router", "a", "b" }.Select(t => Route(2, t, false)))
+            .Concat([LinkEvent("up", 0), LinkEvent("down", 1900),
+                LinkEvent("up", 4100, extra: new JsonObject { ["interfaceIndex"] = 9 })]).ToList();
+        var summary = LinkSummary();
+        summary["interfaceIndex"] = 9;
+        events.Add(summary);
+        var a = Analyze(Build(P("ooxxo", "ooxxo", "ooxxo")), events);
+        Assert.Equal(Verdict.LinkDown, V(a, 2));
+    }
+
+    [Fact]
+    public void ExternalLossRateUsesJudgeableRoundsOnly()
+    {
+        // 외부 셋 중 20회차가 손실/오류/성공, 나머지 80회차 모두 성공 → 판정 가능한 80회차의 외부 손실률 0 (G4 1라운드 6)
+        var c = new Target("c", "C", IPAddress.Parse("203.0.113.9"), TargetRole.External, "C사", ProbeMethod.Icmp);
+        var rounds = Build(new Dictionary<string, string>
+        {
+            ["router"] = Ok(100), ["a"] = new string('x', 20) + Ok(80), ["b"] = new string('e', 20) + Ok(80), ["c"] = Ok(100),
+        });
+        var r = Analyze(rounds, header: Header([Router, ExtA, ExtB, c]));
+        Assert.Equal(0, r.Coverage.ExternalLossRate);
+        Assert.NotEqual(Grade.VeryBad, r.Grade.Grade);
+    }
+
+    [Fact]
+    public void UnobservedTailCountsAgainstCoverage()
+    {
+        // 600회차가 지났는데 앞 60회차만 저장 (끝부분 미처리) → 관측 부족 (G4 1라운드 1)
+        var summary = new RecordSummary("m", EndReason.Stopped, W0, 60, 60, 0, 0, 540, 59, false, null, 0, 599_500);
+        var a = Analyze(Build(P(Ok(60), Ok(60), Ok(60))), summary: summary);
+        Assert.Equal(600, a.Coverage.ExpectedRounds);
+        Assert.Equal((Grade.Insufficient, "low-coverage"), (a.Grade.Grade, a.Grade.Reason));
+        // 측정 중(잠정) 분석은 지금까지의 경과 시각으로
+        var live = MeasurementAnalysis.Analyze(Header(), Build(P(Ok(60), Ok(60), Ok(60))), [], [], null, provisional: true, elapsedMs: 599_500);
+        Assert.Equal("low-coverage", live.Grade.Reason);
     }
 
     [Fact]

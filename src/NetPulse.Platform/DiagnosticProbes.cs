@@ -86,8 +86,7 @@ public sealed class DiagnosticProbes : IDiagnosticProbes, IDisposable
             int status = (int)response.StatusCode;
             return status is >= 200 and < 500 && status != 407 ? new(TargetOutcome.Ok) : new(TargetOutcome.Fail, "http-" + status);
         }
-        catch (HttpRequestException ex) when (ex.InnerException is AuthenticationException) { return new(TargetOutcome.Fail, "tls"); }
-        catch (HttpRequestException ex) { return new(TargetOutcome.Fail, "http-" + (ex.HttpRequestError.ToString())); }
+        catch (HttpRequestException ex) { return HttpOutcome.Map(ex); }
     }
 
     public async Task<PortalResult> PortalAsync(Uri uri, string expected, CancellationToken ct)
@@ -108,7 +107,11 @@ public sealed class DiagnosticProbes : IDiagnosticProbes, IDisposable
             bool match = System.Text.Encoding.UTF8.GetString(buffer, 0, read).StartsWith(expected, StringComparison.Ordinal);
             return new PortalResult(TargetOutcome.Ok, status, match);
         }
-        catch (HttpRequestException ex) { return new PortalResult(TargetOutcome.Fail, null, false, "http-" + ex.HttpRequestError); }
+        catch (HttpRequestException ex)
+        {
+            var mapped = HttpOutcome.Map(ex);
+            return new PortalResult(mapped.Outcome, null, false, mapped.Code);
+        }
     }
 
     public Task<LinkFacts> LinkAsync(CancellationToken ct) => Task.Run(() =>
@@ -118,13 +121,54 @@ public sealed class DiagnosticProbes : IDiagnosticProbes, IDisposable
         var (row, code) = IfEntry.Read(route.InterfaceIndex);
         if (row is null) return new LinkFacts(IfEntry.IsGone(code) ? LinkState.Removed : LinkState.Unknown, LinkCapability.Unsupported, false, IfEntry.CodeOf(code));
         var info = IfEntry.InfoOf(row);
+        var nowState = IfEntry.StateOf(row);   // 지금 상태를 먼저 확보한다: 로그가 늦어도 잃지 않는다 (G4 1라운드 10)
         var now = DateTimeOffset.UtcNow;
-        var result = log.Read(now - TimeSpan.FromMinutes(30), now, [info], TimeSpan.FromSeconds(2.5));
+        var reading = Task.Run(() => log.Read(now - TimeSpan.FromMinutes(30), now, [info], LogBudget), ct);
+        if (!reading.Wait(LogBudget + TimeSpan.FromMilliseconds(200), ct))
+        {
+            _ = reading.ContinueWith(t => _ = t.Exception, TaskScheduler.Default);
+            return new LinkFacts(nowState, LinkCapability.Unsupported, false, "log-timeout");
+        }
+        var result = reading.Result;
         var cap = result.Overall != LinkCapability.Supported ? result.Overall
             : result.PerAdapter.TryGetValue(info.Key, out var c) ? c.Capability : LinkCapability.Unsupported;
         bool recentDown = result.Events.Any(e => e.Match == LinkMatch.Linked && e.AdapterKey == info.Key && e.State == LinkState.Down);
-        return new LinkFacts(IfEntry.StateOf(row), cap, recentDown, result.OverallCode);
+        return new LinkFacts(nowState, cap, recentDown, result.OverallCode);
     }, ct);
 
+    /// <summary>링크 검사의 로그 조회 예산 (검사 제한 3초 안에서 지금 상태를 돌려줄 여유를 남긴다).</summary>
+    public static readonly TimeSpan LogBudget = TimeSpan.FromSeconds(2);
+
     public void Dispose() => http.Dispose();
+}
+
+/// <summary>
+/// HTTP 예외 → 대상 결과 (G4 1라운드 11). 확정 실패(인증서·이름 없음·연결 거부·시간 초과·도달 불가)와
+/// 검사 오류(그 밖의 소켓 오류·알 수 없는 예외)를 구분한다.
+/// </summary>
+public static class HttpOutcome
+{
+    public static ProbeOutcomeResult Map(HttpRequestException ex)
+    {
+        if (ex.InnerException is AuthenticationException || ex.HttpRequestError == HttpRequestError.SecureConnectionError)
+            return new(TargetOutcome.Fail, "tls");
+        if (ex.HttpRequestError == HttpRequestError.NameResolutionError) return new(TargetOutcome.Fail, "dns");
+        if (FindSocket(ex) is { } se)
+            return se.SocketErrorCode is SocketError.ConnectionRefused or SocketError.TimedOut or SocketError.HostUnreachable
+                or SocketError.NetworkUnreachable or SocketError.ConnectionReset or SocketError.HostNotFound
+                ? new(TargetOutcome.Fail, "socket-" + se.SocketErrorCode)
+                : new(TargetOutcome.Error, "socket-" + se.SocketErrorCode);
+        return ex.HttpRequestError switch
+        {
+            HttpRequestError.InvalidResponse or HttpRequestError.ResponseEnded => new(TargetOutcome.Fail, "http-" + ex.HttpRequestError),
+            _ => new(TargetOutcome.Error, "http-" + ex.HttpRequestError),
+        };
+    }
+
+    private static SocketException? FindSocket(Exception? ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+            if (e is SocketException se) return se;
+        return null;
+    }
 }

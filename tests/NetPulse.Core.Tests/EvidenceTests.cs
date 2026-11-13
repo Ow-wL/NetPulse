@@ -31,9 +31,10 @@ public sealed class EvidenceTests
     {
         var rounds = new[] { R(0, 0, W0), R(1, 1000, W0.AddSeconds(1)), R(2, 2000, W0.AddSeconds(2)) };
         Assert.Equal(1500, TimeMapping.ToElapsedMs(rounds, W0.AddMilliseconds(1500)));
-        Assert.Equal(0L, TimeMapping.ToElapsedMs(rounds, W0.AddSeconds(-2)));   // 시작 3초 안은 끝 대응
-        Assert.Null(TimeMapping.ToElapsedMs(rounds, W0.AddSeconds(-10)));   // 측정 밖
-        Assert.Equal(4000, TimeMapping.ToElapsedMs(rounds, W0.AddSeconds(4)));
+        Assert.Null(TimeMapping.ToElapsedMs(rounds, W0.AddSeconds(-2)));          // 측정 시작 전: 환산하지 않음 (G4 1라운드 3)
+        Assert.Null(TimeMapping.ToElapsedMs(rounds, W0.AddSeconds(4)));           // 끝을 모르면 마지막 회차 뒤는 밖
+        Assert.Equal(4000, TimeMapping.ToElapsedMs(rounds, W0.AddSeconds(4), endMs: 5000));
+        Assert.Null(TimeMapping.ToElapsedMs(rounds, W0.AddSeconds(6), endMs: 5000));
     }
 
     [Fact]
@@ -45,10 +46,14 @@ public sealed class EvidenceTests
         Assert.Equal(500, TimeMapping.ToElapsedMs(suspend, W0.AddMilliseconds(500)));
         Assert.Equal(2500, TimeMapping.ToElapsedMs(suspend, W0.AddHours(1).AddMilliseconds(500)));
 
-        // 시계를 10초 되돌림: 회차 1(벽 1s)과 2(벽 -8s) 사이 불확실, 겹치는 벽시계는 두 대응이 가능해 환산하지 않음 (2-3)
-        var back = new[] { R(0, 0, W0), R(1, 1000, W0.AddSeconds(1)), R(2, 2000, W0.AddSeconds(-8)), R(3, 3000, W0.AddSeconds(-7)) };
-        Assert.Null(TimeMapping.ToElapsedMs(back, W0.AddMilliseconds(600)));
-        Assert.Null(TimeMapping.ToElapsedMs(back, W0.AddSeconds(-7.5)));   // 변경 사이 불확실 구간
+        // 시계를 10초 되돌림 (G4 1라운드 2의 반례): (0,0),(1,1),(2,-8),…,(12,2) [경과초, 벽초]
+        var back = Enumerable.Range(0, 13).Select(k => R(k, k * 1000L, W0.AddSeconds(k <= 1 ? k : k - 10))).ToArray();
+        Assert.Null(TimeMapping.ToElapsedMs(back, W0.AddMilliseconds(1500)));   // 변경 전 1.5초 또는 변경 사이 → 불확실
+        Assert.Null(TimeMapping.ToElapsedMs(back, W0.AddMilliseconds(500)));    // 변경 전 0.5초 또는 변경 뒤 10.5초 → 두 대응
+        Assert.Equal(2500, TimeMapping.ToElapsedMs(back, W0.AddSeconds(-7.5)));  // 변경 뒤에만 가능
+        // 측정이 짧아 변경 뒤 대응이 측정 밖이면 하나로 정해진다
+        var shortBack = new[] { R(0, 0, W0), R(1, 1000, W0.AddSeconds(1)), R(2, 2000, W0.AddSeconds(-8)), R(3, 3000, W0.AddSeconds(-7)) };
+        Assert.Equal(600, TimeMapping.ToElapsedMs(shortBack, W0.AddMilliseconds(600)));
     }
 
     private static JsonObject Link(string collection, string? adapter = "a1", long? eventMs = null, JsonObject? extra = null, string source = "direct")
