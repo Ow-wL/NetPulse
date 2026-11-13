@@ -72,7 +72,8 @@ function Test-Lines([string[]] $lines, [string] $where) {
 }
 
 function Get-AddedLines([string[]] $diff) {
-    $diff | Where-Object { $_.StartsWith('+') -and -not $_.StartsWith('+++') } | ForEach-Object { $_.Substring(1) }
+    if (-not $diff) { return @() }   # 변경이 없으면 빈 목록
+    $diff | Where-Object { $_ } | Where-Object { $_.StartsWith('+') -and -not $_.StartsWith('+++') } | ForEach-Object { $_.Substring(1) }
 }
 
 $total = 0
