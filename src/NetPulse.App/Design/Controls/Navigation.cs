@@ -76,7 +76,14 @@ public sealed class NavRail : GroupPanel
         button.Checked += (_, _) => { Refresh(); Current = id; Selected?.Invoke(id); };
         button.Unchecked += (_, _) => Refresh();
         button.RegisterPropertyChangedCallback(ButtonBase.IsPointerOverProperty, (_, _) => Refresh());
-        // 화살표로 초점이 옮겨 가면 바로 고르지 않는다 (Space/Enter로 고름). 탭으로 들어올 때는 선택된 항목에 초점.
+        // 위아래 화살표로 초점만 옮긴다 (Space/Enter로 고름). 자동 XY 이동은 이 템플릿에서 움직이지 않아 직접 처리한다 (키 시험에서 발견).
+        button.KeyDown += (_, e) =>
+        {
+            if (e.Key is not (Windows.System.VirtualKey.Down or Windows.System.VirtualKey.Up)) return;
+            int i = items.Children.IndexOf(button) + (e.Key == Windows.System.VirtualKey.Down ? 1 : -1);
+            if (i >= 0 && i < items.Children.Count && items.Children[i] is Control next) next.Focus(FocusState.Keyboard);
+            e.Handled = true;
+        };
         byId[id] = button;
         items.Children.Add(button);
         Refresh();
@@ -176,6 +183,13 @@ public sealed class SegmentedChoice : GroupPanel
                 t.Foreground = on ? ui.Brushes.AccentInk : ui.Brushes.Muted;
             }
             b.Checked += (_, _) => { Refresh(); Changed?.Invoke(value); };
+            b.KeyDown += (_, e) =>
+            {
+                if (e.Key is not (Windows.System.VirtualKey.Right or Windows.System.VirtualKey.Left)) return;
+                int i = row.Children.IndexOf(b) + (e.Key == Windows.System.VirtualKey.Right ? 1 : -1);
+                if (i >= 0 && i < row.Children.Count && row.Children[i] is Control next) next.Focus(FocusState.Keyboard);
+                e.Handled = true;
+            };
             b.Unchecked += (_, _) => Refresh();
             b.IsChecked = value == initial;
             Refresh();

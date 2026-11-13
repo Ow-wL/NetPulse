@@ -20,6 +20,7 @@ public sealed class Ui
         Motion = new Motion(window.Compositor) { Frozen = options.FreezeMotion };
         Glass = new Glass(Brushes, Motion);
         Lights = new Lights(Motion);
+        Lights.Prepare();
         Effects = new Effects(window.DispatcherQueue, settings, options, log);
         Theme = new Theme(this) { HoldAt = options.RevealHold };
         Effects.Changed += (previous, mode) => Theme.OnModeChanged(previous, mode);

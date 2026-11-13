@@ -26,6 +26,9 @@ public sealed class Lights
     private readonly List<Light> lights = [];
     private readonly List<Ribbon> ribbons = [];
     private readonly List<MotionHandle> drift = [];
+    // 테마·상태별 브러시를 미리 만들어 두고 바꿔 끼우기만 한다 (전환 순간에 새로 만들면 프레임이 늦어졌다, 벤치 관측)
+    private readonly Dictionary<(ThemeKind, bool, int), Brush> lightBrushes = [];
+    private readonly Dictionary<(ThemeKind, int), Brush> ribbonBrushes = [];
     private bool problem, auroraOn, moving;
     private ThemeKind theme = ThemeKind.Dark;
 
@@ -71,11 +74,10 @@ public sealed class Lights
         // 테마가 바뀌면 브러시를 새로 만들어 끼운다 (요소는 그대로, 8+3개라 비용이 작다).
         foreach (var l in lights)
         {
-            l.Normal.Fill = Radial(Materials.Lights(theme, false)[l.Index].Color);
-            l.Problem.Fill = Radial(Materials.Lights(theme, true)[l.Index].Color);
+            l.Normal.Fill = LightBrush(theme, false, l.Index);
+            l.Problem.Fill = LightBrush(theme, true, l.Index);
         }
-        var colors = Materials.Aurora(theme);
-        foreach (var r in ribbons) r.Shape.Fill = RibbonBrush(colors[r.Index].Color);
+        foreach (var r in ribbons) r.Shape.Fill = AuroraBrush(theme, r.Index);
         SetState(problem, animate: false);
         SetAurora(mode.AuroraVisible, animate: false);
         if (mode.LightsMoving != moving) { moving = mode.LightsMoving; RestartDrift(); }
@@ -112,6 +114,30 @@ public sealed class Lights
     }
 
     private static (Ellipse, GradientStop[]) Blob() => (new Ellipse(), []);
+
+    private Brush LightBrush(ThemeKind t, bool bad, int index)
+    {
+        if (!lightBrushes.TryGetValue((t, bad, index), out var b))
+            lightBrushes[(t, bad, index)] = b = Radial(Materials.Lights(t, bad)[index].Color);
+        return b;
+    }
+
+    private Brush AuroraBrush(ThemeKind t, int index)
+    {
+        if (!ribbonBrushes.TryGetValue((t, index), out var b))
+            ribbonBrushes[(t, index)] = b = RibbonBrush(Materials.Aurora(t)[index].Color);
+        return b;
+    }
+
+    /// <summary>두 테마의 브러시를 미리 만든다 (첫 전환에서도 새로 만들지 않게).</summary>
+    public void Prepare()
+    {
+        foreach (var t in new[] { ThemeKind.Dark, ThemeKind.Light })
+        {
+            foreach (var l in lights) { LightBrush(t, false, l.Index); LightBrush(t, true, l.Index); }
+            foreach (var r in ribbons) AuroraBrush(t, r.Index);
+        }
+    }
 
     private static RadialGradientBrush Radial(NetPulse.Design.Rgba color)
     {
