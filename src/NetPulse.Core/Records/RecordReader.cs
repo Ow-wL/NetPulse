@@ -29,7 +29,13 @@ public sealed record MeasurementRecord(
     DamageCounts Damage,
     IReadOnlyList<int> MissingSegments,
     MeasurementStats? Stats,
-    string? MissingNotice);
+    string? MissingNotice,
+    IReadOnlyList<JsonObject>? Notes = null,
+    int DamagedNotes = 0)
+{
+    /// <summary>끝난 뒤 덧붙인 노트 (M5 설계 3.1, <see cref="RecordNotes"/>). 없으면 빈 목록.</summary>
+    public IReadOnlyList<JsonObject> NoteLines => Notes ?? [];
+}
 
 /// <summary>
 /// 기록 읽기 (M3 설계 6.7). 통계는 언제나 원본 회차로 다시 계산한다. 요약은 종료 사유와 관측 수만 쓴다.
@@ -79,6 +85,8 @@ public static class RecordReader
         var seen = new HashSet<long>();
         long lastRound = -1;
         var events = new List<JsonObject>();
+        var notes = new List<JsonObject>();
+        int badNotes = 0;
         RecordSummary? summary = null;
 
         foreach (var (_, folder) in ordered)
@@ -128,6 +136,20 @@ public static class RecordReader
                     else badEvents++;
                 }
             }
+            // 끝난 뒤 노트 (없어도 된다). 노트 손상은 기록 손상과 따로 센다 (기록 본문은 그대로이므로)
+            var notePath = Path.Combine(folder, RecordNotes.FileName);
+            try
+            {
+                if (File.Exists(notePath))
+                    foreach (var raw in ReadShared(notePath).Split('\n'))
+                    {
+                        var line = raw.TrimEnd('\r');
+                        if (line.Trim().Length == 0) continue;
+                        if (ParseEvent(line, header.Id) is { } o) notes.Add(o);
+                        else badNotes++;
+                    }
+            }
+            catch (Exception ex) when (IsAccessFailure(ex)) { badNotes++; }
             var sum = Path.Combine(folder, "summary.json");
             try
             {
@@ -156,7 +178,7 @@ public static class RecordReader
         if (badHeaders > 0) notice = (notice is null ? "" : notice + " ") + $"열지 못한 조각 {badHeaders}개";
         if (summary?.EventsDropped is long ed && ed > 0) notice = (notice is null ? "" : notice + " ") + $"이벤트 유실 {ed}개";
         var status = damage.Total > 0 || missing.Length > 0 || damage.DamagedEvents > 0 ? RecordStatus.Damaged : RecordStatus.Ok;
-        return new MeasurementRecord(status, null, header, rounds, gaps, events, summary, end, damage, missing, stats, notice);
+        return new MeasurementRecord(status, null, header, rounds, gaps, events, summary, end, damage, missing, stats, notice, notes, badNotes);
     }
 
     /// <summary>
@@ -203,7 +225,7 @@ public static class RecordReader
     }
 
     /// <summary>쓰는 중인 파일도 읽는다 (측정 중 보기, 마감 실패로 처리 작업이 아직 쥔 파일).</summary>
-    private static string ReadShared(string path)
+    internal static string ReadShared(string path)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
@@ -223,7 +245,7 @@ public static class RecordReader
         }
     }
 
-    private static RecordSummary? ParseSummary(string json, string id)
+    internal static RecordSummary? ParseSummary(string json, string id)
     {
         try
         {

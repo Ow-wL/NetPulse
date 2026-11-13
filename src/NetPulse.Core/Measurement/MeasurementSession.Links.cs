@@ -114,6 +114,12 @@ public sealed partial class MeasurementSession
     /// <summary>시험 전용: 링크 수집이 닫혔는지.</summary>
     internal bool LinkClosed => linkClosed;
 
+    /// <summary>시험 전용: 큐에 있는 링크 표본 수.</summary>
+    internal int LinkQueueCount => linkQueue.Reader.Count;
+
+    /// <summary>시험 전용: 링크 표본 마감 시각을 바꾼다 (받을 때·꺼낼 때 검사를 따로 시험, M4 이월 1).</summary>
+    internal void TestSetLinkCutoff(long ms) => Volatile.Write(ref linkCutoffMs, ms);
+
     /// <summary>큐에 쌓인 링크 표본을 처리한다 (처리 작업, 또는 처리 작업이 멈춘 뒤 끝에서).</summary>
     private void DrainLinks()
     {
@@ -158,6 +164,7 @@ public sealed partial class MeasurementSession
         fields["eventMs"] = item.Ms;
         fields["eventWall"] = RecordSchema.Iso(item.Wall);
         if (item.Sample.Code is not null) fields["code"] = item.Sample.Code;
+        string eventId;
         lock (linkGate)
         {
             if (track.State is { } prev)
@@ -168,8 +175,11 @@ public sealed partial class MeasurementSession
             }
             track.State = item.Sample.State;
             track.First = track.Last = item.Ms;
+            // 트랙 상태와 이벤트 등록을 같은 잠금 안에서: 실시간 사본(M5 설계 3.2)이 둘 중 하나만 보지 않게
+            eventId = RegisterEvent(RecordSchema.EventLine(Id, "link", null, item.Ms, item.Wall, fields), null);
         }
-        WriteEvent(RecordSchema.EventLine(Id, "link", null, item.Ms, item.Wall, fields));
+        RetryEvents();
+        PublishEvent(eventId);
     }
 
     private static void CloseUnknown(AdapterTrack t)
@@ -196,44 +206,18 @@ public sealed partial class MeasurementSession
 
         if (options.Links is not null && directCapability == LinkCapability.Supported)
         {
-            if (tracks.Length == 0)
-                WriteEvent(RecordSchema.EventLine(Id, "link", null, at, endWall,
-                    new JsonObject { ["source"] = "direct", ["collection"] = "unsupported", ["code"] = "no-interface" }));
-            foreach (var t in tracks)
+            // 요약 줄은 잠정 분석이 쓰는 것과 같은 함수로 만든다 (DirectSummary, M5 설계 3.2).
+            // 등록과 "요약을 썼음" 표시를 한 잠금 안에서: 실시간 사본이 실제 요약과 잠정 요약을 함께 보지 않게
+            var ids = new List<string>();
+            lock (linkGate)
             {
-                JsonObject fields;
-                lock (linkGate)
-                {
-                    CloseUnknown(t);
-                    long missed = overflowByKey.GetValueOrDefault(t.Info.Key);
-                    long watched = t.Watched + missed;
-                    fields = AdapterFields(t);
-                    fields["collection"] = "summary";
-                    fields["capability"] = "supported";
-                    fields["watchedRounds"] = watched;
-                    fields["observedRounds"] = t.Observed;
-                    fields["coverage"] = watched == 0 ? 0.0 : Math.Round((double)t.Observed / watched, 4);
-                    fields["unobserved"] = new JsonArray(t.Unobserved.Select(u => (JsonNode)new JsonArray(u.From, u.To)).ToArray());
-                    if (t.UnobservedOverflow > 0) fields["unobservedMore"] = t.UnobservedOverflow;
-                    if (missed > 0) fields["overflow"] = missed;
-                    if (t.State is { } last)
-                    {
-                        fields["lastState"] = LinkEvidenceBuilder.Text(last);
-                        fields["lastFirstMs"] = t.First;
-                        fields["lastLastMs"] = t.Last;
-                    }
-                }
-                WriteEvent(RecordSchema.EventLine(Id, "link", null, at, endWall, fields));
+                foreach (var t in tracks) CloseUnknown(t);
+                var lines = DirectSummary.Lines(tracks.Select(SnapshotTrack).ToArray(), linkOverflow, overflowSpans.ToArray());
+                foreach (var fields in lines) ids.Add(RegisterEvent(RecordSchema.EventLine(Id, "link", null, at, endWall, fields), null));
+                linkSummaryWritten = true;
             }
-            long totalOverflow;
-            (long From, long To)[] spans;
-            lock (linkGate) { totalOverflow = linkOverflow; spans = overflowSpans.ToArray(); }
-            if (totalOverflow > 0)
-                WriteEvent(RecordSchema.EventLine(Id, "link", null, at, endWall, new JsonObject
-                {
-                    ["source"] = "direct", ["collection"] = "overflow", ["count"] = totalOverflow,
-                    ["spans"] = new JsonArray(spans.Select(x => (JsonNode)new JsonArray(x.From, x.To)).ToArray()),
-                }));
+            RetryEvents();
+            foreach (var id in ids) PublishEvent(id);
         }
 
         if (options.LinkLog is { } logSource) ReadLinkLog(logSource, tracks, at, endWall);
