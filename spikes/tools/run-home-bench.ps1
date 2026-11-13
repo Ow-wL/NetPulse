@@ -1,6 +1,6 @@
 ﻿<#
   흑요석 홈 재현(C --home)의 성능·자원·측정 영향·전환 중 자동화 격리를 잰다.
-  - 벤치 실행: 정지 장면 10초 → 오로라 켜고 끄기 6회 → 원형 전환 10회 → 전환 뒤 정지 장면 10초. 측정 루프(1초 루프백 Ping)를 함께 돌린다.
+  - 벤치 실행: 정지 장면 10초 → 오로라 켜고 끄기 6회 → 원형 전환 20회 → 전환 뒤 정지 장면 10초. 측정 루프(1초 루프백 Ping)를 함께 돌린다.
   - 자원: 전환 전 정지 장면과 전환 뒤 정지 장면에서 각각 10초 표본 (누적 여부 확인).
   - 자동화 격리: 비교 막대로 전환을 일으키고 전환 도중 UI Automation에서 같은 AutomationId가 몇 개 보이는지 센다.
 #>
@@ -16,7 +16,7 @@ $summary = [ordered]@{ gitHead = (git -C $here rev-parse --short HEAD); worktree
 
 # ---- 벤치 ----
 if (Test-Path $logFile) { Remove-Item $logFile }
-$p = Start-Process $Exe -ArgumentList '--home', '--bench', '--aurora', 'on', '--chrome', '0', '--run-seconds', '46' -PassThru
+$p = Start-Process $Exe -ArgumentList '--home', '--bench', '--aurora', 'on', '--chrome', '0', '--run-seconds', '56' -PassThru
 Start-Sleep -Seconds 5
 $summary.resourcesBefore = & "$here\measure-process.ps1" -ProcessId $p.Id -Seconds 10 | Select-Object * -ExcludeProperty sampleData
 $deadline = (Get-Date).AddSeconds(30)
@@ -30,7 +30,7 @@ Copy-Item $logFile (Join-Path $OutDir 'home-bench.jsonl') -Force
 $log = Get-Content $logFile -Encoding UTF8 | ForEach-Object { $_ | ConvertFrom-Json }
 $summary.windowsSettings = ($log | Where-Object kind -eq 'windowsSettings' | Select-Object values, highContrast, reduceMotion, reduceTransparency)
 $summary.frames = @($log | Where-Object kind -eq 'frames' | ForEach-Object { [ordered]@{ label = $_.label; avgFps = $_.avgFps; p95Ms = $_.p95Ms; maxMs = $_.maxMs; count = $_.count } })
-$summary.scenes = @($log | Where-Object kind -eq 'mark' | Where-Object { $_.label -ne 'bench-done' } | ForEach-Object { [ordered]@{ label = $_.label; scenes = $_.scenes; plots = $_.plots } })
+$summary.scenes = @($log | Where-Object kind -eq 'mark' | Where-Object { $_.label -ne 'bench-done' } | ForEach-Object { [ordered]@{ label = $_.label; scenes = $_.scenes; plots = $_.plots; storyboardScenes = $_.storyboardScenes; managedMB = $_.managedMB } })
 $summary.switches = @($log | Where-Object kind -eq 'switch' | ForEach-Object { $_.ms })
 $summary.switchStartMs = @($log | Where-Object kind -eq 'switchStart' | ForEach-Object { $_.msToAnimation })
 $rounds = @($log | Where-Object kind -eq 'round')

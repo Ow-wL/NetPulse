@@ -97,6 +97,13 @@ namespace NetPulseSpike
         private sealed class PlotView { public Grid Scene, Host; public Canvas Fixed, Moving; }
         private readonly List<PlotView> plots = new List<PlotView>();
         private Grid building;   // 지금 만드는 장면
+        // 장면마다 시작한 반복 애니메이션. 장면을 뗄 때 멈춘다 (멈추지 않으면 떼어 낸 장면이 메모리에 남는다).
+        private readonly Dictionary<Grid, List<Storyboard>> sceneStoryboards = new Dictionary<Grid, List<Storyboard>>();
+        private Storyboard Track(Storyboard sb)
+        {
+            if (building != null) { if (!sceneStoryboards.TryGetValue(building, out var list)) sceneStoryboards[building] = list = new List<Storyboard>(); list.Add(sb); }
+            return sb;
+        }
         private readonly Dictionary<string, Button> switchButtons = new Dictionary<string, Button>();
         private readonly MeasureLoop measure = new MeasureLoop();   // 측정 부하를 함께 돌려 화면이 측정에 주는 영향을 본다
         private readonly System.Threading.CancellationTokenSource stop = new System.Threading.CancellationTokenSource();
@@ -241,6 +248,7 @@ namespace NetPulseSpike
         {
             windowRoot.Children.Remove(scene);
             plots.RemoveAll(v => v.Scene == scene);
+            if (sceneStoryboards.TryGetValue(scene, out var list)) { foreach (var sb in list) sb.Stop(); sceneStoryboards.Remove(scene); }
         }
 
         // 전환 중 이전 장면을 입력과 접근성 트리에서 뺀다. 화면에는 남지만 클릭·초점·화면 읽기 대상이 아니다.
@@ -343,7 +351,7 @@ namespace NetPulseSpike
                 var an = new DoubleAnimation { To = to, Duration = TimeSpan.FromSeconds(seconds), EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut } };
                 Storyboard.SetTarget(an, tr); Storyboard.SetTargetProperty(an, prop); sb.Children.Add(an);
             }
-            sb.Begin();
+            Track(sb).Begin();
         }
 
         private FrameworkElement BuildRail()
@@ -564,7 +572,7 @@ namespace NetPulseSpike
                 }
                 var op = new DoubleAnimation { From = 1, To = 0, Duration = TimeSpan.FromSeconds(2.6), EasingFunction = new ExponentialEase { EasingMode = EasingMode.EaseOut, Exponent = 6 } };
                 Storyboard.SetTarget(op, halo); Storyboard.SetTargetProperty(op, "Opacity"); sb.Children.Add(op);
-                sb.Begin();
+                Track(sb).Begin();
             }
             var core = new Ellipse { Width = 52, Height = 52, Fill = B(Color.FromArgb(230, t.Tint.R, t.Tint.G, t.Tint.B)), Stroke = B(t.Edge), StrokeThickness = 1.5 };
             Canvas.SetLeft(core, x - 26); Canvas.SetTop(core, 66); c.Children.Add(core);
@@ -851,13 +859,13 @@ namespace NetPulseSpike
             await Task.Delay(4000);
             await Record("steady", () => Task.Delay(10000));
             await Record("aurora-toggle", async () => { for (int i = 0; i < 6; i++) { ToggleAurora(); await Task.Delay(1100); } });
-            log.Write("mark", "label", "before-switches", "scenes", windowRoot.Children.Count, "plots", plots.Count);
+            log.Write("mark", "label", "before-switches", "scenes", windowRoot.Children.Count, "plots", plots.Count, "storyboardScenes", sceneStoryboards.Count, "managedMB", Math.Round(GC.GetTotalMemory(true) / 1048576.0, 1));
             await Record("theme-switch", async () =>
             {
                 var origin = new Point(windowRoot.ActualWidth / 2, windowRoot.ActualHeight - 40);
-                for (int i = 0; i < 10; i++) { await SwitchAsync(origin, () => t = t.Dark ? LightTokens : DarkTokens); await Task.Delay(400); }
+                for (int i = 0; i < 20; i++) { await SwitchAsync(origin, () => t = t.Dark ? LightTokens : DarkTokens); await Task.Delay(400); }
             });
-            log.Write("mark", "label", "after-switches", "scenes", windowRoot.Children.Count, "plots", plots.Count);
+            log.Write("mark", "label", "after-switches", "scenes", windowRoot.Children.Count, "plots", plots.Count, "storyboardScenes", sceneStoryboards.Count, "managedMB", Math.Round(GC.GetTotalMemory(true) / 1048576.0, 1));
             await Record("steady-after", () => Task.Delay(10000));
             log.Write("mark", "label", "bench-done");
         }
@@ -896,14 +904,14 @@ namespace NetPulseSpike
             timer.Start();
         }
 
-        private static void Animate(DependencyObject target, string property, double from, double to, double seconds, bool forever, bool dependent = false, bool autoReverse = false)
+        private void Animate(DependencyObject target, string property, double from, double to, double seconds, bool forever, bool dependent = false, bool autoReverse = false)
         {
             var an = new DoubleAnimation { From = from, To = to, Duration = TimeSpan.FromSeconds(seconds), EnableDependentAnimation = dependent };
             if (!forever) an.EasingFunction = new ExponentialEase { EasingMode = EasingMode.EaseOut, Exponent = 6 };
             var sb = new Storyboard();
             if (forever) { sb.RepeatBehavior = RepeatBehavior.Forever; sb.AutoReverse = autoReverse; }
             Storyboard.SetTarget(an, target); Storyboard.SetTargetProperty(an, property); sb.Children.Add(an);
-            sb.Begin();
+            Track(sb).Begin();
         }
     }
 }
