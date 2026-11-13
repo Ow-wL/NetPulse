@@ -10,3 +10,11 @@
 *.evtx
 *.etl
 *.zip
+
+# 루프 작업 기록 (Codex 답변 원문, 스크린샷)
+.loop/
+
+# 스파이크 빌드 출력
+spikes/**/bin/
+spikes/**/obj/
+node_modules/
