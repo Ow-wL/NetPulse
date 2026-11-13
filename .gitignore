@@ -14,7 +14,13 @@
 # 루프 작업 기록 (Codex 답변 원문, 스크린샷)
 .loop/
 
-# 스파이크 빌드 출력
-spikes/**/bin/
-spikes/**/obj/
+# 빌드 출력
+bin/
+obj/
+artifacts/
 node_modules/
+*.user
+.vs/
+
+# 테스트 픽스처 CSV는 추적한다 (위의 *.csv 제외의 예외)
+!tests/**/fixtures/*.csv

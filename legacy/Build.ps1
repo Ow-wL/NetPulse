@@ -13,7 +13,7 @@ try {
     try {
         foreach ($weight in 'Regular','SemiBold','Bold') {
             $file = "Pretendard-$weight.otf"
-            $font = [IO.File]::OpenRead((Join-Path $PSScriptRoot "fonts\$file"))
+            $font = [IO.File]::OpenRead((Join-Path $PSScriptRoot "..\assets\fonts\$file"))
             $writer.AddResource("fonts/" + $file.ToLowerInvariant(), $font, $true)
         }
     }
@@ -22,7 +22,7 @@ try {
     $arguments = @('/nologo', '/target:winexe', '/optimize+', '/platform:anycpu', "/out:$Output",
         "/resource:$(Join-Path $PSScriptRoot 'Dashboard.xaml'),Dashboard.xaml",
         "/resource:$fontResources,$assemblyName.g.resources",
-        "/resource:$(Join-Path $PSScriptRoot 'fonts\OFL-Pretendard.txt'),OFL-Pretendard.txt",
+        "/resource:$(Join-Path $PSScriptRoot '..\assets\fonts\OFL-Pretendard.txt'),OFL-Pretendard.txt",
         "/win32manifest:$(Join-Path $PSScriptRoot 'App.manifest')",
         "/win32icon:$(Join-Path $PSScriptRoot 'NetPulse.ico')")
     $arguments += $references | ForEach-Object { "/reference:$(Join-Path $framework $_)" }

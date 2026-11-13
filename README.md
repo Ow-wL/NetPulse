@@ -1,5 +1,8 @@
 # NetPulse
 
+> **재작성 중입니다.** NetPulse를 WinUI 3로 처음부터 다시 만들고 있습니다. 진행 계획은 [`docs/loop-plan.md`](docs/loop-plan.md), 현재 상태는 [`docs/loop/STATE.md`](docs/loop/STATE.md)에 있습니다.
+> 아래 설명은 기존 앱입니다. 기존 앱 소스는 `legacy/`로 옮겼고 `legacy\Build.ps1`로 빌드합니다.
+
 NetPulse는 Windows 11에서 간헐적인 네트워크 끊김을 기록하고 비교하는 진단 도구입니다. C#과 WPF로 작성했습니다.
 
 ## 주요 기능
@@ -20,17 +23,17 @@ Windows PowerShell에서 저장소를 받은 뒤 아래 명령을 실행합니�
 ```powershell
 git clone https://github.com/Ow-wL/NetPulse.git
 cd NetPulse
-.\Build.ps1
+.\legacy\Build.ps1
 ```
 
 생성된 `NetPulse.exe`를 실행합니다. 앱은 관리자 권한을 요청하지 않으며, DNS 캐시 비우기는 버튼을 누르고 확인한 경우에만 실행합니다. 측정 결과는 실행 파일 옆 `결과` 폴더에 저장됩니다.
 
 ## 측정 대상 설정
 
-이 버전의 IPv4 대상은 코드에 정의되어 있습니다. 다른 네트워크에서 사용할 때는 `Dashboard.cs`의 대상 주소와 `Analysis.cs`의 대응 주소를 함께 수정하고 다시 빌드하세요.
+이 버전의 IPv4 대상은 코드에 정의되어 있습니다. 다른 네트워크에서 사용할 때는 `legacy/Dashboard.cs`의 대상 주소와 `legacy/Analysis.cs`의 대응 주소를 함께 수정하고 다시 빌드하세요.
 
 모드 선택은 기록과 대상 선택에 적용됩니다. 실제 Ping은 Windows가 선택한 경로를 사용하므로 시작 전에 원하는 네트워크에 연결되어 있는지 확인하세요. 분석 화면의 구간 후보는 함께 관측된 증거를 바탕으로 우선 확인할 위치를 보여줍니다.
 
 ## 글꼴
 
-내장한 Pretendard 1.3.9의 라이선스는 [SIL Open Font License](fonts/OFL-Pretendard.txt)에서 확인할 수 있습니다.
+내장한 Pretendard 1.3.9의 라이선스는 [SIL Open Font License](assets/fonts/OFL-Pretendard.txt)에서 확인할 수 있습니다.
