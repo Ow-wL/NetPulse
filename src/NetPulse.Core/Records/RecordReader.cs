@@ -233,7 +233,7 @@ public static class RecordReader
             };
             return new RecordSummary(id, reason, DateTimeOffset.Parse((string)o["endedAt"]!, CultureInfo.InvariantCulture),
                 (long)o["observed"]!, (long)o["committed"]!, (long)o["pending"]!, (long)o["dropped"]!, (long)o["unprocessed"]!,
-                (long?)o["lastCommittedRound"], (bool)o["sealFailed"]!, (string?)o["error"]);
+                (long?)o["lastCommittedRound"], (bool)o["sealFailed"]!, (string?)o["error"], (long?)o["eventsDropped"]);
         }
         catch (Exception ex) when (IsDataFailure(ex)) { return null; }
     }

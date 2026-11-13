@@ -9,7 +9,8 @@ public sealed record TargetResult(string TargetId, ProbeOutcome Outcome, double?
 /// 회차 하나 (M3 설계 6.2의 rounds.jsonl 한 줄). 경과 시간(ms)은 단조 시계, Wall은 표시용 UTC.
 /// Gap이면 이 회차는 관측 없음(절전 경계에 걸침)으로 다룬다.
 /// </summary>
-public sealed record RoundData(long Round, long DueMs, long AtMs, DateTimeOffset Wall, long Skipped, bool Gap, IReadOnlyList<TargetResult> Results);
+/// <param name="EndMs">측정 공급자 결과를 다 받은 경과 ms (M4 설계 A7). 옛 기록에는 없다(null): 읽는 쪽이 추정한다.</param>
+public sealed record RoundData(long Round, long DueMs, long AtMs, DateTimeOffset Wall, long Skipped, bool Gap, IReadOnlyList<TargetResult> Results, long? EndMs = null);
 
 /// <summary>회차 시점에 관측한 대상별 경로 (M3 설계 6.4).</summary>
 public sealed record RouteSample(string TargetId, int? InterfaceIndex, string? Kind, bool Ok, string? Error);
