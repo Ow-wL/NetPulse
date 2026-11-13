@@ -34,7 +34,8 @@ public static class NetworkInfo
             try
             {
                 props = nic.GetIPProperties();
-                index = props.GetIPv4Properties()?.Index ?? -1;
+                // IPv4가 없는 연결(IPv6만)도 "작동 중인 연결"로 센다: 그래야 NoNetwork가 아니라 NoIpv4Route가 된다
+                index = Ipv4Index(props) ?? Ipv6Index(props) ?? -1;
             }
             catch (NetworkInformationException) { continue; }
             if (index < 0) continue;
@@ -42,6 +43,18 @@ public static class NetworkInfo
             list.Add(new InterfaceInfo(index, KindOf(nic), VirtualOf(nic), gateway));
         }
         return list;
+    }
+
+    private static int? Ipv4Index(IPInterfaceProperties props)
+    {
+        try { return props.GetIPv4Properties()?.Index; }
+        catch (NetworkInformationException) { return null; }
+    }
+
+    private static int? Ipv6Index(IPInterfaceProperties props)
+    {
+        try { return props.GetIPv6Properties()?.Index; }
+        catch (NetworkInformationException) { return null; }
     }
 
     public static InterfaceKind KindOf(NetworkInterface nic) => nic.NetworkInterfaceType switch
@@ -124,15 +137,18 @@ public static class NetworkInfo
 
 /// <summary>
 /// 대상별 Windows 경로 (M3 설계 6.4): 인터페이스 번호는 매 회차, 유형은 30회차마다 다시 조회한다.
+/// 번호가 바뀐 회차에는 유형도 바로 조회한다 (앞 인터페이스의 유형을 새 번호에 붙이지 않는다).
 /// 실패는 Ok=false와 코드로 돌려준다 (정상으로 꾸미지 않는다).
 /// </summary>
 public sealed class RouteObserver : IRouteObserver
 {
     public const int KindEvery = 30;
 
+    private readonly Dictionary<string, int> lastIndex = [];
+
     public IReadOnlyList<RouteSample> Observe(IReadOnlyList<ProbeTarget> targets, long round)
     {
-        bool refreshKind = round % KindEvery == 0;
+        bool periodic = round % KindEvery == 0;
         var samples = new RouteSample[targets.Count];
         for (int i = 0; i < targets.Count; i++)
         {
@@ -140,12 +156,21 @@ public sealed class RouteObserver : IRouteObserver
             try
             {
                 var (index, error) = NetworkInfo.BestInterface(t.Address);
-                samples[i] = index is int idx
-                    ? new RouteSample(t.Id, idx, refreshKind ? NetworkInfo.KindText(idx) : null, true, null)
-                    : new RouteSample(t.Id, null, null, false, error);
+                if (index is int idx)
+                {
+                    bool changed = !lastIndex.TryGetValue(t.Id, out var before) || before != idx;
+                    lastIndex[t.Id] = idx;
+                    samples[i] = new RouteSample(t.Id, idx, periodic || changed ? NetworkInfo.KindText(idx) : null, true, null);
+                }
+                else
+                {
+                    lastIndex.Remove(t.Id);
+                    samples[i] = new RouteSample(t.Id, null, null, false, error);
+                }
             }
             catch (Exception ex) when (ex is NetworkInformationException or ArgumentException)
             {
+                lastIndex.Remove(t.Id);
                 samples[i] = new RouteSample(t.Id, null, null, false, ex.GetType().Name);
             }
         }

@@ -42,7 +42,7 @@ public sealed class GapTracker(TimeSpan interval)
     private long? lastRound;
     private long lastStartMs = -1;
     private TimeSpan? clockBaseline;
-    private int suspendsSeenByClock;
+    private long lastClockMs = long.MinValue;
 
     /// <summary>지금 절전 중(복귀 알림 전)인지.</summary>
     public bool Suspended { get { lock (gate) return suspends.Count > 0 && suspends[^1].ToMs is null; } }
@@ -128,17 +128,21 @@ public sealed class GapTracker(TimeSpan interval)
 
     /// <summary>
     /// 벽시계 변경 확인. 바뀐 크기(ms)를 돌려주고 기준을 새로 잡는다. 바뀌지 않았으면 null.
-    /// 그 사이 절전이 있었으면 차이가 절전 때문일 수 있으니 기준만 다시 잡는다 (공백으로 이미 기록됨).
+    /// 직전 표본과 이 표본 사이에 절전이 시작됐거나 이 표본이 절전 중이면, 차이가 절전 때문일 수 있으니 기준만 다시 잡는다
+    /// (공백으로 이미 기록됨). 판단은 처리 시점이 아니라 표본의 경과 시간으로 한다: 절전 전에 시작해 복귀 뒤에 처리된 회차가
+    /// 기준 재설정을 먼저 써 버리지 않게.
     /// </summary>
     public long? CheckClock(TimeSpan elapsed, DateTimeOffset wall)
     {
         lock (gate)
         {
+            long now = Ms(elapsed);
             var offset = wall.UtcDateTime - DateTime.UnixEpoch - elapsed;
-            if (clockBaseline is null || suspends.Count != suspendsSeenByClock)
+            bool crossed = suspends.Any(s => (s.FromMs >= lastClockMs && s.FromMs <= now) || (s.FromMs <= now && (s.ToMs is null || now < s.ToMs)));
+            lastClockMs = now;
+            if (clockBaseline is null || crossed)
             {
                 clockBaseline = offset;
-                suspendsSeenByClock = suspends.Count;
                 return null;
             }
             var delta = offset - clockBaseline.Value;

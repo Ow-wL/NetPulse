@@ -5,7 +5,8 @@ using System.Text.Json.Serialization;
 
 namespace NetPulse.Core.Targets;
 
-public enum ProfileLoadStatus { Loaded, Missing, Unreadable, UnknownVersion }
+/// <summary>Invalid: 읽었지만 검증 오류가 있는 프로필이 있음 (원본은 옮겨 두고 쓰지 않는다).</summary>
+public enum ProfileLoadStatus { Loaded, Missing, Unreadable, UnknownVersion, Invalid }
 
 /// <summary>저장된 프로필 묶음.</summary>
 public sealed record ProfileSet(IReadOnlyList<Profile> Profiles, string? LastUsedId);
@@ -41,6 +42,9 @@ public static class ProfileStore
                 return (null, ProfileLoadStatus.UnknownVersion, MoveAside(path, now));
             var dto = doc.RootElement.Deserialize<FileDto>(Json) ?? throw new JsonException("빈 파일");
             var profiles = dto.Profiles.Select(ToModel).ToArray();
+            // 저장 계약과 같은 검증: 오류가 있는 프로필이 섞였으면 원본을 보존(옮겨 둠)하고 쓰지 않는다
+            if (profiles.Any(p => ProfileValidator.HasErrors(ProfileValidator.Validate(p))))
+                return (null, ProfileLoadStatus.Invalid, MoveAside(path, now));
             return (new ProfileSet(profiles, dto.LastUsedId), ProfileLoadStatus.Loaded, null);
         }
         catch (Exception ex) when (ex is JsonException or FormatException or InvalidOperationException or ArgumentException or NullReferenceException)
@@ -49,8 +53,14 @@ public static class ProfileStore
         }
     }
 
+    /// <summary>저장한다. 검증 오류가 있는 프로필이 있으면 저장하지 않고 ArgumentException (M3 설계 3.2 "저장·시작 거부").</summary>
     public static void Save(string folder, ProfileSet set)
     {
+        foreach (var p in set.Profiles)
+        {
+            var errors = ProfileValidator.Validate(p).Where(i => i.Severity == IssueSeverity.Error).Select(i => i.Code).ToArray();
+            if (errors.Length > 0) throw new ArgumentException($"프로필 '{p.Id}' 오류: {string.Join(", ", errors)}", nameof(set));
+        }
         Directory.CreateDirectory(folder);
         var path = Path.Combine(folder, FileName);
         var temp = path + ".tmp";

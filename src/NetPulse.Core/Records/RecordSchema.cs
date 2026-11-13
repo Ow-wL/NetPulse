@@ -98,9 +98,28 @@ public static class RecordSchema
                 (string)t["role"]! switch { "local" => TargetRole.Local, "external" => TargetRole.External, var x => throw new FormatException("모르는 역할 " + x) },
                 (string?)t["provider"], ProfileStore.ParseMethod((string)t["method"]!));
         }).ToArray();
-        return (new RecordHeader((string)o["id"]!, (int)o["segment"]!, (string)o["appVersion"]!, DateTimeOffset.Parse((string)o["startedAt"]!, CultureInfo.InvariantCulture),
-            (int)o["utcOffsetMinutes"]!, targets, (int)o["intervalMs"]!, (int)o["timeoutMs"]!, (long)o["plannedMs"]!, (string?)o["location"] ?? "unknown"), false);
+        var header = new RecordHeader((string)o["id"]!, (int)o["segment"]!, (string)o["appVersion"]!, DateTimeOffset.Parse((string)o["startedAt"]!, CultureInfo.InvariantCulture),
+            (int)o["utcOffsetMinutes"]!, targets, (int)o["intervalMs"]!, (int)o["timeoutMs"]!, (long)o["plannedMs"]!, (string?)o["location"] ?? "unknown");
+        Check(header);
+        return (header, false);
     }
+
+    /// <summary>머리의 의미 검증. 틀리면 FormatException (읽을 수 없는 기록).</summary>
+    private static void Check(RecordHeader h)
+    {
+        static void Require(bool ok, string what) { if (!ok) throw new FormatException("기록 머리 손상: " + what); }
+        Require(!string.IsNullOrWhiteSpace(h.Id), "id");
+        Require(h.Segment is >= 0 and <= MaxSegment, "segment");
+        Require(h.AppVersion is not null, "appVersion");
+        Require(h.UtcOffsetMinutes is >= -14 * 60 and <= 14 * 60, "utcOffsetMinutes");
+        Require(h.Targets.Count > 0, "targets");
+        Require(h.Targets.All(t => !string.IsNullOrWhiteSpace(t.Id)), "target id");
+        Require(h.Targets.Select(t => t.Id).Distinct(StringComparer.Ordinal).Count() == h.Targets.Count, "target id 중복");
+        Require(h.IntervalMs > 0 && h.TimeoutMs > 0 && h.PlannedMs > 0, "시간 설정");
+    }
+
+    /// <summary>조각 번호 상한 (손상된 큰 값으로 누락 조각 목록이 터지지 않게).</summary>
+    public const int MaxSegment = 1000;
 
     public enum LineProblem { None, Malformed, WrongId, UnknownTarget, BadCombination, UnknownValue }
 

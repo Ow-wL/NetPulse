@@ -55,11 +55,11 @@ internal sealed class FaultyFile(IAppendFile inner, Func<Fault> next, Func<TimeS
 }
 
 /// <summary>디스크 폴더를 감싸 파일 이름별로 고장을 주입한다.</summary>
-internal sealed class FaultyFolder(IRecordFolder inner, Func<string, Fault> next, Func<TimeSpan>? delay = null) : IRecordFolder
+internal sealed class FaultyFolder(IRecordFolder inner, Func<string, Fault> next, Func<string, TimeSpan>? delay = null) : IRecordFolder
 {
     public bool FailWholeFiles { get; set; }
     public string Kind => inner.Kind;
-    public IAppendFile OpenAppend(string name) => new FaultyFile(inner.OpenAppend(name), () => next(name), delay);
+    public IAppendFile OpenAppend(string name) => new FaultyFile(inner.OpenAppend(name), () => next(name), delay is null ? null : () => delay(name));
     public void WriteAllText(string name, string text)
     {
         if (FailWholeFiles) throw new IOException("통째 쓰기 실패");
@@ -72,6 +72,8 @@ internal sealed class FaultyRoot(DiskRecordRoot inner, string? volume = null) : 
 {
     public Func<string, Fault> Next { get; set; } = _ => Fault.None;
     public Func<TimeSpan>? Delay { get; set; }
+    /// <summary>파일 이름별 지연 (예: 이벤트 쓰기만 막기).</summary>
+    public Func<string, TimeSpan>? DelayFor { get; set; }
     public bool FailCreate { get; set; }
     public FaultyFolder? LastFolder { get; private set; }
     public string Kind => inner.Kind;
@@ -83,7 +85,7 @@ internal sealed class FaultyRoot(DiskRecordRoot inner, string? volume = null) : 
         if (FailCreate) throw new UnauthorizedAccessException("쓸 수 없음");
         var folder = inner.CreateFolder(name);
         if (folder is null) return null;
-        LastFolder = new FaultyFolder(folder, n => Next(n), Delay);
+        LastFolder = new FaultyFolder(folder, n => Next(n), n => (Delay?.Invoke() ?? TimeSpan.Zero) + (DelayFor?.Invoke(n) ?? TimeSpan.Zero));
         return LastFolder;
     }
 }

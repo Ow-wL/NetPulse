@@ -167,12 +167,14 @@ public sealed class M3IntegrationTests : IDisposable
     [Fact]
     public void RouteObserverReportsLoopbackInterface()
     {
-        var samples = new RouteObserver().Observe([new ProbeTarget("lo", "local", IPAddress.Loopback)], 0);
-        var s = Assert.Single(samples);
+        var observer = new RouteObserver();
+        ProbeTarget[] lo = [new ProbeTarget("lo", "local", IPAddress.Loopback)];
+        var s = Assert.Single(observer.Observe(lo, 1));
         Assert.True(s.Ok, "루프백 경로 조회는 성공해야 한다: " + s.Error);
         Assert.NotNull(s.InterfaceIndex);
-        Assert.Equal("loopback", s.Kind);
-        Assert.Null(new RouteObserver().Observe([new ProbeTarget("lo", "local", IPAddress.Loopback)], 1)[0].Kind);   // 유형은 30회차마다
+        Assert.Equal("loopback", s.Kind);                 // 처음 본 인터페이스는 30회차 주기와 상관없이 유형을 조회한다
+        Assert.Null(observer.Observe(lo, 2)[0].Kind);     // 같은 인터페이스면 유형은 30회차마다
+        Assert.Equal("loopback", observer.Observe(lo, 30)[0].Kind);
     }
 
     [Fact]
@@ -194,7 +196,7 @@ public sealed class M3IntegrationTests : IDisposable
             for (int i = 0; i < 300; i++)
             {
                 var watch = Stopwatch.StartNew();
-                Assert.True(w.TryAppend(line, out var failure), failure?.Message);
+                Assert.True(w.TryAppend(line, out var failure), failure is null ? null : LineAppender.Reason(failure));
                 times.Add(watch.Elapsed.TotalMilliseconds);
             }
         times.Sort();
