@@ -20,8 +20,8 @@
     <ProjectReference Include="..\NetPulse.Core\NetPulse.Core.csproj" />
     <ProjectReference Include="..\NetPulse.Platform\NetPulse.Platform.csproj" />
     <!-- 글꼴(Pretendard, SIL OFL)과 데모 시나리오는 실행 파일 옆에 둔다 (manifest 해시 대상) -->
-    <Content Include="..\..\assets\fonts\*.otf;..\..\assets\fonts\OFL-Pretendard.txt" Link="Fonts\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="..\..\demo\scenarios\*.json" Link="demo\scenarios\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\fonts\*.otf;..\..\assets\fonts\OFL-Pretendard.txt" Link="Fonts\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <Content Include="..\..\demo\scenarios\*.json" Link="demo\scenarios\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
   <!-- 패키지 없는 배포에서 App.xbf와 앱 .pri가 배포 폴더로 복사되지 않는 것을 M0에서 관측했다. 직접 복사한다. -->
   <Target Name="CopyXamlArtifactsToPublish" AfterTargets="Publish">

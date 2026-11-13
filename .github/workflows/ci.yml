@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main, 'loop/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: Source commits
+        run: |
+          Write-Host "checkout: $(git rev-parse HEAD)"
+          Write-Host "head:     ${{ github.event.pull_request.head.sha || github.sha }}"
+      - name: Build, test, publish (UI tests run locally as G3)
+        run: ./build/build.ps1
