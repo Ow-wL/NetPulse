@@ -6,15 +6,15 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 마일스톤 | M1 골격 |
-| 단계 | ⑦ 마감 (푸시, PR, CI 확인) |
-| 브랜치 | `loop/m1-skeleton` (base `loop/m0-decisions`) |
-| 설계 검토 라운드 | 2 / 2 — 2라운드 `REVISE`(구현을 막는 문제 없음), 남은 항목 Claude 결정 |
-| diff 리뷰 라운드 | 3 / 3 — 1·2라운드 `REVISE`, 3라운드 `APPROVE` |
-| 누적 실패 | 2 / 8 (G4 `REVISE` 2회) |
-| PR | 마감 스크립트가 만든다. 번호는 M2 첫 커밋에서 적는다 |
+| 마일스톤 | M2 디자인 시스템 |
+| 단계 | ① 설계안 작성 |
+| 브랜치 | `loop/m2-design-system` (base `loop/m1-skeleton`) |
+| 설계 검토 라운드 | 0 / 2 |
+| diff 리뷰 라운드 | 0 / 3 |
+| 누적 실패 | 2 / 8 |
+| PR | 없음 |
 
-## 게이트 통과 (M1)
+## 지난 마일스톤의 게이트 (M1)
 
 | 항목 | 값 |
 | --- | --- |
@@ -32,13 +32,14 @@
 | 마일스톤 | 브랜치 | PR | 상태 |
 | --- | --- | --- | --- |
 | M0 결정 | `loop/m0-decisions` | Ow-wL/NetPulse#1 | 열림, 사용자 머지 대기. D1 = WinUI 3, D2 = 흑요석 |
+| M1 골격 | `loop/m1-skeleton` | Ow-wL/NetPulse#2 (base M0) | 열림, 사용자 머지 대기. CI 실행 43381315413 성공 (PR head `c4f72af`) |
 
-## 미해결 지적 (M1 G4 3라운드, 차단 아님 → M2에서 처리)
+## 미해결 지적 (M1 G4 3라운드, 차단 아님 → M2 구현에서 처리)
 
 1. 중요: `MeasurementEngine.StopAsync`가 제한시간으로 `false`를 돌려준 뒤 다시 부르면 남은 작업과 무관하게 `true`를 돌려준다. `DisposeAsync`가 취소 콜백·측정 작업이 끝나기 전에 취소 원본을 정리할 수 있다. 취소·측정의 공동 완료 작업을 보관해 재호출도 그것을 기다리고, 정리는 실제 완료 뒤에 한다.
 2. 사소: `PlatformTests.EngineRunsWithRealProbeOnLoopback`이 세 회차를 모두 건너뛴 경우(`Latest` 없음)를 가정하지 않는다. `Rounds > 0`일 때만 마지막 회차를 검사한다.
 
 ## 다음 할 일
 
-1. `build/close-milestone.ps1`로 M1 마감 (푸시, PR, CI 확인)
-2. M2 디자인 시스템: 첫 커밋에서 M1 PR 번호·CI 결과를 적고, 위 미해결 지적 2건을 처리
+1. `docs/loop/M2-design.md` 작성 → Codex 설계 검토
+2. 구현 (미해결 지적 2건 포함) → G1~G3, G5 → G4 → 마감
