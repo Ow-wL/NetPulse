@@ -85,7 +85,6 @@ namespace NetPulseSpike
         private int tick;
         private int problemSince = int.MaxValue;
         private double lastArrivalMs;
-        private Canvas plotMoving, plotFixed;
         private readonly TranslateTransform plotShift = new TranslateTransform();
         private Grid plotHost;
         private Grid veilLayer;
@@ -93,6 +92,15 @@ namespace NetPulseSpike
         private List<double> frameTimes; private double lastFrameMs;
         private Microsoft.UI.Dispatching.DispatcherQueueTimer secondTimer, closeTimer;
         private readonly List<Microsoft.UI.Dispatching.DispatcherQueueTimer> countTimers = new List<Microsoft.UI.Dispatching.DispatcherQueueTimer>();
+
+        // 장면마다 따로 있는 그래프. 전환 중에는 두 장면이 함께 살아 있으므로 둘 다 같은 데이터로 다시 그린다.
+        private sealed class PlotView { public Grid Scene, Host; public Canvas Fixed, Moving; }
+        private readonly List<PlotView> plots = new List<PlotView>();
+        private Grid building;   // 지금 만드는 장면
+        private readonly Dictionary<string, Button> switchButtons = new Dictionary<string, Button>();
+        private readonly MeasureLoop measure = new MeasureLoop();   // 측정 부하를 함께 돌려 화면이 측정에 주는 영향을 본다
+        private readonly System.Threading.CancellationTokenSource stop = new System.Threading.CancellationTokenSource();
+        private bool highContrast;
 
         public HomeWindow(string[] args)
         {
@@ -105,6 +113,14 @@ namespace NetPulseSpike
             reduceMotion = a.Contains("--reduce-motion");
             reduceTransparency = a.Contains("--reduce-transparency");
             int runSeconds = int.TryParse(Arg("--run-seconds"), out var rs) ? rs : 0;
+            // Windows 설정을 읽는다: 투명 효과 끔 -> 효과 줄이기, 애니메이션 끔 -> 움직임 줄이기, 고대비 -> 효과 줄이기
+            var ws = WindowsSettings.Read();
+            if (ws["enableTransparency"] == "0") reduceTransparency = true;
+            if (ws["clientAreaAnimation"] == "off") reduceMotion = true;
+            try { highContrast = new Windows.UI.ViewManagement.AccessibilitySettings().HighContrast; } catch (Exception) { }
+            if (highContrast) reduceTransparency = true;
+            log.Write("windowsSettings", "values", string.Join(",", ws.Select(p => p.Key + "=" + p.Value)), "highContrast", highContrast,
+                "reduceMotion", reduceMotion, "reduceTransparency", reduceTransparency);
 
             Title = "NetPulse · 흑요석 재현";
             AppWindow.ResizeClient(new SizeInt32(1440, 900));
@@ -123,7 +139,15 @@ namespace NetPulseSpike
             CompositionTarget.Rendering += OnRendering;
             log.Write("start", "theme", t.Dark ? "dark" : "light", "aurora", aurora, "problem", problem);
             if (runSeconds > 0) { closeTimer = DispatcherQueue.CreateTimer(); closeTimer.Interval = TimeSpan.FromSeconds(runSeconds); closeTimer.Tick += (s, e) => Close(); closeTimer.Start(); }
-            Closed += (s, e) => log.Dispose();
+            measure.RoundCompleted += r => log.Write("round", "index", r.Index, "scheduledMs", Math.Round(r.ScheduledMs, 1), "actualMs", Math.Round(r.ActualMs, 1));
+            _ = measure.RunAsync(stop.Token);
+            if (a.Contains("--bench")) _ = BenchAsync();
+            Closed += (s, e) =>
+            {
+                stop.Cancel();
+                log.Write("end", "rounds", measure.Rounds, "missed", measure.Missed, "maxLateMs", Math.Round(measure.MaxLateMs, 1), "scenes", windowRoot.Children.Count, "plots", plots.Count);
+                log.Dispose();
+            };
         }
 
         // ---------- 합성 데이터 ----------
@@ -163,9 +187,22 @@ namespace NetPulseSpike
         {
             var tb = new TextBlock { Text = s, FontSize = size, Foreground = B(color),
                 FontFamily = weight >= 700 ? Font(true) : weight >= 600 ? SemiBold() : Font(false),
-                FontWeight = weight >= 700 ? FontWeights.Bold : weight >= 600 ? FontWeights.SemiBold : FontWeights.Normal };
+                FontWeight = weight >= 700 ? FontWeights.Bold : weight >= 600 ? FontWeights.SemiBold : FontWeights.Normal,
+                LineHeight = Math.Round(size * 1.5), LineStackingStrategy = LineStackingStrategy.BlockLineHeight };   // 시안의 line-height: 1.5
             if (id != null) AutomationProperties.SetAutomationId(tb, id);
             return tb;
+        }
+
+        // 한국어를 단어 중간에서 줄바꿈하지 않게 한다 (CSS의 word-break: keep-all). 공백이 아닌 글자 사이에 단어 결합자(U+2060)를 넣는다.
+        private static string KeepAll(string s)
+        {
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < s.Length; i++)
+            {
+                sb.Append(s[i]);
+                if (i + 1 < s.Length && !char.IsWhiteSpace(s[i]) && !char.IsWhiteSpace(s[i + 1])) sb.Append('\u2060');
+            }
+            return sb.ToString();
         }
 
         private Brush HeadlineBrush() => new LinearGradientBrush
@@ -184,7 +221,9 @@ namespace NetPulseSpike
             edge.GradientStops.Add(new GradientStop { Color = t.Hi, Offset = 0 });
             edge.GradientStops.Add(new GradientStop { Color = t.Edge, Offset = 0.06 });
             edge.GradientStops.Add(new GradientStop { Color = t.Edge, Offset = 1 });
-            var b = new Border { Background = bg, BorderBrush = edge, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(radius),
+            // 흑요석 시안은 유리 반경을 18, 떠 있는 유리를 12로 덮어쓴다. 알약 모양(999)만 그대로 둔다.
+            double r = radius >= 999 ? radius : level == "float" ? 12 : 18;
+            var b = new Border { Background = bg, BorderBrush = edge, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(r),
                 Padding = padding, Child = child };
             if (level != "float" && !reduceTransparency) { b.Shadow = new ThemeShadow(); b.Translation = new Vector3(0, 0, level == "content" ? 32 : 20); }
             return b;
@@ -198,11 +237,30 @@ namespace NetPulseSpike
 
         private void Rebuild() => Rebuild(false);
 
+        private void RemoveScene(Grid scene)
+        {
+            windowRoot.Children.Remove(scene);
+            plots.RemoveAll(v => v.Scene == scene);
+        }
+
+        // 전환 중 이전 장면을 입력과 접근성 트리에서 뺀다. 화면에는 남지만 클릭·초점·화면 읽기 대상이 아니다.
+        private static void Detach(UIElement root)
+        {
+            root.IsHitTestVisible = false;
+            void Walk(DependencyObject d)
+            {
+                if (d is UIElement u) { AutomationProperties.SetAccessibilityView(u, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw); if (u is Control c) c.IsTabStop = false; }
+                int n = VisualTreeHelper.GetChildrenCount(d);
+                for (int i = 0; i < n; i++) Walk(VisualTreeHelper.GetChild(d, i));
+            }
+            Walk(root);
+        }
+
         /// <summary>장면을 새로 만든다. keepOld면 이전 장면을 그대로 두고 새 장면을 그 위에 올린다 (전환 애니메이션용).</summary>
         private Grid Rebuild(bool keepOld)
         {
             var previous = sceneRoot;
-            if (previous != null && !keepOld) windowRoot.Children.Remove(previous);
+            if (previous != null && !keepOld) RemoveScene(previous);
             // 제목 표시줄도 테마 바탕색에 맞춘다
             var bar = AppWindow.TitleBar;
             bar.BackgroundColor = bar.InactiveBackgroundColor = bar.ButtonBackgroundColor = bar.ButtonInactiveBackgroundColor = t.Bg;
@@ -210,7 +268,8 @@ namespace NetPulseSpike
             bar.InactiveForegroundColor = bar.ButtonInactiveForegroundColor = t.Muted;
             bar.ButtonHoverBackgroundColor = t.Faint;
             riseCards.Clear();
-            sceneRoot = new Grid { Background = B(t.Bg) };
+            sceneRoot = building = new Grid { Background = B(t.Bg) };
+            switchButtons.Clear();
             sceneRoot.Children.Add(BuildLights());
             sceneRoot.Children.Add(veilLayer = BuildVeil());
             var app = new Grid { Padding = new Thickness(18), ColumnSpacing = 18 };
@@ -373,19 +432,24 @@ namespace NetPulseSpike
             left.Children.Add(Text("네트워크 상태", 30, t.Ink, 700));
             g.Children.Add(left);
             var chips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
-            chips.Children.Add(Chip("Wi‑Fi", "5 GHz", true));
+            chips.Children.Add(Chip("Wi‑Fi", "5 GHz", true, "M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 19.5h.01"));
             chips.Children.Add(Chip("공유기", "2 ms", false));
             chips.Children.Add(Chip("인터넷", problem ? "응답 없음" : "18 ms", false));
             g.Children.Add(chips);
             return g;
         }
 
-        private UIElement Chip(string a, string b, bool boldFirst)
+        private UIElement Chip(string a, string b, bool boldFirst, string icon = null)
         {
-            var tb = new TextBlock { FontSize = 12.5, FontFamily = SemiBold(), FontWeight = FontWeights.SemiBold };
+            var tb = new TextBlock { FontSize = 12.5, FontFamily = SemiBold(), FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
             tb.Inlines.Add(new Run { Text = a + "  ", Foreground = B(boldFirst ? t.Ink : t.Muted) });
             tb.Inlines.Add(new Run { Text = b, Foreground = B(boldFirst ? t.Muted : t.Ink), FontFamily = Font(true), FontWeight = FontWeights.Bold });
-            return Glass("float", 999, tb, new Thickness(14, 8, 14, 8));
+            if (icon == null) return Glass("float", 12, tb, new Thickness(14, 8, 14, 8));
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            var path = IconPath(icon, t.Muted, 2);
+            row.Children.Add(new Viewbox { Width = 14, Height = 14, VerticalAlignment = VerticalAlignment.Center, Child = new Canvas { Width = 24, Height = 24, Children = { path } } });
+            row.Children.Add(tb);
+            return Glass("float", 12, row, new Thickness(14, 8, 14, 8));
         }
 
         private FrameworkElement BuildHero()
@@ -403,7 +467,8 @@ namespace NetPulseSpike
                 RenderTransformOrigin = new Point(.5, .5), RenderTransform = new RotateTransform { Angle = -90 } };
             ring.Children.Add(value);
             double target = circumference * (1 - score / 100.0);
-            if (reduceMotion) value.StrokeDashOffset = target; else Animate(value, "StrokeDashOffset", circumference, target, 1.4, false, dependent: true);
+            // 처음 한 번만 채운다. 테마·상태를 바꿀 때는 현재 값을 그대로 보인다.
+            if (reduceMotion || !firstBuild) value.StrokeDashOffset = target; else Animate(value, "StrokeDashOffset", circumference, target, 1.4, false, dependent: true);
             var label = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             var grade = Text(problem ? "D" : "A", 52, t.Ink, 700); grade.Foreground = HeadlineBrush(); grade.HorizontalAlignment = HorizontalAlignment.Center;
             label.Children.Add(grade);
@@ -414,20 +479,22 @@ namespace NetPulseSpike
             g.Children.Add(ring);
 
             var right = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            var verdict = Text(problem ? "외부 인터넷 연결이 끊긴 것으로 보입니다" : "지금 연결은 안정적입니다", 27, t.Ink, 700, "verdict");
-            verdict.Foreground = HeadlineBrush(); verdict.TextWrapping = TextWrapping.WrapWholeWords;   // 한국어 단어 중간 줄바꿈 방지
+            var verdict = Text(KeepAll(problem ? "외부 인터넷 연결이 끊긴 것으로 보입니다" : "지금 연결은 안정적입니다"), 27, t.Ink, 700, "verdict");
+            verdict.LineHeight = Math.Round(27 * 1.25);   // 시안의 .verdict line-height: 1.25
+            verdict.Foreground = HeadlineBrush(); verdict.TextWrapping = TextWrapping.Wrap;   // 한국어 단어 중간 줄바꿈 방지
             right.Children.Add(verdict);
-            var sub = new TextBlock { FontSize = 14.5, Foreground = B(t.Muted), FontFamily = Font(false), TextWrapping = TextWrapping.WrapWholeWords, Margin = new Thickness(0, 10, 0, 20) };
+            var sub = new TextBlock { FontSize = 14.5, Foreground = B(t.Muted), FontFamily = Font(false), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 20),
+                LineHeight = Math.Round(14.5 * 1.5), LineStackingStrategy = LineStackingStrategy.BlockLineHeight };
             if (problem)
             {
-                sub.Inlines.Add(new Run { Text = "공유기는 응답하지만 서로 다른 외부 대상 " });
-                sub.Inlines.Add(Strong("3곳")); sub.Inlines.Add(new Run { Text = "이 함께 응답하지 않습니다 · " }); sub.Inlines.Add(Strong("지금 끊김이 이어지는 중"));
+                sub.Inlines.Add(new Run { Text = KeepAll("공유기는 응답하지만 서로 다른 외부 대상 ") });
+                sub.Inlines.Add(Strong("3곳")); sub.Inlines.Add(new Run { Text = KeepAll("이 함께 응답하지 않습니다 · ") }); sub.Inlines.Add(Strong("지금 끊김이 이어지는 중"));
             }
             else
             {
-                sub.Inlines.Add(new Run { Text = "최근 2시간 동안 끊김 " }); sub.Inlines.Add(Strong("0회"));
-                sub.Inlines.Add(new Run { Text = " · 평균 지연 " }); sub.Inlines.Add(Strong("18 ms"));
-                sub.Inlines.Add(new Run { Text = " · 응답 성공 " }); sub.Inlines.Add(Strong("99.9%"));
+                sub.Inlines.Add(new Run { Text = KeepAll("최근 2시간 동안 끊김 ") }); sub.Inlines.Add(Strong("0회"));
+                sub.Inlines.Add(new Run { Text = KeepAll(" · 평균 지연 ") }); sub.Inlines.Add(Strong("18 ms"));
+                sub.Inlines.Add(new Run { Text = KeepAll(" · 응답 성공 ") }); sub.Inlines.Add(Strong("99.9%"));
             }
             right.Children.Add(sub);
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
@@ -445,7 +512,7 @@ namespace NetPulseSpike
             return Glass("content", 28, g, new Thickness(28, 26, 28, 26));
         }
 
-        private Run Strong(string s) => new Run { Text = s, Foreground = B(t.Ink), FontFamily = SemiBold(), FontWeight = FontWeights.SemiBold };
+        private Run Strong(string s) => new Run { Text = KeepAll(s), Foreground = B(t.Ink), FontFamily = SemiBold(), FontWeight = FontWeights.SemiBold };
 
         private FrameworkElement BuildMap()
         {
@@ -525,14 +592,14 @@ namespace NetPulseSpike
             g.RowDefinitions.Add(new RowDefinition());
             g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             g.Children.Add(CardHead("최근 2분", "실시간 · 1초 간격"));
-            plotHost = new Grid();
-            plotFixed = new Canvas();
-            plotMoving = new Canvas { RenderTransform = plotShift };
-            plotHost.Children.Add(plotFixed);
-            plotHost.Children.Add(plotMoving);
-            plotHost.SizeChanged += (s, e) => { plotHost.Clip = new RectangleGeometry { Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height) }; DrawPlot(); };
-            Grid.SetRow(plotHost, 1);
-            g.Children.Add(plotHost);
+            var view = new PlotView { Scene = building, Host = new Grid(), Fixed = new Canvas(), Moving = new Canvas { RenderTransform = plotShift } };
+            view.Host.Children.Add(view.Fixed);
+            view.Host.Children.Add(view.Moving);
+            view.Host.SizeChanged += (s, e) => { view.Host.Clip = new RectangleGeometry { Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height) }; DrawPlot(view); };
+            plots.Add(view);
+            plotHost = view.Host;
+            Grid.SetRow(view.Host, 1);
+            g.Children.Add(view.Host);
             var legend = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16 };
             foreach (var (label, color) in new[] { ("인터넷 지연", t.Accent), ("공유기 지연", t.Accent), ("응답 없음", t.Bad), ("증상 표시", t.Warn) })
             {
@@ -546,10 +613,12 @@ namespace NetPulseSpike
             return Glass("content", 28, g, new Thickness(22, 20, 22, 16));
         }
 
-        private void DrawPlot()
+        private void DrawPlot() { foreach (var v in plots.ToList()) DrawPlot(v); }
+
+        private void DrawPlot(PlotView view)
         {
-            if (plotHost == null) return;
-            double w = plotHost.ActualWidth, h = plotHost.ActualHeight;
+            var plotFixed = view.Fixed; var plotMoving = view.Moving;
+            double w = view.Host.ActualWidth, h = view.Host.ActualHeight;
             if (w <= 0 || h <= 0) return;
             plotFixed.Children.Clear(); plotMoving.Children.Clear();
             double step = w / (N - 2);
@@ -682,7 +751,8 @@ namespace NetPulseSpike
                 var b = new Button { Content = label, CornerRadius = new CornerRadius(999), Padding = new Thickness(14, 8, 14, 8), FontSize = 12.5,
                     Background = B(pressed ? t.Ink : Colors.Transparent), Foreground = B(pressed ? t.Bg : t.Muted), BorderThickness = new Thickness(0) };
                 AutomationProperties.SetAutomationId(b, id); AutomationProperties.SetName(b, label);
-                b.Click += (s, e) => act(b.TransformToVisual(windowRoot).TransformPoint(new Point(b.ActualWidth / 2, b.ActualHeight / 2)));
+                switchButtons[id] = b;
+                b.Click += (s, e) => { lastSwitchId = id; act(b.TransformToVisual(windowRoot).TransformPoint(new Point(b.ActualWidth / 2, b.ActualHeight / 2))); };
                 return b;
             }
             sp.Children.Add(Btn("다크", "theme-dark", t.Dark, p => { if (!t.Dark) _ = SwitchAsync(p, () => t = DarkTokens); }));
@@ -692,6 +762,12 @@ namespace NetPulseSpike
             var bar = Glass("control", 999, sp, new Thickness(6));
             bar.HorizontalAlignment = HorizontalAlignment.Center; bar.VerticalAlignment = VerticalAlignment.Bottom; bar.Margin = new Thickness(0, 0, 0, 16);
             return bar;
+        }
+
+        private void UpdateSwitchStates()
+        {
+            foreach (var (id, on) in new[] { ("theme-dark", t.Dark), ("theme-light", !t.Dark), ("aurora-toggle", aurora), ("problem-toggle", problem) })
+                if (switchButtons.TryGetValue(id, out var b)) { b.Background = B(on ? t.Ink : Colors.Transparent); b.Foreground = B(on ? t.Bg : t.Muted); }
         }
 
         private void RefillNet()
@@ -704,19 +780,20 @@ namespace NetPulseSpike
         {
             aurora = !aurora;
             double to = aurora ? t.VeilStrength : 0;
-            if (reduceMotion) { veilLayer.Opacity = to; Rebuild(); return; }
+            UpdateSwitchStates();
+            log.Write("aurora", "on", aurora);
+            if (reduceMotion) { veilLayer.Opacity = to; return; }
             var sb = new Storyboard();
             var an = new DoubleAnimation { To = to, Duration = TimeSpan.FromMilliseconds(600), EasingFunction = new ExponentialEase { EasingMode = EasingMode.EaseOut, Exponent = 6 } };
             Storyboard.SetTarget(an, veilLayer); Storyboard.SetTargetProperty(an, "Opacity"); sb.Children.Add(an);
-            sb.Completed += (s, e) => Rebuild();   // 막대의 눌림 표시를 갱신
             sb.Begin();
-            log.Write("aurora", "on", aurora);
         }
 
         // ---------- 테마·상태 전환: 누른 지점에서 새 화면이 원형으로 퍼진다 ----------
         // 이전 장면을 그대로 둔 채 새 장면을 위에 올리고, 새 장면의 Composition 시각 요소에 원형 클립을 키운다.
         // 두 장면 모두 살아 있으므로 전환 중에도 그래프와 빛이 계속 움직인다. 끝나면 이전 장면을 뗀다.
         private bool switching;
+        private string lastSwitchId;
         private async Task SwitchAsync(Point origin, Action change)
         {
             if (switching) return;
@@ -726,7 +803,10 @@ namespace NetPulseSpike
             {
                 change();
                 if (reduceMotion) { Rebuild(); return; }
+                bool hadFocus = Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(windowRoot.XamlRoot) is Button;
                 var previous = Rebuild(true);
+                if (previous != null) Detach(previous);
+                if (hadFocus && lastSwitchId != null && switchButtons.TryGetValue(lastSwitchId, out var focusTarget)) focusTarget.Focus(FocusState.Programmatic);
                 var visual = ElementCompositionPreview.GetElementVisual(sceneRoot);
                 var comp = visual.Compositor;
                 var ellipse = comp.CreateEllipseGeometry();
@@ -746,13 +826,40 @@ namespace NetPulseSpike
                 log.Write("switchStart", "msToAnimation", Math.Round(sw.Elapsed.TotalMilliseconds));
                 await done.Task;
                 visual.Clip = null;
-                if (previous != null) windowRoot.Children.Remove(previous);
+                if (previous != null) RemoveScene(previous);
             }
             finally
             {
                 switching = false;
                 log.Write("switch", "ms", Math.Round(sw.Elapsed.TotalMilliseconds), "theme", t.Dark ? "dark" : "light", "problem", problem);
             }
+        }
+
+        // ---------- 벤치: 정지 장면, 오로라 켜고 끄기, 반복 원형 전환의 프레임 ----------
+        private async Task Record(string label, Func<Task> during)
+        {
+            frameTimes = new List<double>();
+            await during();
+            var ft = frameTimes; frameTimes = null;
+            ft.Sort();
+            double avg = ft.Count > 0 ? 1000 / ft.Average() : 0, p95 = ft.Count > 0 ? ft[(int)(ft.Count * .95)] : 0, max = ft.Count > 0 ? ft[ft.Count - 1] : 0;
+            log.Write("frames", "label", label, "avgFps", Math.Round(avg, 1), "p95Ms", Math.Round(p95, 1), "maxMs", Math.Round(max, 1), "count", ft.Count);
+        }
+
+        private async Task BenchAsync()
+        {
+            await Task.Delay(4000);
+            await Record("steady", () => Task.Delay(10000));
+            await Record("aurora-toggle", async () => { for (int i = 0; i < 6; i++) { ToggleAurora(); await Task.Delay(1100); } });
+            log.Write("mark", "label", "before-switches", "scenes", windowRoot.Children.Count, "plots", plots.Count);
+            await Record("theme-switch", async () =>
+            {
+                var origin = new Point(windowRoot.ActualWidth / 2, windowRoot.ActualHeight - 40);
+                for (int i = 0; i < 10; i++) { await SwitchAsync(origin, () => t = t.Dark ? LightTokens : DarkTokens); await Task.Delay(400); }
+            });
+            log.Write("mark", "label", "after-switches", "scenes", windowRoot.Children.Count, "plots", plots.Count);
+            await Record("steady-after", () => Task.Delay(10000));
+            log.Write("mark", "label", "bench-done");
         }
 
         // ---------- 등장, 숫자, 공용 애니메이션 ----------
