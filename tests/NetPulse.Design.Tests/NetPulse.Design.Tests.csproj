@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 디자인 토큰·대비·화면 코드 정적 검사 (M2 설계 7절 G2). Windows·UI 없음. CI 필수. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <Using Include="Xunit" />
+    <ProjectReference Include="..\..\src\NetPulse.Design\NetPulse.Design.csproj" />
+  </ItemGroup>
+</Project>
