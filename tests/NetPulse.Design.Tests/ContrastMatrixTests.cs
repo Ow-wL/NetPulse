@@ -37,7 +37,13 @@ public sealed class ContrastMatrixTests
                 behind = behind.Union(new BackgroundRange(c, c, 1));
         }
         if (level == GlassLevel.Dialog)
-            behind = Surface(theme, GlassLevel.Control).Union(behind).Under(p.Scrim);
+        {
+            // 대화상자·알림 뒤에는 카드의 글자·그래프 선·상태색도 온다 (M2 이월 2, M5): 차폐층 아래 범위에 넣는다
+            var under = Surface(theme, GlassLevel.Control).Union(behind);
+            foreach (var c in new[] { p.Ink, p.Muted, p.Accent, p.Series2, p.Ok, p.Warn, p.Bad })
+                under = under.Union(new BackgroundRange(c, c, 1));
+            behind = under.Under(p.Scrim);
+        }
         var surface = behind.Under(Materials.Glass(theme, level).TintWithAlpha);
         // 두꺼운 유리에는 포인터 하이라이트가 바탕 위(글자 아래)에 올 수 있다 (보통 유리에는 넣지 않는다)
         if (level is GlassLevel.Content)

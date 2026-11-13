@@ -29,12 +29,13 @@ public static class Materials
         (ThemeKind.Dark, GlassLevel.Content) => new(level, Rgba.Hex("#0e0e12"), 0.70, 32),
         (ThemeKind.Dark, GlassLevel.Control) => new(level, Rgba.Hex("#0e0e12"), 0.52, 20),
         (ThemeKind.Dark, GlassLevel.Float) => new(level, Rgba.Hex("#0e0e12"), 0.62, 40),
-        (ThemeKind.Dark, GlassLevel.Dialog) => new(level, Rgba.Hex("#0e0e12"), 0.52, 40),
-        // 라이트의 그림자 깊이는 다크의 절반 (밝은 바탕에서 그림자가 시안보다 진하게 보였다, G4 M2 1라운드 시각 검토)
-        (ThemeKind.Light, GlassLevel.Content) => new(level, Rgba.Hex("#ffffff"), 0.72, 16),
-        (ThemeKind.Light, GlassLevel.Control) => new(level, Rgba.Hex("#ffffff"), 0.55, 10),
-        (ThemeKind.Light, GlassLevel.Float) => new(level, Rgba.Hex("#ffffff"), 0.60, 20),
-        (ThemeKind.Light, GlassLevel.Dialog) => new(level, Rgba.Hex("#ffffff"), 0.55, 20),
+        (ThemeKind.Dark, GlassLevel.Dialog) => new(level, Rgba.Hex("#0e0e12"), 0.62, 40),   // M2 이월 2: 뒤에 글자·그래프가 와도 보조 글자 4.5 (0.52 → 0.62)
+        // 라이트의 그림자 깊이는 다크보다 얕게 (밝은 바탕에서 그림자가 시안보다 진하게 보였다, G4 M2 1라운드 시각 검토).
+        // M2 이월 3: 세 두께가 비슷해 보여 단계 사이 깊이 차이를 벌린다 (16·10·20 → 18·6·28). 틴트·불투명도는 대비 때문에 그대로
+        (ThemeKind.Light, GlassLevel.Content) => new(level, Rgba.Hex("#ffffff"), 0.72, 18),
+        (ThemeKind.Light, GlassLevel.Control) => new(level, Rgba.Hex("#ffffff"), 0.55, 6),
+        (ThemeKind.Light, GlassLevel.Float) => new(level, Rgba.Hex("#ffffff"), 0.60, 28),
+        (ThemeKind.Light, GlassLevel.Dialog) => new(level, Rgba.Hex("#ffffff"), 0.86, 20),   // M2 이월 2 (0.55 → 0.86)
         _ => throw new ArgumentOutOfRangeException(nameof(level)),
     };
 
