@@ -6,13 +6,23 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 마일스톤 | M3 측정 엔진 |
-| 단계 | ⑥ 마감 (push · PR · CI) |
-| 브랜치 | `loop/m3-engine` (base `loop/m2-design-system`) |
-| 설계 검토 라운드 | 2 / 2 |
-| diff 리뷰 라운드 | 3 / 3 (3라운드 APPROVE) |
+| 마일스톤 | M4 근거와 분석 엔진 |
+| 단계 | 마감 (G4 6라운드 APPROVE, 2026-11-14) |
+| 브랜치 | `loop/m4-analysis` (분기 `loop/m3-engine`, M0~M3은 `main`에 병합됨) |
+| 설계 검토 라운드 | 2 / 2 (Claude 판정으로 3판 확정) |
+| diff 리뷰 라운드 | 6 / 6 (사용자 예외. 6라운드 APPROVE, 차단 0) |
 | 누적 실패 | 4 / 8 |
-| PR | 마감 스크립트가 만든다 |
+| PR | base `main` (마감 스크립트가 만든다) |
+
+## 지난 마일스톤의 게이트 (M4)
+
+| 항목 | 값 |
+| --- | --- |
+| 승인받은 코드 커밋 X | `e63658faa67f497172da0910b59f7e7a90827b8d` (코드 끝 `6a2cc21` + 결정 기록) |
+| G1·G2 | `build/build.ps1 -Gate`: Core 258/258, Design 109/109, Platform 29/29, 미실행 0. `SessionLinkTests` 디버그 5회 반복 통과 |
+| G3 | 화면 없는 통합 (Platform 시험 안): 인터페이스 직접 관측 오프셋·읽기 비용, 실제 세션 링크 수집, 링크 로그 읽기, 빠른 진단, 데모 `link-drop.json`. 이 PC 실측 기록 `docs/loop/m4/pc-measurement.md` |
+| G4 | `.loop/reviews/m4-g4-r6-answer.md`: `판정: APPROVE` (차단 0, 사용자 예외 6라운드) |
+| manifest.json SHA-256 | `BFE22A5EE643B785527A83CEFA5B1D9150FFFFB9613EB421797DC56639F56D5B` |
 
 ## 지난 마일스톤의 게이트 (M3)
 
@@ -41,7 +51,8 @@
 | M0 결정 | `loop/m0-decisions` | Ow-wL/NetPulse#1 | 열림, 사용자 머지 대기. D1 = WinUI 3, D2 = 흑요석 |
 | M1 골격 | `loop/m1-skeleton` | Ow-wL/NetPulse#2 (base M0) | 열림, 사용자 머지 대기. CI 성공 |
 | M2 디자인 시스템 | `loop/m2-design-system` | Ow-wL/NetPulse#3 (base M1) | 열림, 사용자 머지 대기. CI 실행 43415674372 성공 (PR head `085f382`) |
-| M3 측정 엔진 | `loop/m3-engine` | (마감 중, base M2) | G4 3라운드 승인 |
+| M3 측정 엔진 | `loop/m3-engine` | Ow-wL/NetPulse#4 (base M2) | 병합됨 (`loop/m2-design-system`) |
+| M0~M3 통합 | `loop/m2-design-system` | Ow-wL/NetPulse#7 (base `main`) | `main`에 병합됨 (병합 커밋 `2af5dfe`) |
 
 ## 미해결 지적 (M2 G4 3라운드, 차단 아님 → M5에서 처리. M3에는 화면이 없어 그대로 둔다)
 
@@ -49,14 +60,19 @@
 2. 중요: 대화상자 뒤 범위에 글자·그래프색이 들어 있지 않다. 넣으면 대화상자 위 `muted` 대비가 계산상 약 4.40으로 기준(4.5) 아래다. 대화상자 배후 범위와 실측 장면을 넓히고 재질을 조정한다.
 3. 사소: 라이트의 세 재질 두께 구분이 약하다 (가독성 때문에 얇은 유리 불투명도를 올린 결과). 테두리·틴트·그림자로 조정한다.
 
-## 미해결 지적 (M3 G4 3라운드, 차단 아님 → M4에서 처리)
+## 미해결 지적 (M3 G4 3라운드, 차단 아님 → M4에서 처리함, 커밋 `2a1cc89`)
 
 1. 중요: 복귀와 직전 표본의 경과 시간이 같으면(단조 시계 정지, 밀리초 절삭) 복귀 경계를 놓쳐 거짓 `clock` 이벤트가 남는다 (`GapTracker.CheckClock`의 `to > lastClockMs`). 아직 반영하지 않은 복귀를 따로 기억하고 같은 시각 시험을 더한다. 회차·손실 집계에는 영향 없음.
 2. 중요: 시험의 쓰기 진입 신호가 "마지막 실패 완료"를 보장하지 않는다 (`RecordFakes` 횟수는 고장 결정 전에 오름). 실패 완료·배출 시도 완료 신호로 단계를 고정한다 (`ReviewR1Tests` 89·120행 부근).
 3. 중요: `SuspendGapSurvivesWhenRoundsAfterResumeAreSealedAsUnprocessed`는 원래 경쟁(꺼낸 뒤 분류 잠금 전에 마감)을 재현하지 못한다. 꺼냄과 분류 사이에 끼어드는 시험 지점을 두어 고정한다. 코드는 같은 잠금으로 해결됨.
 - 참고: 요약 게시가 시작된 뒤(이름 바꾸기)는 종료가 제한 없이 기다린다. 일관성을 위한 선택이며 "종료 기한은 게시 시작 전까지"로 표현한다.
 
+## 미해결 지적 (M4 G4 5·6라운드, 차단 아님 → M5에서 처리)
+
+1. 중요: 링크 표본 마감 검사의 두 위치(받을 때, 큐에서 꺼낼 때)를 각각 고정해 시험한다 (`SessionLinkTests`).
+2. 중요: 넘침 경쟁 시험(`LateOverflowRegistrationCannotMergeDownsAcrossTheLostSample`)이 큐 배출·재관측 생산자 진입을 `Task.Delay(200)`에 기댄다. 신호로 확인하고, 분리된 두 다운 구간의 존재·경계를 단언한다.
+
 ## 다음 할 일
 
-1. `close-milestone.ps1 -UiOptional`로 M3 마감 (push, PR base `loop/m2-design-system`, CI)
-2. M4 설계 (사용자 "M4 진행" 뒤). 위 미해결 지적 1~3을 M4 범위에 넣는다
+M4 G4 6라운드 승인. 이 기록 커밋 뒤 `close-milestone.ps1 -UiOptional` (base `main`)로 푸시·PR·CI를 마친다.
+- 다음: 사용자가 M4 PR을 `main`에 병합하면 M5. M5에서 위 미해결 지적(M2 3건, M4 2건)을 함께 처리한다.

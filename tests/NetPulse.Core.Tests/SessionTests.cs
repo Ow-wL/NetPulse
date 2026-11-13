@@ -171,7 +171,8 @@ public sealed class SessionTests : IDisposable
         await Eventually(() => s.Status.Committed == 2, "확정 2");
         failing = true;
         await Rounds(clock, s, 7);                     // 2~8 실패: 대기 3, 폐기 4 (같은 볼륨 가득 참이라 옮기지 않음)
-        await Eventually(() => s.Status.Observed == 9, "관측 9");
+        // 관측은 쓰기 전에 더해지므로(M3 G4 1라운드), 회차 8의 실패한 쓰기와 그 뒤 폐기까지 끝난 것을 신호로 기다린다
+        await Eventually(() => s.Status.Observed == 9 && primary.WritesDone("rounds") == 9 && s.Status.Dropped == 4, "회차 8 쓰기·폐기 완료");
         Assert.Equal((3L, 4L), (s.Status.Pending, s.Status.Dropped));
         Assert.True(s.Status.StorageFailing);
         Assert.Equal("primary", s.Status.LocationKind);

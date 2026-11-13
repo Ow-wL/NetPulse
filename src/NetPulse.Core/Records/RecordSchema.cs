@@ -10,7 +10,7 @@ namespace NetPulse.Core.Records;
 /// <summary>measurement.json (M3 설계 6.2). 조각마다 복제되고 segment만 다르다.</summary>
 public sealed record RecordHeader(
     string Id, int Segment, string AppVersion, DateTimeOffset StartedAt, int UtcOffsetMinutes,
-    IReadOnlyList<Target> Targets, int IntervalMs, int TimeoutMs, long PlannedMs, string LocationKind);
+    IReadOnlyList<Target> Targets, int IntervalMs, int TimeoutMs, long PlannedMs, string LocationKind, ExpectedConnection? Expected = null);
 
 public enum EndReason { Completed, Stopped, Error, Interrupted }
 
@@ -18,11 +18,12 @@ public enum EndReason { Completed, Stopped, Error, Interrupted }
 public sealed record RecordSummary(
     string Id, EndReason EndReason, DateTimeOffset EndedAt,
     long Observed, long Committed, long Pending, long Dropped, long Unprocessed,
-    long? LastCommittedRound, bool SealFailed, string? Error);
+    long? LastCommittedRound, bool SealFailed, string? Error, long? EventsDropped = null, long? EndMs = null);
 
 /// <summary>
 /// 기록 형식 버전 1의 직렬화 규칙 (M3 설계 6.2~6.3). 줄 단위 JSON. 모르는 필드는 무시하고, 알려진 필드의 모르는 값은 손상으로 본다.
-/// 같은 버전 안에서 필드를 더할 때는 없을 때의 의미를 여기 정한다: skipped 없음 = 0, gap 없음 = false.
+/// 같은 버전 안에서 필드를 더할 때는 없을 때의 의미를 여기 정한다: skipped 없음 = 0, gap 없음 = false,
+/// (M4) 머리 expected 없음 = 미기록(null, "상관없음"과 다름), 회차 end 없음 = 미기록(null, 읽는 쪽이 추정), 요약 eventsDropped 없음 = 미기록(null, 0이 아님).
 /// </summary>
 public static class RecordSchema
 {
@@ -47,6 +48,7 @@ public static class RecordSchema
             ["results"] = results,
         };
         if (r.Gap) line["gap"] = true;
+        if (r.EndMs is long end) line["end"] = end;
         return line.ToJsonString();
     }
 
@@ -72,14 +74,18 @@ public static class RecordSchema
             ["format"] = Format, ["version"] = Version, ["id"] = h.Id, ["segment"] = h.Segment, ["appVersion"] = h.AppVersion,
             ["startedAt"] = Iso(h.StartedAt), ["utcOffsetMinutes"] = h.UtcOffsetMinutes, ["targets"] = targets,
             ["intervalMs"] = h.IntervalMs, ["timeoutMs"] = h.TimeoutMs, ["plannedMs"] = h.PlannedMs, ["location"] = h.LocationKind,
+            ["expected"] = h.Expected is { } e ? ExpectedText(e) : null,
         }.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }
+
+    public static string ExpectedText(ExpectedConnection e) => e switch { ExpectedConnection.Wired => "wired", ExpectedConnection.Wireless => "wireless", _ => "any" };
 
     public static string SummaryJson(RecordSummary s) => new JsonObject
     {
         ["format"] = Format, ["version"] = Version, ["id"] = s.Id, ["endReason"] = s.EndReason.ToString().ToLowerInvariant(),
         ["endedAt"] = Iso(s.EndedAt), ["observed"] = s.Observed, ["committed"] = s.Committed, ["pending"] = s.Pending, ["dropped"] = s.Dropped,
         ["unprocessed"] = s.Unprocessed, ["lastCommittedRound"] = s.LastCommittedRound, ["sealFailed"] = s.SealFailed, ["error"] = s.Error,
+        ["eventsDropped"] = s.EventsDropped, ["endMs"] = s.EndMs,
     }.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
 
     public static string Iso(DateTimeOffset t) => t.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
@@ -99,7 +105,12 @@ public static class RecordSchema
                 (string?)t["provider"], ProfileStore.ParseMethod((string)t["method"]!));
         }).ToArray();
         var header = new RecordHeader((string)o["id"]!, (int)o["segment"]!, (string)o["appVersion"]!, DateTimeOffset.Parse((string)o["startedAt"]!, CultureInfo.InvariantCulture),
-            (int)o["utcOffsetMinutes"]!, targets, (int)o["intervalMs"]!, (int)o["timeoutMs"]!, (long)o["plannedMs"]!, (string?)o["location"] ?? "unknown");
+            (int)o["utcOffsetMinutes"]!, targets, (int)o["intervalMs"]!, (int)o["timeoutMs"]!, (long)o["plannedMs"]!, (string?)o["location"] ?? "unknown",
+            (string?)o["expected"] switch
+            {
+                null => null, "any" => ExpectedConnection.Any, "wired" => ExpectedConnection.Wired, "wireless" => ExpectedConnection.Wireless,
+                var x => throw new FormatException("모르는 예상 연결 유형 " + x),
+            });
         Check(header);
         return (header, false);
     }
@@ -138,6 +149,7 @@ public static class RecordSchema
             var wall = DateTimeOffset.Parse((string)o["wall"]!, CultureInfo.InvariantCulture);
             long skipped = o["skipped"] is JsonNode s ? (long)s : 0;
             bool gap = o["gap"] is JsonNode g && (bool)g;
+            long? end = o["end"] is JsonNode en ? (long)en : null;
             var results = new List<TargetResult>();
             foreach (var n in o["results"]!.AsArray())
             {
@@ -164,7 +176,8 @@ public static class RecordSchema
                 results.Add(new TargetResult(t, outcome, ms, e));
             }
             if (r < 0 || skipped < 0 || results.GroupBy(x => x.TargetId).Any(gr => gr.Count() > 1)) return (null, LineProblem.BadCombination);
-            return (new RoundData(r, due, at, wall, skipped, gap, results), LineProblem.None);
+            if (end is long e2 && e2 < at) return (null, LineProblem.BadCombination);   // 끝이 시작보다 이름
+            return (new RoundData(r, due, at, wall, skipped, gap, results, end), LineProblem.None);
         }
         catch (Exception ex) when (ex is NullReferenceException or InvalidOperationException or FormatException or JsonException or KeyNotFoundException)
         {

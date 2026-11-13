@@ -25,6 +25,12 @@ public sealed class Scenario
     public required IReadOnlyList<ScenarioTarget> Targets { get; init; }
     public required IReadOnlyList<ScenarioSegment> Segments { get; init; }
 
+    /// <summary>선택 (M4): 링크가 내려간 회차 구간 (from 이상 to 미만). 데모 경로·링크 관측이 쓴다.</summary>
+    public IReadOnlyList<ScenarioLink>? Links { get; init; }
+
+    /// <summary>그 회차에 데모 링크가 내려가 있는지.</summary>
+    public bool LinkDownAt(long round) => Links?.Any(l => round >= l.From && round < l.To) ?? false;
+
     /// <summary>재생할 회차 수 (0 이상 이 값 미만).</summary>
     public long RoundCount => DurationRounds ?? Segments.Max(s => s.To);
 
@@ -77,6 +83,8 @@ public sealed class Scenario
             if (hasResult && segment.Result is not ("lost" or "error")) throw new ScenarioException($"구간 {i}: result는 lost 또는 error입니다.");
             if (segment.Rtt is { } rtt && (rtt.Base < 0 || rtt.Jitter < 0)) throw new ScenarioException($"구간 {i}: rtt 값은 0 이상이어야 합니다.");
         }
+        foreach (var (link, i) in (Links ?? []).Select((l, i) => (l, i)))
+            if (link.From < 0 || link.To <= link.From) throw new ScenarioException($"링크 {i}: from은 0 이상, to는 from보다 커야 합니다.");
     }
 
     internal static bool IsDocumentationAddress(IPAddress address)
@@ -100,6 +108,13 @@ public sealed class ScenarioSegment
     public required string Target { get; init; }
     public ScenarioRtt? Rtt { get; init; }
     public string? Result { get; init; }
+}
+
+/// <summary>링크 다운 구간 (M4 데모).</summary>
+public sealed class ScenarioLink
+{
+    public required long From { get; init; }
+    public required long To { get; init; }
 }
 
 public sealed class ScenarioRtt

@@ -26,6 +26,10 @@ public sealed class GapTracker(TimeSpan interval)
 {
     public const int StallThreshold = 10;
     public static readonly TimeSpan ClockThreshold = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ResumeWallSlack = TimeSpan.FromSeconds(2);
+
+    /// <summary>마지막 <see cref="CheckClock"/> 호출 직전 표본의 경과 ms (시각 변경 이벤트의 prevAtMs, 불확실 구간 시작). 처리 작업에서만 읽는다.</summary>
+    public long? PreviousSampleMs { get; private set; }
 
     private sealed class Suspend
     {
@@ -35,6 +39,7 @@ public sealed class GapTracker(TimeSpan interval)
         public DateTimeOffset? ToWall;
         public long? LastRoundBefore;
         public bool Emitted;
+        public bool ClockRebased;   // 복귀 뒤 첫 표본에서 시각 기준을 다시 잡았는지
     }
 
     private readonly object gate = new();
@@ -137,12 +142,23 @@ public sealed class GapTracker(TimeSpan interval)
         lock (gate)
         {
             long now = Ms(elapsed);
+            PreviousSampleMs = lastClockMs == long.MinValue ? null : lastClockMs;
             var offset = wall.UtcDateTime - DateTime.UnixEpoch - elapsed;
             // 직전 표본과 이 표본 사이에 절전 시작 또는 복귀가 있었거나, 이 표본이 절전 중이면 기준만 다시 잡는다
-            bool crossed = suspends.Any(s =>
-                (s.FromMs >= lastClockMs && s.FromMs <= now)
-                || (s.ToMs is long to && to > lastClockMs && to <= now)
-                || (s.FromMs <= now && (s.ToMs is null || now < s.ToMs)));
+            // 복귀 경계는 "아직 반영하지 않은 복귀"로 따로 기억한다: 복귀 시각이 직전 표본과 같아도(단조 시계 정지, 밀리초 절삭)
+            // 복귀 뒤 첫 표본에서 반드시 기준을 다시 잡는다 (M3 G4 3라운드 이월 1)
+            bool crossed = false;
+            foreach (var s in suspends)
+            {
+                if (s.FromMs >= lastClockMs && s.FromMs <= now) crossed = true;
+                if (s.FromMs <= now && (s.ToMs is null || now < s.ToMs)) crossed = true;
+                // 경과 시간이 복귀와 같으면 표본 벽시계로 가른다: 복귀 알림 벽시계보다 2초 넘게 이른 표본은 복귀 전에 잡힌 것 (M4 설계 2-7)
+                if (s.ToMs is long to && !s.ClockRebased && (now > to || (now == to && wall >= s.ToWall!.Value - ResumeWallSlack)))
+                {
+                    s.ClockRebased = true;
+                    crossed = true;
+                }
+            }
             lastClockMs = now;
             if (clockBaseline is null || crossed)
             {

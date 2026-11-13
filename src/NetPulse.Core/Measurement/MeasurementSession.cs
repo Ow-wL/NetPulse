@@ -18,6 +18,16 @@ public sealed record SessionOptions
     public required IRecordRoot Primary { get; init; }
     public required IRecordRoot Fallback { get; init; }
     public IRouteObserver? Routes { get; init; }
+    /// <summary>링크 직접 관측 (M4 설계 A2). 경로 관측이 쓰는 인터페이스를 감시한다.</summary>
+    public NetPulse.Core.Evidence.ILinkObserver? Links { get; init; }
+    /// <summary>링크 로그 (M4 설계 A3). 측정 끝에 한 번 읽는다.</summary>
+    public NetPulse.Core.Evidence.ILinkLogSource? LinkLog { get; init; }
+    /// <summary>측정 끝 뒤 로그가 쌓이기를 기다리는 시간 (기본 3초).</summary>
+    public TimeSpan LinkLogSettle { get; init; } = TimeSpan.FromSeconds(3);
+    /// <summary>로그 조회 제한 (기본 5초).</summary>
+    public TimeSpan LinkLogTimeout { get; init; } = TimeSpan.FromSeconds(5);
+    /// <summary>직접 관측 표본 큐 크기 (기본 1024).</summary>
+    public int LinkQueueCapacity { get; init; } = MeasurementSession.LinkQueueCapacityDefault;
     public IPowerEvents? Power { get; init; }
     public string AppVersion { get; init; } = "0.0.0";
     /// <summary>회차 큐 크기 (기본 3600 = 1시간).</summary>
@@ -53,7 +63,7 @@ public sealed record SessionResult(
 /// 엔진이 회차를 제한 큐에 넣고, 처리 작업 하나가 순서대로 꺼내 공백 판정 → 경로 이벤트 → 통계(관측) → 기록(확정)을 한다.
 /// 회차 상태: 관측 → 확정 / 대기(쓰기 실패, 재시도) / 폐기(대기 상한 초과). 큐에 넣지 못한 회차는 미처리.
 /// </summary>
-public sealed class MeasurementSession : IAsyncDisposable
+public sealed partial class MeasurementSession : IAsyncDisposable
 {
     private readonly SessionOptions options;
     private readonly IClock clock;
@@ -79,7 +89,7 @@ public sealed class MeasurementSession : IAsyncDisposable
     private Task worker = Task.CompletedTask;
     private int ending;
     private bool sealedOff;
-    private long committed, dropped, unprocessed, lastRound = -1;
+    private long committed, dropped, unprocessed, lastRound = -1, eventsDropped;
     private long? lastCommittedRound;
     private bool storageFailing;
     private (long From, long To)? dropRange;
@@ -104,11 +114,19 @@ public sealed class MeasurementSession : IAsyncDisposable
         var probes = targets.ToDictionary(t => t.Id, options.ProbeFor);
         long limit = profile.Duration.Ticks / Profile.Interval.Ticks;
         engine = new MeasurementEngine(clock, new DispatchProbe(probes), targets.Select(t => t.ToProbeTarget()).ToArray(), Profile.Interval, limit,
-            options.Routes, Enqueue);
+            options.Links is { } links ? new RoutesWithLinks(options.Routes, links, () => directCapability == NetPulse.Core.Evidence.LinkCapability.Supported) : options.Routes, Enqueue);
+        CreateLinkQueue(options.LinkQueueCapacity);
+        linkCutoffMs = header.PlannedMs;   // 계획 끝 뒤의 링크 표본은 처음부터 받지 않는다 (M4 G4 4라운드 2)
         powerSubscription = options.Power?.Subscribe(() => gaps.OnSuspend(clock.Elapsed, clock.Now), () => gaps.OnResume(clock.Elapsed, clock.Now));
     }
 
     public string Id { get; }
+
+    /// <summary>시험 전용: 처리 작업이 회차를 꺼낸 직후(분류 잠금 전) 부른다.</summary>
+    internal Action<long>? TestHookAfterDequeue { get; set; }
+
+    /// <summary>시험 전용: 마감됐는지.</summary>
+    internal bool Sealed { get { lock (sync) return sealedOff; } }
 
     /// <summary>화면용 상태 구독은 엔진에서 직접 한다 (수명은 세션이 소유).</summary>
     public MeasurementEngine Engine => engine;
@@ -131,7 +149,8 @@ public sealed class MeasurementSession : IAsyncDisposable
         foreach (var root in new[] { options.Primary, options.Fallback })
         {
             var header = new RecordHeader(id, 0, options.AppVersion, startedAt, (int)startedAt.Offset.TotalMinutes, options.Profile.ActiveTargets,
-                (int)Profile.Interval.TotalMilliseconds, (int)options.Profile.Timeout.TotalMilliseconds, (long)options.Profile.Duration.TotalMilliseconds, root.Kind);
+                (int)Profile.Interval.TotalMilliseconds, (int)options.Profile.Timeout.TotalMilliseconds, (long)options.Profile.Duration.TotalMilliseconds, root.Kind,
+                options.Profile.Expected);
             try
             {
                 var folder = root.CreateFolder(id) ?? throw new IOException("같은 이름의 기록 폴더가 이미 있습니다.");
@@ -150,6 +169,7 @@ public sealed class MeasurementSession : IAsyncDisposable
 
     private void Begin()
     {
+        StartLinks();
         worker = Task.Run(WorkAsync);
         engine.Start();
         _ = engine.Finished.ContinueWith(_ => EndAsync(EndReason.Completed, null), TaskScheduler.Default);
@@ -239,6 +259,7 @@ public sealed class MeasurementSession : IAsyncDisposable
                         if (sealedOff) return;   // 마감 뒤에는 꺼내지 않는다
                         if (!queue.Reader.TryRead(out item)) break;
                     }
+                    DrainLinks();
                     Process(item);
                 }
             }
@@ -256,6 +277,7 @@ public sealed class MeasurementSession : IAsyncDisposable
     /// </summary>
     private void Process(RoundSnapshot s)
     {
+        TestHookAfterDequeue?.Invoke(s.Tick.Index);   // 시험 전용: 꺼낸 뒤·분류 잠금 전에 끼어든다 (M3 이월 3)
         long startMs = (long)s.Tick.Actual.TotalMilliseconds;
         long endMs = (long)(s.Completed == default ? s.Tick.Actual : s.Completed).TotalMilliseconds;
         var results = s.Results.Select(x => new TargetResult(x.Target.Id, x.Result.Outcome,
@@ -263,6 +285,7 @@ public sealed class MeasurementSession : IAsyncDisposable
             x.Result.Outcome == ProbeOutcome.Error ? (string.IsNullOrEmpty(x.Result.Status) ? "error" : x.Result.Status) : null)).ToArray();
         GapVerdict verdict;
         long? clockDelta;
+        long? clockPrevMs;
         RoundData data;
 
         // 회차 수용 여부와 공백·시각 상태 변경을 같은 마감 경계 안에서 정한다 (디스크 쓰기만 밖에서)
@@ -277,7 +300,9 @@ public sealed class MeasurementSession : IAsyncDisposable
             }
             verdict = gaps.OnRound(s.Tick.Index, s.Tick.SkippedBefore, startMs, endMs, s.At);
             clockDelta = gaps.CheckClock(s.Tick.Actual, s.At);
-            data = new RoundData(s.Tick.Index, (long)s.Tick.Scheduled.TotalMilliseconds, startMs, s.At, verdict.Skipped, verdict.Gap, results);
+            clockPrevMs = gaps.PreviousSampleMs;
+            data = new RoundData(s.Tick.Index, (long)s.Tick.Scheduled.TotalMilliseconds, startMs, s.At, verdict.Skipped, verdict.Gap, results,
+                s.Completed == default ? null : endMs);
             observed.Add(data);
             gapSpans.AddRange(verdict.Closed);
             lastRound = data.Round;
@@ -287,7 +312,7 @@ public sealed class MeasurementSession : IAsyncDisposable
         foreach (var g in verdict.Closed) WriteGapLine(g);
         if (s.Routes is not null) WriteRouteChanges(s.Tick.Index, startMs, s.At, s.Routes);
         if (clockDelta is long delta)
-            WriteEvent(RecordSchema.EventLine(Id, "clock", s.Tick.Index, startMs, s.At, new JsonObject { ["deltaMs"] = delta }));
+            WriteEvent(RecordSchema.EventLine(Id, "clock", s.Tick.Index, startMs, s.At, new JsonObject { ["deltaMs"] = delta, ["prevAtMs"] = clockPrevMs }));
         FlushPending(s.Tick.Actual, s.At, fromWorker: true);
     }
 
@@ -443,7 +468,7 @@ public sealed class MeasurementSession : IAsyncDisposable
         lock (sync)
         {
             pendingEvents.Add(line);
-            while (pendingEvents.Count > options.PendingLimit) pendingEvents.RemoveAt(0);
+            while (pendingEvents.Count > options.PendingLimit) { pendingEvents.RemoveAt(0); eventsDropped++; }   // 버린 수는 요약에 (M4 A5)
         }
         RetryEvents();
     }
@@ -472,10 +497,18 @@ public sealed class MeasurementSession : IAsyncDisposable
     private async Task<SessionResult> EndAsync(EndReason reason, string? error)
     {
         if (Interlocked.Exchange(ref ending, 1) != 0) return await completion.Task.ConfigureAwait(false);
+        // 측정 끝 경계는 정리(엔진 정지·배출·마감)를 기다리기 전에 고정한다 (M4 G4 2라운드 4)
+        var stopElapsed = clock.Elapsed;
+        var stopWall = clock.Now;
+        // 링크 표본 마감 = 최종 측정 끝과 같은 경계: min(중지 시각, 계획 끝) (M4 G4 4라운드 2)
+        Volatile.Write(ref linkCutoffMs, Math.Min((long)stopElapsed.TotalMilliseconds, header.PlannedMs));
         try
         {
             await engine.StopAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
             powerSubscription?.Dispose();
+            // 알림 해제 (해제 뒤 도착한 콜백은 버린다, M4 설계 A5 종료 순서)
+            linkClosed = true;
+            try { options.Links?.Dispose(); } catch (Exception) { }
             queue.Writer.TryComplete();
             bool sealFailed = false;
             if (!await Within(worker, options.DrainTimeout).ConfigureAwait(false))
@@ -494,8 +527,8 @@ public sealed class MeasurementSession : IAsyncDisposable
                 if (!await Within(worker, options.SealTimeout).ConfigureAwait(false)) sealFailed = true;
             }
 
-            var endElapsed = clock.Elapsed;
-            var endWall = clock.Now;
+            var endElapsed = stopElapsed;
+            var endWall = stopWall;
             long endMs = Math.Min((long)endElapsed.TotalMilliseconds, header.PlannedMs);
             // 계획 시간 뒤에 끝났으면(계획 뒤 복귀) 끝 경계를 계획 시간으로 맞추고 벽시계도 같은 순간으로 되돌린다
             if ((long)endElapsed.TotalMilliseconds > endMs)
@@ -518,7 +551,9 @@ public sealed class MeasurementSession : IAsyncDisposable
             // 끝 쓰기(공백·미처리 이벤트, 대기 회차 재시도, 요약)는 한 작업에서 하고 전체를 제한한다.
             // 쓰기가 멈춰 돌아오지 않으면 요약 없이 "기록 마감 실패"로 돌려준다 (늦게 끝나도 요약을 쓰지 않는다).
             var finishing = Task.Run(() => FinishWrites(reason, error, endMs, endElapsed, endWall));
-            if (!await Within(finishing, options.RetryTimeout + options.SealTimeout).ConfigureAwait(false))
+            var finishLimit = options.RetryTimeout + options.SealTimeout
+                + (options.LinkLog is null ? TimeSpan.Zero : options.LinkLogSettle + options.LinkLogTimeout);
+            if (!await Within(finishing, finishLimit).ConfigureAwait(false))
             {
                 // 포기와 요약 게시는 같은 잠금에서 하나만 이긴다. 게시(이름 바꾸기)가 이미 시작됐으면 그 결과를 기다린다.
                 bool gaveUp;
@@ -564,6 +599,7 @@ public sealed class MeasurementSession : IAsyncDisposable
         try
         {
             foreach (var g in gaps.Close(endMs, endWall)) WriteGapEvent(g);
+            FinishLinks(endElapsed, endWall);
             List<(long From, long To)> ranges;
             lock (sync) ranges = Merge(unprocessedRanges);
             foreach (var (from, to) in ranges)
@@ -581,7 +617,9 @@ public sealed class MeasurementSession : IAsyncDisposable
 
         RecordSummary summary;
         lock (sync)
-            summary = new RecordSummary(Id, reason, endWall, observed.Count, committed, pending.Count, dropped, unprocessed, lastCommittedRound, false, error);
+            summary = new RecordSummary(Id, reason, endWall, observed.Count, committed, pending.Count, dropped, unprocessed, lastCommittedRound, false, error,
+                eventsDropped + pendingEvents.Count,   // 끝까지 못 쓴 이벤트도 유실
+                endMs);                                // 측정 끝 경과 ms (관측해야 했던 회차의 분모, G4 1라운드 1)
         try
         {
             // 게시 직전에 포기 여부를 확인하고, 아니면 게시 중으로 표시한다 (그 뒤로는 종료 쪽이 포기하지 않는다)

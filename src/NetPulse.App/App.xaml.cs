@@ -99,7 +99,7 @@ public partial class App : Application
                 {
                     Profile = profile, Clock = new SystemClock(), ProbeFor = t => ProbeFactory.For(t, profile.Timeout),
                     Primary = new DiskRecordRoot(Path.Combine(options.UserData, "records"), "primary"), Fallback = fallback,
-                    Routes = new RouteObserver(), Power = new PowerEvents(),
+                    Routes = new RouteObserver(), Power = new PowerEvents(), Links = new LinkObserver(), LinkLog = new LinkLogReader(),
                     AppVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "0.0.0",
                 });
                 engine = session.Engine;
