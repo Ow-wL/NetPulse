@@ -27,7 +27,7 @@ public sealed partial class ShowcaseWindow
             int repeatsAtStart = ui.Motion.ActiveByKind[MotionKind.Repeat];
             int subscribersAtStart = ui.Effects.SubscriberCount;
             for (int i = 0; i < 2; i++) { await SwitchTheme(); await Task.Delay(Gap); }
-            double memAfter2 = PrivateMb();
+            double memAt2 = PrivateMb();
 
             segments.Add(await Measure("idle-1", () => Task.Delay(Idle)));
             for (int i = 0; i < 6; i++)
@@ -44,10 +44,10 @@ public sealed partial class ShowcaseWindow
             segments.Add(await Measure("idle-2", () => Task.Delay(Idle)));
             for (int i = 0; i < 14; i++) { await SwitchTheme(); await Task.Delay(Settle); }
             await Task.Delay(Idle);
-            double memAfter20 = PrivateMb();
+            double memAt22 = PrivateMb();   // 준비 2 + 측정 6 + 추가 14 = 전환 22회 뒤
             for (int i = 0; i < 40; i++) { await SwitchTheme(); await Task.Delay(Settle); }
             await Task.Delay(Idle);
-            double memAfter60 = PrivateMb();
+            double memAt62 = PrivateMb();   // 전환 62회 뒤
 
             log.Write("bench", new
             {
@@ -57,7 +57,7 @@ public sealed partial class ShowcaseWindow
                 fallbacks = ui.Theme.Fallbacks,
                 unclippedNewThemeFrames = ui.Theme.UnclippedNewThemeFrames,
                 lastSnapshotMs = ui.Theme.LastSnapshotMs,
-                memory = new { after2Mb = Math.Round(memAfter2, 1), after20Mb = Math.Round(memAfter20, 1), after60Mb = Math.Round(memAfter60, 1), plateauGrowthMb = Math.Round(memAfter60 - memAfter20, 1) },
+                memory = new { at2Mb = Math.Round(memAt2, 1), at22Mb = Math.Round(memAt22, 1), at62Mb = Math.Round(memAt62, 1), plateauGrowthMb = Math.Round(memAt62 - memAt22, 1) },
                 leftovers = new
                 {
                     snapshotLayers = ui.Theme.SnapshotLayersInTree,

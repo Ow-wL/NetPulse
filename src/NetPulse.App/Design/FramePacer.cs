@@ -33,7 +33,8 @@ public sealed class FramePacer
     private readonly List<double> window = [];
     private double windowStart;
     private int overWindows;
-    private double goodSince = -1;
+    private double goodSeconds;          // 유효한 창(전환·크기 조절 밖)에서만 쌓은 양호 시간
+    private double suspendedUntil = double.NegativeInfinity;
     private double lastSwitch = double.NegativeInfinity;
     private bool low;
 
@@ -64,6 +65,9 @@ public sealed class FramePacer
 
     public void Detach() => CompositionTarget.Rendering -= OnRendering;
 
+    /// <summary>창 크기 조절처럼 표본을 넣지 않을 구간 (G4 M2 1라운드 지적 9).</summary>
+    public void Suspend(TimeSpan span) => suspendedUntil = Math.Max(suspendedUntil, clock.Elapsed.TotalMilliseconds + span.TotalMilliseconds);
+
     private void OnRendering(object? sender, object e)
     {
         double now = clock.Elapsed.TotalMilliseconds;
@@ -71,7 +75,7 @@ public sealed class FramePacer
         {
             double dt = now - last;
             segment?.Add(dt);
-            if (!paused()) Track(now, dt);
+            if (!paused() && now >= suspendedUntil) Track(now, dt);
             else { window.Clear(); windowStart = now; }
         }
         last = now;
@@ -84,6 +88,7 @@ public sealed class FramePacer
         if (now - windowStart < FrameBudget.Window.TotalMilliseconds) return;
         var s = window.OrderBy(x => x).ToArray();
         double p50 = s[s.Length / 2], p95 = s[Math.Min(s.Length - 1, (int)(s.Length * 0.95))];
+        double windowSeconds = (now - windowStart) / 1000;
         window.Clear();
         if (Baseline is null) { Baseline = p50; return; }
         double t = Baseline.Value;
@@ -93,17 +98,17 @@ public sealed class FramePacer
             overWindows = p95 > Math.Max(FrameBudget.DegradeFloor, FrameBudget.DegradeFactor * t) ? overWindows + 1 : 0;
             if (overWindows >= FrameBudget.DegradeWindows && secondsNow - lastSwitch >= FrameBudget.MinSwitchGap.TotalSeconds)
             {
-                low = true; lastSwitch = secondsNow; overWindows = 0; goodSince = -1;
+                low = true; lastSwitch = secondsNow; overWindows = 0; goodSeconds = 0;
                 setLow(true);
             }
         }
         else
         {
-            if (p95 <= FrameBudget.RecoverFactor * t) { if (goodSince < 0) goodSince = secondsNow; }
-            else goodSince = -1;
-            if (goodSince >= 0 && secondsNow - goodSince >= FrameBudget.RecoverAfter.TotalSeconds && secondsNow - lastSwitch >= FrameBudget.MinSwitchGap.TotalSeconds)
+            // 양호한 시간은 유효한 창의 길이만 더한다 (전환·크기 조절 구간은 창이 비워져 더해지지 않는다)
+            goodSeconds = p95 <= FrameBudget.RecoverFactor * t ? goodSeconds + windowSeconds : 0;
+            if (goodSeconds >= FrameBudget.RecoverAfter.TotalSeconds && secondsNow - lastSwitch >= FrameBudget.MinSwitchGap.TotalSeconds)
             {
-                low = false; lastSwitch = secondsNow; goodSince = -1;
+                low = false; lastSwitch = secondsNow; goodSeconds = 0;
                 setLow(false);
             }
         }

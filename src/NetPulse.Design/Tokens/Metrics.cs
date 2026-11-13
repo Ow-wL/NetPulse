@@ -49,7 +49,7 @@ public static class Emphasis
     /// <summary>불러오는 중 윤곽의 가장 옅은 / 가장 진한 불투명도</summary>
     public const double SkeletonLow = 0.35, SkeletonHigh = 0.8;
     /// <summary>포인터를 따라가는 유리 하이라이트의 세기</summary>
-    public const double PointerGlow = 0.13;
+    public const double PointerGlow = 0.08;
     /// <summary>격자선</summary>
     public const double Grid = 1;
 }

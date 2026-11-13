@@ -27,8 +27,8 @@ public static partial class TokenLint
             new(@"""#[0-9a-fA-F]{3,8}""", RegexOptions.Compiled),
             ["src/NetPulse.App/Design/TokenBrushes.cs", "src/NetPulse.App/Design/SystemColors.cs"]),
         new("numeric-layout",
-            new($@"\b({LayoutProps})\s*=\s*-?(?!0(\.0+)?(?![\d.]))\.?\d|new\s+(Thickness|CornerRadius)\s*\([^)]*?(?<![\w.])(?!0(\.0+)?(?![\d.]))\.?\d|new\s+SizeInt32\s*\(\s*\d", RegexOptions.Compiled),
-            new($@"\b({LayoutProps})\s*=\s*""(?!\{{)(?!0(,0)*"")[^""]*\d", RegexOptions.Compiled),
+            new($@"\b({LayoutProps})\s*=\s*-?(?!0(\.0+)?(?![\d.]))\.?\d|\b({LayoutProps})\s*=\s*new\s*\([^)]*?(?<![\w.])(?!0(\.0+)?(?![\d.]))\.?\d|new\s+(Thickness|CornerRadius)\s*\([^)]*?(?<![\w.])(?!0(\.0+)?(?![\d.]))\.?\d|new\s+SizeInt32\s*\(\s*\d", RegexOptions.Compiled),
+            new($@"\b({LayoutProps})\s*=\s*""(?!\{{)(?!0(,0)*"")[^""]*\d|<\s*Setter\s+Property\s*=\s*""({LayoutProps})""\s+Value\s*=\s*""(?!\{{)(?!0(,0)*"")[^""]*\d", RegexOptions.Compiled),
             []),
         new("hidden-constant",
             new(@"\b(const|static\s+readonly)\s+(double|float|int|long|decimal|Color|Rgba|TimeSpan|Thickness|CornerRadius|SolidColorBrush)\b", RegexOptions.Compiled),
@@ -60,19 +60,26 @@ public static partial class TokenLint
         bool xaml = relativePath.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase);
         var lines = text.Replace("\r\n", "\n").Split('\n');
         bool inBlockComment = false;
+        // 주석을 지운 코드를 줄 구조 그대로 이어 붙여 파일 전체에 규칙을 건다.
+        // 그래서 "FontSize =" 다음 줄의 "14;"처럼 문장이 줄을 넘어가도 잡는다 (G4 M2 1라운드 지적 8).
+        var code = new string[lines.Length];
         for (int i = 0; i < lines.Length; i++)
+            code[i] = xaml ? StripXamlComment(lines[i], ref inBlockComment) : StripCsComment(lines[i], ref inBlockComment, out _);
+        string whole = string.Join("\n", code);
+        string wholeNoStrings = xaml ? whole : string.Join("\n", code.Select(BlankStrings));
+        static int LineOf(string subject, int index) => subject.AsSpan(0, index).Count(Environment.NewLine[^1]);   // 검사한 본문 기준 줄 번호 (문자열을 지운 본문은 길이가 다르다)
+        foreach (var rule in Rules)
         {
-            string code = xaml ? StripXamlComment(lines[i], ref inBlockComment) : StripCsComment(lines[i], ref inBlockComment, out _);
-            if (code.Trim().Length == 0) continue;
-            string codeNoStrings = xaml ? code : BlankStrings(code);
-            foreach (var rule in Rules)
+            if (rule.AllowedFiles.Contains(relativePath, StringComparer.OrdinalIgnoreCase)) continue;
+            var regex = xaml ? rule.Xaml : rule.Cs;
+            if (regex is null) continue;
+            // 색 문자열은 문자열 안에서 찾고, 나머지는 문자열을 지운 코드에서 찾는다
+            string subject = rule.Name == "color-literal" ? whole : wholeNoStrings;
+            var reported = new HashSet<int>();
+            foreach (Match m in regex.Matches(subject))
             {
-                if (rule.AllowedFiles.Contains(relativePath, StringComparer.OrdinalIgnoreCase)) continue;
-                var regex = xaml ? rule.Xaml : rule.Cs;
-                if (regex is null) continue;
-                // 색 문자열은 문자열 안에서 찾고, 나머지는 문자열을 지운 코드에서 찾는다
-                string subject = rule.Name == "color-literal" ? code : codeNoStrings;
-                if (regex.IsMatch(subject)) yield return new LintFinding(relativePath, i + 1, rule.Name, lines[i]);
+                int line = LineOf(subject, m.Index);
+                if (reported.Add(line)) yield return new LintFinding(relativePath, line + 1, rule.Name, lines[line]);
             }
         }
     }

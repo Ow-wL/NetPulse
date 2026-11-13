@@ -106,17 +106,14 @@ public sealed class Effects
     public void Refresh()
     {
         var previous = Mode;
+        var previousOs = Os;
         Mode = EffectsPolicy.Compute(ReadOs(), Settings, lowPerformance);
-        if (previous != Mode && !SameMode(previous, Mode))
+        if (EffectsPolicy.NeedsReapply(previous, previousOs, Mode, Os))
         {
             log.Write("mode", Describe(Mode));
             Changed?.Invoke(previous, Mode);
         }
     }
-
-    private static bool SameMode(EffectiveMode a, EffectiveMode b) =>
-        a.Theme == b.Theme && a.Material == b.Material && a.LightsVisible == b.LightsVisible && a.LightsMoving == b.LightsMoving
-        && a.AuroraVisible == b.AuroraVisible && a.ReduceMotion == b.ReduceMotion;
 
     public object Describe(EffectiveMode m) => new
     {

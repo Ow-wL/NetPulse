@@ -136,7 +136,9 @@ public sealed class ShowcaseTests
     public void NothingIsClippedOrOverlapping(string section, string scale)
     {
         // 설계 5.8: 스크롤 밖은 잘림 0, 스크롤 안은 가로가 보기 안, 글자 잘림 0, 상호작용 요소 겹침 0
-        using var app = Showcase("--freeze-motion", "--section", section, "--ui-scale", scale, "--selftest", "layout");
+        // 대화상자 절은 대화상자를 연 채로 검사한다 (G4 M2 1라운드 지적 6)
+        string[] extra = section == "dialog" ? ["--open-dialog"] : [];
+        using var app = Showcase(["--freeze-motion", "--section", section, "--ui-scale", scale, "--selftest", "layout", .. extra]);
         var report = app.WaitSelfTest("layout").GetProperty("report");
         var trimmed = report.GetProperty("trimmed").EnumerateArray().Select(e => e.GetString()).ToArray();
         var overlaps = report.GetProperty("overlaps").EnumerateArray().Select(e => e.GetString()).ToArray();

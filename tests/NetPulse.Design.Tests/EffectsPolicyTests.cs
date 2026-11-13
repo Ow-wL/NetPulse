@@ -71,3 +71,33 @@ public sealed class EffectsPolicyTests
     public void ThemePreferenceResolves(ThemePreference pref, bool systemDark, ThemeKind expected) =>
         Assert.Equal(expected, EffectsPolicy.Compute(Normal with { SystemPrefersDark = systemDark }, AppSettings.Default with { Theme = pref }, false).Theme);
 }
+
+public sealed class ReapplyTests
+{
+    private static readonly OsState Hc = new(true, true, true, false, true, SystemColorSet.Aquatic);
+
+    [Fact]
+    public void SystemColorChangeWhileHighContrastIsReapplied()
+    {
+        var m = EffectsPolicy.Compute(Hc, AppSettings.Default, false);
+        var os2 = Hc with { SystemColors = SystemColorSet.Desert };
+        var m2 = EffectsPolicy.Compute(os2, AppSettings.Default, false);
+        Assert.True(EffectsPolicy.NeedsReapply(m, Hc, m2, os2));
+    }
+
+    [Fact]
+    public void SystemColorChangeOutsideHighContrastIsIgnored()
+    {
+        var os = Hc with { HighContrast = false };
+        var m = EffectsPolicy.Compute(os, AppSettings.Default, false);
+        var os2 = os with { SystemColors = SystemColorSet.Desert };
+        Assert.False(EffectsPolicy.NeedsReapply(m, os, EffectsPolicy.Compute(os2, AppSettings.Default, false), os2));
+    }
+
+    [Fact]
+    public void SameInputsNeedNoReapply()
+    {
+        var m = EffectsPolicy.Compute(Hc, AppSettings.Default, false);
+        Assert.False(EffectsPolicy.NeedsReapply(m, Hc, m, Hc));
+    }
+}

@@ -22,6 +22,9 @@ public sealed class TokenLintTests
     [InlineData("acrylic.TintOpacity = .7;", "numeric-layout")]
     [InlineData("line.StrokeThickness = 1.5;", "numeric-layout")]
     [InlineData("AppWindow.ResizeClient(new SizeInt32(1280, 800));", "numeric-layout")]
+    [InlineData("text.FontSize =\n    14;", "numeric-layout")]
+    [InlineData("panel.Margin = new(12);", "numeric-layout")]
+    [InlineData("var t = new TextBlock\n{\n    FontSize\n        = 14,\n};", "numeric-layout")]
     [InlineData("private const double Gap = 12;", "hidden-constant")]
     [InlineData("static readonly Color Bg = x;", "hidden-constant")]
     [InlineData("private static readonly TimeSpan Wait = t;", "hidden-constant")]
@@ -53,6 +56,8 @@ public sealed class TokenLintTests
     [InlineData("/// <summary>FontSize = 14 같은 설명</summary>")]
     [InlineData("log.Write(\"FontSize = 14 Storyboard Popup\");")]
     [InlineData("int count = 3;")]
+    [InlineData("panel.Margin = new(Space.S2);")]
+    [InlineData("text.FontSize =\n    Typography.Body.Size;")]
     public void AllowsTokenUse(string code) => Assert.Empty(Rules(code));
 
     [Fact]
@@ -72,11 +77,14 @@ public sealed class TokenLintTests
     [InlineData("<DoubleAnimation Duration=\"0:0:0.3\"/>", "animation-api")]
     [InlineData("<VisualTransition GeneratedDuration=\"0:0:0.2\"/>", "animation-api")]
     [InlineData("<Popup/>", "popup-api")]
+    [InlineData("<Setter Property=\"FontSize\" Value=\"14\"/>", "numeric-layout")]
+    [InlineData("<Setter Property=\"Margin\"\n        Value=\"12,0,0,0\"/>", "numeric-layout")]
     public void CatchesXamlBypass(string code, string rule) => Assert.Contains(rule, Rules(code, ScreenXaml));
 
     [Theory]
     [InlineData("<Border Margin=\"{StaticResource Gap}\"/>")]
     [InlineData("<Border Margin=\"0\"/>")]
+    [InlineData("<Setter Property=\"Margin\" Value=\"{StaticResource Gap}\"/>")]
     [InlineData("<!-- <Border Margin=\"12\"/> -->")]
     public void AllowsXamlTokenUse(string code) => Assert.Empty(Rules(code, ScreenXaml));
 

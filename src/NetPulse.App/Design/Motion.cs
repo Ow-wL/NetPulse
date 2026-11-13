@@ -219,7 +219,7 @@ public sealed class Motion
         a.Duration = MotionTokens.Slow * 2;
         a.IterationBehavior = AnimationIterationBehavior.Count;
         a.IterationCount = times;
-        Run(element, MotionKind.Repeat, visual, ("Opacity", a), null, () => visual.Opacity = (float)Emphasis.Full);
+        Run(element, MotionKind.Repeat, visual, ("Opacity", a), null, () => visual.Opacity = (float)Emphasis.Full, endless: false);
     }
 
     /// <summary>
@@ -263,16 +263,20 @@ public sealed class Motion
         return ElementCompositionPreview.GetElementVisual(element);
     }
 
+    /// <param name="endless">끝없이 도는 반복이면 true (끝나지 않으므로 완료로 해제하지 않는다). 횟수가 정해진 반복은 false.</param>
     private MotionHandle Run(UIElement owner, MotionKind kind, Visual visual, (string Property, CompositionAnimation Animation) first,
-        (string Property, CompositionAnimation Animation)? second, Action final)
+        (string Property, CompositionAnimation Animation)? second, Action final, bool? endless = null)
     {
         created[kind]++;
+        bool forever = endless ?? kind == MotionKind.Repeat;
         MotionHandle? handle = null;
+        Action? detachUnloaded = null;
         bool ended = false;
         void Finish()
         {
             if (ended) return;
             ended = true;
+            detachUnloaded?.Invoke();   // 끝난 모션이 화면 이탈 처리기·클로저를 붙잡고 있지 않게
             visual.StopAnimation(first.Property);
             if (second is { } s) visual.StopAnimation(s.Property);
             final();
@@ -285,9 +289,9 @@ public sealed class Motion
         visual.StartAnimation(first.Property, first.Animation);
         if (second is { } sec) visual.StartAnimation(sec.Property, sec.Animation);
         batch.End();
-        // 반복형은 끝나지 않는다. 한 번 도는 것은 끝나면 최종 상태로 정리한다.
-        batch.Completed += (_, _) => owner.DispatcherQueue?.TryEnqueue(() => { if (kind != MotionKind.Repeat) Finish(); });
-        owner.RegisterUnloaded(Finish);
+        // 끝없는 반복은 끝나지 않는다. 한 번 돌거나 횟수가 정해진 것은 끝나면 최종 상태로 정리하고 해제한다.
+        batch.Completed += (_, _) => owner.DispatcherQueue?.TryEnqueue(() => { if (!forever) Finish(); });
+        detachUnloaded = owner.RegisterUnloaded(Finish);
         return handle;
     }
 
@@ -299,11 +303,12 @@ public sealed class Motion
 
 internal static class UnloadedExtensions
 {
-    /// <summary>요소가 화면에서 떨어질 때 한 번 부른다.</summary>
-    public static void RegisterUnloaded(this UIElement element, Action action)
+    /// <summary>요소가 화면에서 떨어질 때 한 번 부른다. 돌려받은 동작을 부르면 등록을 푼다.</summary>
+    public static Action RegisterUnloaded(this UIElement element, Action action)
     {
-        if (element is not FrameworkElement fe) return;
+        if (element is not FrameworkElement fe) return () => { };
         void Handler(object s, RoutedEventArgs e) { fe.Unloaded -= Handler; action(); }
         fe.Unloaded += Handler;
+        return () => fe.Unloaded -= Handler;
     }
 }

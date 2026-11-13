@@ -62,7 +62,7 @@ function Write-BenchSummary($Bench, [string] $Path) {
     $lines += ''
     $lines += "- 기준 간격 T: $([math]::Round($Bench.baselineMs, 2)) ms (CompositionTarget.Rendering 콜백 간격, 실제 표시 프레임과 다를 수 있음)"
     $lines += "- 원형 전환 $($Bench.transitions)회, 대체(페이드) $($Bench.fallbacks)회, 클립 없이 새 색이 그려진 콜백 $($Bench.unclippedNewThemeFrames)회, 마지막 화면 찍기 $([math]::Round($Bench.lastSnapshotMs, 1)) ms"
-    $lines += "- 전용 메모리: 전환 2회 뒤 $($m.after2Mb) MB, 20회 뒤 $($m.after20Mb) MB, 60회 뒤 $($m.after60Mb) MB (20→60회 증가 $($m.plateauGrowthMb) MB)"
+    $lines += "- 전용 메모리: 전환 2회 뒤 $($m.at2Mb) MB, 22회 뒤 $($m.at22Mb) MB, 62회 뒤 $($m.at62Mb) MB (22→62회 증가 $($m.plateauGrowthMb) MB)"
     $l = $Bench.leftovers
     $lines += "- 남은 것: 찍은 화면 $($l.snapshotLayers), 반복 모션 $($l.repeatsAtStart)→$($l.repeatsAtEnd), 모드 구독자 $($l.subscribersAtStart)→$($l.subscribersAtEnd)"
     $lines | Set-Content $Path -Encoding UTF8

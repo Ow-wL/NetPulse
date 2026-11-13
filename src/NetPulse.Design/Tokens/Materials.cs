@@ -30,10 +30,11 @@ public static class Materials
         (ThemeKind.Dark, GlassLevel.Control) => new(level, Rgba.Hex("#0e0e12"), 0.52, 20),
         (ThemeKind.Dark, GlassLevel.Float) => new(level, Rgba.Hex("#0e0e12"), 0.62, 40),
         (ThemeKind.Dark, GlassLevel.Dialog) => new(level, Rgba.Hex("#0e0e12"), 0.52, 40),
-        (ThemeKind.Light, GlassLevel.Content) => new(level, Rgba.Hex("#ffffff"), 0.72, 32),
-        (ThemeKind.Light, GlassLevel.Control) => new(level, Rgba.Hex("#ffffff"), 0.55, 20),
-        (ThemeKind.Light, GlassLevel.Float) => new(level, Rgba.Hex("#ffffff"), 0.60, 40),
-        (ThemeKind.Light, GlassLevel.Dialog) => new(level, Rgba.Hex("#ffffff"), 0.55, 40),
+        // 라이트의 그림자 깊이는 다크의 절반 (밝은 바탕에서 그림자가 시안보다 진하게 보였다, G4 M2 1라운드 시각 검토)
+        (ThemeKind.Light, GlassLevel.Content) => new(level, Rgba.Hex("#ffffff"), 0.72, 16),
+        (ThemeKind.Light, GlassLevel.Control) => new(level, Rgba.Hex("#ffffff"), 0.55, 10),
+        (ThemeKind.Light, GlassLevel.Float) => new(level, Rgba.Hex("#ffffff"), 0.60, 20),
+        (ThemeKind.Light, GlassLevel.Dialog) => new(level, Rgba.Hex("#ffffff"), 0.55, 20),
         _ => throw new ArgumentOutOfRangeException(nameof(level)),
     };
 

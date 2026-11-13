@@ -28,6 +28,7 @@ public sealed class Theme
     private readonly RenderTargetBitmap shot = new();   // 하나를 계속 다시 쓴다 (전환마다 새로 만들면 화면 한 장만큼씩 메모리가 늘었다)
     private CancellationTokenSource? transition;
     private EffectiveMode? pending;
+    private bool closing;
     private Compositor? compositor;
 
     public Theme(Ui ui)
@@ -135,6 +136,12 @@ public sealed class Theme
                 return;
             }
             LastSnapshotMs = started.Elapsed.TotalMilliseconds;
+            // 찍는 동안 닫기·움직임 줄이기·고대비·창 크기 변경이 들어왔으면 원형 없이 바로 끝낸다 (G4 M2 1라운드 지적 3)
+            if (cts.IsCancellationRequested || closing)
+            {
+                Apply(next);
+                return;
+            }
 
             // 3~5. 양보 없이 이어서: 찍은 화면을 아래에, 반경 0 클립, 유리 불투명, 새 색
             snapshotLayer.Source = shot;
@@ -189,6 +196,7 @@ public sealed class Theme
             cts.Dispose();
             TransitionChanged?.Invoke();
             ui.Log.Write("themeSwitch", new { theme = next.Theme.ToString().ToLowerInvariant(), ms = Math.Round(started.Elapsed.TotalMilliseconds), snapshotMs = Math.Round(LastSnapshotMs, 1) });
+            if (closing) pending = null;   // 닫는 중에는 새 전환을 시작하지 않는다
             if (pending is { } p2)
             {
                 pending = null;
@@ -200,6 +208,8 @@ public sealed class Theme
     /// <summary>창을 닫을 때: 진행 중인 전환을 끝내고 렌더링 구독을 푼다.</summary>
     public void Detach()
     {
+        closing = true;
+        pending = null;
         transition?.Cancel();
         CompositionTarget.Rendering -= OnRendering;
     }

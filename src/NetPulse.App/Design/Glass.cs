@@ -16,7 +16,7 @@ public sealed class Glass
     private readonly Dictionary<GlassLevel, AcrylicBrush> brushes = [];
     private readonly TokenBrushes tokens;
     private readonly Motion motion;
-    private readonly List<WeakReference<UIElement>> shadowed = [];
+    private readonly List<(WeakReference<UIElement> Element, GlassLevel Level)> shadowed = [];
     private MaterialMode mode = MaterialMode.Acrylic;
     private bool forceOpaque;
     private ThemeKind theme = ThemeKind.Dark;
@@ -49,8 +49,12 @@ public sealed class Glass
         }
         UpdateFallback();
         bool shadows = material != MaterialMode.HighContrast;
-        foreach (var weak in shadowed)
-            if (weak.TryGetTarget(out var el)) el.Shadow = shadows ? new ThemeShadow() : null;
+        foreach (var (weak, level) in shadowed)
+            if (weak.TryGetTarget(out var el))
+            {
+                el.Shadow = shadows ? new ThemeShadow() : null;
+                el.Translation = new Vector3(0, 0, (float)Materials.Glass(theme, level).ShadowDepth);
+            }
     }
 
     /// <summary>원형 전환 동안 잠시 불투명 표면으로 (M2 설계 5.4의 4, 아크릴 회색 대책).</summary>
@@ -102,15 +106,16 @@ public sealed class Glass
     /// </summary>
     public Grid Surface(GlassLevel level, UIElement child, double radius, Thickness padding)
     {
+        // 층: 유리 바탕 → 포인터 하이라이트 → 내용 → 위쪽 하이라이트 선.
+        // 포인터 하이라이트는 바탕만 밝히고 글자 위에는 그리지 않는다. 밝아진 바탕은 대비 계산에 들어 있다 (G4 M2 1라운드 지적 4).
         var body = new Border
         {
             Background = brushes[level],
             BorderBrush = tokens.Edge,
             BorderThickness = new Thickness(Size.Hairline),
             CornerRadius = new CornerRadius(radius),
-            Padding = padding,
-            Child = child,
         };
+        var content = new Border { Padding = padding, Child = child, BorderThickness = new Thickness(Size.Hairline) };
         var highlight = new Border
         {
             BorderBrush = tokens.Highlight,
@@ -120,13 +125,13 @@ public sealed class Glass
         };
         var host = new Grid();
         host.Children.Add(body);
+        if (level is GlassLevel.Content) AddPointerGlow(host, radius);   // 보통 유리는 보조 글자 대비 여유가 없어 넣지 않는다 (대비 계산)
+        host.Children.Add(content);
         host.Children.Add(highlight);
-        if (level is GlassLevel.Content or GlassLevel.Control) AddPointerGlow(host, radius);
-        // 그림자는 둥근 표면 자체에 건다 (바깥 사각 틀에 걸면 모서리가 각진 그림자가 보인다)
-        double depth = Materials.Glass(ThemeKind.Dark, level).ShadowDepth;
-        body.Translation = new Vector3(0, 0, (float)depth);
+        // 그림자는 둥근 표면 자체에 건다 (바깥 사각 틀에 걸면 모서리가 각진 그림자가 보인다). 깊이는 테마별 토큰
+        body.Translation = new Vector3(0, 0, (float)Materials.Glass(theme, level).ShadowDepth);
         body.Shadow = mode == MaterialMode.HighContrast ? null : new ThemeShadow();
-        shadowed.Add(new WeakReference<UIElement>(body));
+        shadowed.Add((new WeakReference<UIElement>(body), level));
         return host;
     }
 }

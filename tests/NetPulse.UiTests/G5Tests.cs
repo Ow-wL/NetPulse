@@ -61,8 +61,8 @@ public sealed class G5Tests
         if (left.GetProperty("repeatsAtEnd").GetInt32() != left.GetProperty("repeatsAtStart").GetInt32()) problems.Add($"반복 모션 수가 달라졌다 {left.GetProperty("repeatsAtStart")}→{left.GetProperty("repeatsAtEnd")}");
         if (left.GetProperty("subscribersAtEnd").GetInt32() != left.GetProperty("subscribersAtStart").GetInt32()) problems.Add("모드 구독자 수가 늘었다");
         var mem = bench.GetProperty("memory");
-        if (mem.GetProperty("plateauGrowthMb").GetDouble() > FrameBudget.PlateauGrowthMb) problems.Add($"전환 20→60회 사이 메모리 증가 {mem.GetProperty("plateauGrowthMb")} MB > {FrameBudget.PlateauGrowthMb}");
-        if (mem.GetProperty("after60Mb").GetDouble() > FrameBudget.PrivateLimitMb) problems.Add($"전용 메모리 {mem.GetProperty("after60Mb")} MB > {FrameBudget.PrivateLimitMb}");
+        if (mem.GetProperty("plateauGrowthMb").GetDouble() > FrameBudget.PlateauGrowthMb) problems.Add($"전환 22→62회 사이 메모리 증가 {mem.GetProperty("plateauGrowthMb")} MB > {FrameBudget.PlateauGrowthMb}");
+        if (mem.GetProperty("at62Mb").GetDouble() > FrameBudget.PrivateLimitMb) problems.Add($"전용 메모리 {mem.GetProperty("at62Mb")} MB > {FrameBudget.PrivateLimitMb}");
         Assert.True(problems.Count == 0, string.Join("\n", problems));
     }
 
@@ -254,6 +254,42 @@ public sealed class G5Tests
         cold.Dispose();
         Record($"switch-{from}-to-{to}", new { diff.Mean, diff.P99 });
         Assert.True(diff.Mean <= 1 && diff.P99 <= 8, $"실행 중에 바꾼 테마가 처음부터 띄운 화면과 다르다: {diff}");
+    }
+
+    // ---------------- 전환 경계 프레임 (7.3, G4 M2 1라운드 지적 7) ----------------
+
+    [Theory]
+    [InlineData("dark", "light")]
+    [InlineData("light", "dark")]
+    public void RevealNeverShowsTheNewThemeOutsideTheCircle(string from, string to)
+    {
+        // 원형은 도구 막대의 테마 단추에서 퍼진다. 가장 먼 왼쪽 아래 구석은 전환이 끝나기 직전까지 이전 테마여야 한다.
+        // 시작 직후부터 창 캡처를 촘촘히 연속으로 찍어 구석의 색을 본다. 모든 프레임을 찍지는 못하므로 순간 노출을 완전히 배제하지는 못한다.
+        using var app = Showcase("--freeze-motion", "--theme", from);
+        app.WaitDiag(d => d.GetProperty("theme").ToString(), t => t == from, "시작 테마");
+        Thread.Sleep(500);
+        var corner = new Rectangle(8, NetPulse.Design.Tokens.Size.WindowHeight - 28, 20, 20);
+        using var before = app.CaptureBitmap();
+        var oldCorner = ImageCompare.Pixels(before, corner);
+        var frames = new List<(double Ms, double DiffFromOld)>();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        app.Select("toolbar.theme." + to);
+        while (sw.ElapsedMilliseconds < 400)
+        {
+            using var f = app.CaptureBitmap();
+            var px = ImageCompare.Pixels(f, corner);
+            frames.Add((sw.Elapsed.TotalMilliseconds, px.Zip(oldCorner, (x, y) => Math.Abs(x - y)).Average()));
+        }
+        app.WaitDiag(d => (d.GetProperty("inTransition").GetBoolean(), d.GetProperty("transitions").GetInt32()), x => !x.Item1 && x.Item2 >= 1, "전환 끝");
+        Thread.Sleep(300);
+        using var after = app.CaptureBitmap();
+        double finalDiff = ImageCompare.Pixels(after, corner).Zip(oldCorner, (x, y) => Math.Abs(x - y)).Average();
+        Record($"boundary-{from}-to-{to}", new { frames = frames.Select(f => new { ms = Math.Round(f.Ms), diff = Math.Round(f.DiffFromOld, 1) }), finalDiff });
+        Assert.True(frames.Count >= 3, $"연속 캡처가 너무 적다: {frames.Count}");
+        var early = frames.Where(f => f.DiffFromOld > 12).ToArray();
+        Assert.True(early.Length == 0, "원형 밖 구석이 전환 중에 새 테마로 보였다: " + string.Join(", ", early.Select(f => $"{f.Ms:0} ms ({f.DiffFromOld:0.0})")));
+        Assert.True(finalDiff > 40, $"전환이 끝났는데 구석이 새 테마가 아니다 (차이 {finalDiff:0.0})");
+        Assert.Equal(0, app.Close());
     }
 
     // ---------------- 캡처 매트릭스 (7.4) ----------------

@@ -198,6 +198,11 @@ public sealed partial class ShowcaseWindow : Window
         scroll.ChangeView(0, 0, null, true);
         ui.Motion.Stagger(items);
         if (id == "toasts") ShowAllToasts();
+        if (id == "dialog" && options.OpenDialog && !dialog.IsOpen)
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                if (FindById(root, "dialog.open") is Control opener) OpenDialog(opener, FocusState.Programmatic);
+            });
         log.Write("section", new { id });
         QueueDiag();
     }
@@ -304,6 +309,7 @@ public sealed partial class ShowcaseWindow : Window
             stack.Children.Add(Measured(key + ".ink", "본문 글자 Aa 가나 23 ms", ui.Brushes.Ink));
             if (level != GlassLevel.Float) stack.Children.Add(Measured(key + ".muted", "보조 글자 Aa 가나 23 ms", ui.Brushes.Muted));
             var host = new GroupPanel("contrast." + key, key) { VerticalAlignment = VerticalAlignment.Center };
+            if (level == GlassLevel.Float) host.Children.Add(BehindFloat());
             if (level == GlassLevel.Dialog) host.Children.Add(new Border { Background = ui.Brushes.Scrim, CornerRadius = new CornerRadius(Radius.Outer) });
             host.Children.Add(ui.Glass.Surface(level, stack, Radius.Outer, new Thickness(Space.S4)));
             Grid.SetColumn(host, i);
@@ -311,6 +317,25 @@ public sealed partial class ShowcaseWindow : Window
         }
         scene.Children.Add(panels);
         yield return scene;
+    }
+
+    /// <summary>
+    /// 떠 있는 유리 뒤에 오는 것 (설계 4.3의 5): 측정 글자 자리를 가로지르는 촘촘한 그래프 선과 글자.
+    /// 두꺼운·보통 유리 뒤에는 배치 규칙상 이런 것이 오지 않으므로 떠 있는 유리에만 깐다 (G4 M2 1라운드 지적 5).
+    /// </summary>
+    private UIElement BehindFloat()
+    {
+        var layer = new Grid { IsHitTestVisible = false };
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        foreach (var brush in new[] { ui.Brushes.Ink, ui.Brushes.Muted, ui.Brushes.Ink, ui.Brushes.Muted })
+            text.Children.Add(Fonts.Text("뒤에 있는 글자 Aa 가나 12 ms 뒤에 있는 글자", Typography.Body, brush));
+        layer.Children.Add(text);
+        var lines = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = Space.S1 };
+        foreach (var brush in new[] { ui.Brushes.Accent, ui.Brushes.Series2, ui.Brushes.Ok, ui.Brushes.Warn, ui.Brushes.Bad, ui.Brushes.Accent, ui.Brushes.Ink, ui.Brushes.Series2, ui.Brushes.Bad, ui.Brushes.Accent })
+            lines.Children.Add(new Rectangle { Height = ChartStyle.Line, Fill = brush });
+        layer.Children.Add(lines);
+        AutomationProperties.SetAccessibilityView(layer, AccessibilityView.Raw);
+        return layer;
     }
 
     /// <summary>실측 대비 대상 글자. --hide-measured-text면 이 요소만 투명하게 (공유 브러시는 그대로).</summary>

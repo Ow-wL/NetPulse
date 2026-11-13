@@ -77,6 +77,13 @@ try {
         if (-not (Test-Path $g5Path)) { throw 'G5 결과(g5.json)가 없습니다.' }
         $g5 = Get-Content $g5Path -Encoding UTF8 -Raw | ConvertFrom-Json
         if (-not $g5.passed -or $g5.sourceCommit -ne $X -or $g5.manifestSha256 -ne $manifestHash) { throw 'G5 결과가 X의 통과 증거가 아닙니다.' }
+        # 기록된 캡처가 그대로 있는지 해시로 다시 확인한다 (G4 M2 1라운드 지적 10)
+        foreach ($cap in @($g5.captures)) {
+            $f = Join-Path $artifacts $cap.file
+            if (-not (Test-Path $f)) { throw "G5 캡처가 없습니다: $($cap.file)" }
+            if ((Get-Sha256Text $f) -ne $cap.sha256) { throw "G5 캡처가 기록과 다릅니다: $($cap.file)" }
+        }
+        if (@($g5.captures).Count -eq 0) { throw 'G5 캡처 목록이 비었습니다.' }
         $gate.g5Sha256 = Get-Sha256Text $g5Path
     }
     # G4: 대상이 X인 G4 요청문 중 가장 높은 라운드, 그 짝 답변의 첫 판정 줄

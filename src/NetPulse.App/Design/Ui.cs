@@ -25,6 +25,7 @@ public sealed class Ui
         Theme = new Theme(this) { HoldAt = options.RevealHold };
         Effects.Changed += (previous, mode) => Theme.OnModeChanged(previous, mode);
         Pacer = new FramePacer(() => Theme.InTransition, low => Effects.SetLowPerformance(low || options.SimulateLowPerformance));
+        window.SizeChanged += (_, _) => Pacer.Suspend(MotionTokens.Slow * 3);   // 창 크기 조절 중 표본은 넣지 않는다
     }
 
     public FramePacer Pacer { get; }

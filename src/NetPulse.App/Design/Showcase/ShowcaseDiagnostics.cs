@@ -141,8 +141,14 @@ public sealed partial class ShowcaseWindow
         void Walk(DependencyObject node, Rect clip, bool inScroll)
         {
             if (node is UIElement { Visibility: Visibility.Collapsed }) return;
+            // 자동화에서 빠진 하위 트리(대화상자 뒤 화면, 장식)는 검사하지 않는다
+            if (node is UIElement ue && !ReferenceEquals(node, root) && AutomationProperties.GetAccessibilityView(ue) == AccessibilityView.Raw) return;
+            if (ReferenceEquals(node, diag)) return;   // 진단 출력용 글자는 화면 요소가 아니다
             if (node is FrameworkElement fe && fe.ActualWidth > 0)
             {
+                // 명시적 Clip도 보이는 영역을 줄인다 (G4 M2 1라운드 지적 6)
+                if (fe.Clip is RectangleGeometry rg)
+                    clip = Intersect(clip, fe.TransformToVisual(root).TransformBounds(rg.Rect));
                 var bounds = fe.TransformToVisual(root).TransformBounds(new Rect(0, 0, fe.ActualWidth, fe.ActualHeight));
                 var id = AutomationProperties.GetAutomationId(fe);
                 if (fe is TextBlock { IsTextTrimmed: true } tb) trimmed.Add(id.Length > 0 ? id : tb.Text);
@@ -160,7 +166,7 @@ public sealed partial class ShowcaseWindow
             }
             for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++) Walk(VisualTreeHelper.GetChild(node, i), clip, inScroll);
         }
-        Walk(appGrid, rootRect, false);
+        Walk(root, rootRect, false);   // 오버레이(대화상자, 알림)까지 포함
         var overlaps = new List<string>();
         for (int a = 0; a < interactive.Count; a++)
             for (int b = a + 1; b < interactive.Count; b++)

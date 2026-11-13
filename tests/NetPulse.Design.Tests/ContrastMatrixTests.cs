@@ -38,7 +38,11 @@ public sealed class ContrastMatrixTests
         }
         if (level == GlassLevel.Dialog)
             behind = Surface(theme, GlassLevel.Control).Union(behind).Under(p.Scrim);
-        return behind.Under(Materials.Glass(theme, level).TintWithAlpha);
+        var surface = behind.Under(Materials.Glass(theme, level).TintWithAlpha);
+        // 두꺼운 유리에는 포인터 하이라이트가 바탕 위(글자 아래)에 올 수 있다 (보통 유리에는 넣지 않는다)
+        if (level is GlassLevel.Content)
+            surface = surface.Union(surface.Under(Rgba.White(Emphasis.PointerGlow)));
+        return surface;
     }
 
     private static void AtLeast(double minimum, double actual, string what) =>

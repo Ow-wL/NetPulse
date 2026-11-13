@@ -11,7 +11,18 @@ namespace NetPulse.UiTests;
 /// </summary>
 public sealed class KeyboardTests
 {
-    private const ushort Tab = 0x09, Enter = 0x0D, Escape = 0x1B, Space = 0x20, Down = 0x28;
+    private const ushort Tab = 0x09, Enter = 0x0D, Escape = 0x1B, Space = 0x20, Down = 0x28, Shift = 0x10;
+
+    /// <summary>Shift+Tab (뒤로). 보낼 때마다 전경 확인은 Press와 같다.</summary>
+    private static void PressShiftTab(AppDriver app)
+    {
+        var fg = Native.GetForegroundWindow();
+        Native.GetWindowThreadProcessId(fg, out uint pid);
+        if (pid != app.ProcessId) throw new InvalidOperationException("미완료(전경 아님): 키를 보내지 않았습니다.");
+        var inputs = new[] { Native.Key(Shift, false), Native.Key(Tab, false), Native.Key(Tab, true), Native.Key(Shift, true) };
+        if (Native.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Native.INPUT>()) != inputs.Length) throw new InvalidOperationException("키 입력을 보내지 못했습니다.");
+        Thread.Sleep(120);
+    }
 
     private static void Press(AppDriver app, ushort key)
     {
@@ -97,6 +108,12 @@ public sealed class KeyboardTests
             Press(app, Tab);
             var f = Focused(app);
             Assert.True(f is "dialog.confirm" or "dialog.cancel", "탭이 대화상자 밖으로 나갔다: " + f);
+        }
+        for (int i = 0; i < 5; i++)
+        {
+            PressShiftTab(app);   // 뒤로도 갇혀 있어야 한다 (G4 M2 1라운드)
+            var f = Focused(app);
+            Assert.True(f is "dialog.confirm" or "dialog.cancel", "Shift+Tab이 대화상자 밖으로 나갔다: " + f);
         }
         Press(app, Escape);
         app.WaitDiag(d => d.GetProperty("dialogOpen").GetBoolean(), o => !o, "Esc → 닫힘");

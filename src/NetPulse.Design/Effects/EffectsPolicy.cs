@@ -33,6 +33,14 @@ public sealed record EffectiveMode(
 /// </summary>
 public static class EffectsPolicy
 {
+    /// <summary>
+    /// 화면에 다시 반영해야 하는지: 모드가 달라졌거나, 고대비인 채로 시스템 색이 바뀌었을 때 (G4 M2 1라운드 지적 2).
+    /// </summary>
+    public static bool NeedsReapply(EffectiveMode previous, OsState previousOs, EffectiveMode next, OsState nextOs) =>
+        previous.Theme != next.Theme || previous.Material != next.Material || previous.LightsVisible != next.LightsVisible
+        || previous.LightsMoving != next.LightsMoving || previous.AuroraVisible != next.AuroraVisible || previous.ReduceMotion != next.ReduceMotion
+        || (next.HighContrast && previousOs.SystemColors != nextOs.SystemColors);
+
     public static EffectiveMode Compute(OsState os, AppSettings settings, bool lowPerformance)
     {
         var reasons = new List<string>();
