@@ -19,6 +19,7 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" />
     <ProjectReference Include="..\NetPulse.Core\NetPulse.Core.csproj" />
     <ProjectReference Include="..\NetPulse.Platform\NetPulse.Platform.csproj" />
+    <ProjectReference Include="..\NetPulse.Design\NetPulse.Design.csproj" />
     <!-- 글꼴(Pretendard, SIL OFL)과 데모 시나리오. 단일 파일 배포에서는 실행 파일 안에 묶여 실행 시 풀린다
          (Windows App SDK가 IncludeAllContentForSelfExtract를 강제하고, AppContext.BaseDirectory가 풀린 폴더를 가리킨다).
          실행 파일의 해시가 이 파일들을 덮는다. -->

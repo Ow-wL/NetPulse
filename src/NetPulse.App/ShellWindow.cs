@@ -6,9 +6,10 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using NetPulse.App.Design;
 using NetPulse.Core.Measurement;
+using NetPulse.Design.Tokens;
 using Windows.Graphics;
-using Windows.UI;
 
 namespace NetPulse.App;
 
@@ -20,10 +21,7 @@ namespace NetPulse.App;
 /// </summary>
 public sealed class ShellWindow : Window
 {
-    private static readonly Color Background = Color.FromArgb(255, 5, 5, 7);       // 흑요석 --bg #050507
-    private static readonly Color Ink = Color.FromArgb(255, 244, 244, 245);        // --ink #f4f4f5
-    private static readonly Color Muted = Color.FromArgb(255, 155, 155, 164);      // --muted #9b9ba4
-
+    private readonly TokenBrushes brushes = new(Palette.Dark);
     private readonly TextBlock round;
     private readonly TextBlock status;
     private readonly IDisposable subscription;
@@ -37,27 +35,25 @@ public sealed class ShellWindow : Window
     {
         this.beforeClose = beforeClose;
         Title = "NetPulse";
-        AppWindow.ResizeClient(new SizeInt32(1280, 800));
+        AppWindow.ResizeClient(new SizeInt32(Size.WindowWidth, Size.WindowHeight));
         var bar = AppWindow.TitleBar;
-        bar.BackgroundColor = bar.InactiveBackgroundColor = bar.ButtonBackgroundColor = bar.ButtonInactiveBackgroundColor = Background;
-        bar.ForegroundColor = bar.ButtonForegroundColor = Ink;
-        bar.InactiveForegroundColor = bar.ButtonInactiveForegroundColor = Muted;
+        bar.BackgroundColor = bar.InactiveBackgroundColor = bar.ButtonBackgroundColor = bar.ButtonInactiveBackgroundColor = brushes.Bg.Color;
+        bar.ForegroundColor = bar.ButtonForegroundColor = brushes.Ink.Color;
+        bar.InactiveForegroundColor = bar.ButtonInactiveForegroundColor = brushes.Muted.Color;
 
-        var bold = new FontFamily("ms-appx:///Fonts/Pretendard-Bold.otf#Pretendard");
-        var regular = new FontFamily("ms-appx:///Fonts/Pretendard-Regular.otf#Pretendard");
-        var title = new TextBlock { Text = "NetPulse", FontSize = 30, FontFamily = bold, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(Ink) };
-        status = new TextBlock { Text = mode.StartsWith("demo:", StringComparison.Ordinal) ? "데모 · " + mode[5..] : "측정 대상 없음 (대상 설정은 다음 단계에서)",
-            FontSize = 14, FontFamily = regular, Foreground = new SolidColorBrush(Muted) };
-        round = new TextBlock { Text = "—", FontSize = 52, FontFamily = bold, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(Ink) };
+        var title = Fonts.Text("NetPulse", Typography.Title, brushes.Ink);
+        status = Fonts.Text(mode.StartsWith("demo:", StringComparison.Ordinal) ? "데모 · " + mode[5..] : "측정 대상 없음 (대상 설정은 다음 단계에서)",
+            Typography.Body, brushes.Muted);
+        round = Fonts.Text("—", Typography.Display, brushes.Ink);
         AutomationProperties.SetAutomationId(status, "shell.status");
         AutomationProperties.SetAutomationId(round, "shell.round");
         AutomationProperties.SetHelpText(round, "현재 회차");   // 이름은 숫자 그대로 둔다 (화면 읽기와 자동화가 값을 읽는다)
 
-        var stack = new StackPanel { Spacing = 8, Margin = new Thickness(48) };
+        var stack = new StackPanel { Spacing = Space.S2, Margin = new Thickness(Space.S8) };
         stack.Children.Add(title);
         stack.Children.Add(status);
         stack.Children.Add(round);
-        var root = new Grid { Background = new SolidColorBrush(Background) };
+        var root = new Grid { Background = brushes.Bg };
         AutomationProperties.SetAutomationId(root, "shell.root");
         root.Children.Add(stack);
         Content = root;
