@@ -134,7 +134,7 @@ try {
     elseif ($prs.Count -gt 0) { throw "같은 head·base의 PR이 닫혀 있습니다: #$($prs[0].number). 직접 확인이 필요합니다." }
     else {
         Invoke-Gh pr create --base $Base --head $branch --title $Title --body-file $BodyFile | Out-Host
-        $created = @(Get-GhList pr list --head $branch --base $Base --state open --json 'number,state,url')
+        $created = Get-GhList pr list --head $branch --base $Base --state open --json 'number,state,url'
         if ($created.Count -ne 1) { throw "만든 PR을 찾지 못했습니다 ($($created.Count)개)" }
         $pr = $created[0]
     }

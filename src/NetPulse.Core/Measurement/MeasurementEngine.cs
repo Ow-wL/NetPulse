@@ -71,25 +71,25 @@ public sealed class MeasurementEngine : IAsyncDisposable
     }
 
     /// <summary>
-    /// 멈춘다: 취소 요청 → 실행 중인 회차가 끝날 때까지 기다림(제한시간) → 이후 결과는 버림.
+    /// 멈춘다: 취소 요청 → 취소 처리와 실행 중인 회차가 끝날 때까지 기다림(제한시간) → 이후 결과는 버림.
     /// 제한시간 안에 끝났으면 true.
+    /// 취소 콜백은 공급자 코드라 멈출 수 있다. 잠금 밖에서 비동기로 취소하고(CancelAsync), 제한시간은 취소 전부터 잰다.
     /// </summary>
     public async Task<bool> StopAsync(TimeSpan timeout)
     {
         Task? running;
+        CancellationTokenSource? source;
         lock (gate)
         {
             if (stopped) return true;
-            stopped = true;
-            cancellation?.Cancel();
+            stopped = true;   // 이 순간부터 도착하는 결과는 버린다
+            source = cancellation;
             running = loop;
         }
-        bool completed = true;
-        if (running != null)
-        {
-            var finished = await Task.WhenAny(running, Task.Delay(timeout)).ConfigureAwait(false);
-            completed = finished == running;
-        }
+        var deadline = Task.Delay(timeout);
+        var cancelling = source?.CancelAsync() ?? Task.CompletedTask;
+        var all = Task.WhenAll(cancelling, running ?? Task.CompletedTask);
+        bool completed = await Task.WhenAny(all, deadline).ConfigureAwait(false) == all;
         lock (gate) SetState(state with { Running = false });
         RequestDelivery();
         return completed;

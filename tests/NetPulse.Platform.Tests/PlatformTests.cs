@@ -29,17 +29,22 @@ public sealed class PlatformTests
     [Fact]
     public async Task EngineRunsWithRealProbeOnLoopback()
     {
-        // 실제 시계·실제 ICMP로 3회차. 회차 번호가 0부터 이어지는지 본다.
+        // 실제 시계·실제 ICMP로 상한 3회차. 끝난 상태가 구독자에게 도착하고, 회차 + 건너뜀이 상한과 같은지 본다.
+        // (0번부터 시작하는지, 중간 상태 생략 같은 시간 의존 검사는 Core의 가짜 시계 테스트가 맡는다)
         var engine = new MeasurementEngine(new SystemClock(), new IcmpProbe(TimeSpan.FromMilliseconds(800)),
             [new ProbeTarget("loopback", "local", IPAddress.Loopback)], TimeSpan.FromMilliseconds(200), roundLimit: 3);
-        var indices = new List<long>();
-        using var subscription = engine.Subscribe(s => { if (s.Latest is { } l) lock (indices) if (!indices.Contains(l.Tick.Index)) indices.Add(l.Tick.Index); });
+        var gate = new object();
+        EngineState? last = null;
+        using var subscription = engine.Subscribe(s => { lock (gate) last = s; });
         engine.Start();
         var deadline = DateTime.UtcNow.AddSeconds(10);
-        while (!engine.State.Finished && DateTime.UtcNow < deadline) await Task.Delay(20, TestContext.Current.CancellationToken);
-        Assert.True(engine.State.Finished);
-        Assert.Equal(3, engine.State.Rounds + engine.State.Skipped);
-        Assert.Equal(0, indices[0]);
+        bool Delivered() { lock (gate) return last is { Finished: true }; }
+        while (!Delivered() && DateTime.UtcNow < deadline) await Task.Delay(20, TestContext.Current.CancellationToken);
+        Assert.True(Delivered(), "끝난 상태가 구독자에게 도착해야 한다");
+        EngineState final;
+        lock (gate) final = last!;
+        Assert.Equal(3, final.Rounds + final.Skipped);
+        Assert.InRange(final.Latest!.Tick.Index, 0, 2);
         await engine.DisposeAsync();
     }
 }

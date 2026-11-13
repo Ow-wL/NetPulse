@@ -194,11 +194,52 @@ public sealed class MeasurementEngineTests
     }
 
     [Fact]
+    public async Task StopDoesNotBlockOnAStuckCancellationCallback()
+    {
+        // 공급자가 등록한 취소 콜백이 멈춰도 StopAsync를 부른 쪽(UI 스레드)은 막히지 않고 제한시간 뒤 돌아온다 (G4 2라운드 지적 1)
+        var clock = new ManualClock(Start);
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var probe = new StuckCancellationProbe(entered, release);
+        var engine = new MeasurementEngine(clock, probe, [Target("a")], Second);
+        engine.Start();
+        await Eventually(() => probe.Started, "측정 시작");
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var stop = engine.StopAsync(TimeSpan.FromMilliseconds(300));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(1), $"StopAsync 호출이 취소 콜백에 막혔다: {watch.Elapsed}");
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken), "취소 콜백이 불려야 한다");
+        Assert.False(await stop);   // 콜백이 멈춰 있으니 제한시간 안에 끝나지 못했다고 알린다
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"제한시간을 지키지 않았다: {watch.Elapsed}");
+        Assert.False(engine.State.Running);
+        release.Set();
+        await engine.DisposeAsync();
+    }
+
+    [Fact]
     public async Task StartTwiceThrows()
     {
         await using var engine = new MeasurementEngine(new ManualClock(Start), new RecordingProbe(), [Target("a")], Second);
         engine.Start();
         Assert.Throws<InvalidOperationException>(engine.Start);
+    }
+
+    /// <summary>취소되면 콜백 안에서 멈추는 공급자 (콜백 진입은 entered로 알린다).</summary>
+    private sealed class StuckCancellationProbe(ManualResetEventSlim entered, ManualResetEventSlim release) : IProbe
+    {
+        public volatile bool Started;
+
+        public async Task<ProbeResult> ProbeAsync(ProbeTarget target, long round, CancellationToken cancellationToken)
+        {
+            var done = new TaskCompletionSource<ProbeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            cancellationToken.Register(() =>
+            {
+                entered.Set();
+                release.Wait(TimeSpan.FromSeconds(30));
+                done.TrySetCanceled(cancellationToken);
+            });
+            Started = true;
+            return await done.Task;
+        }
     }
 
     private sealed class SlowProbe(Task gate) : IProbe
