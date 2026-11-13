@@ -127,17 +127,18 @@ public sealed class Theme
             // 1~2. 직전 화면 찍기 (기다리는 동안 아무것도 바꾸지 않는다). 시간 제한을 넘거나 실패하면 페이드로 대체.
             var render = shot.RenderAsync(live).AsTask();
             bool rendered = await Task.WhenAny(render, Task.Delay(MotionTokens.SnapshotLimit)) == render && !render.IsFaulted;
+            if (closing) return;   // 닫는 중이면 화면을 더 바꾸지 않는다 (G4 M2 2라운드 지적 3)
             if (!rendered)
             {
                 Fallbacks++;
                 ui.Log.Write("themeFallback", new { reason = render.IsFaulted ? "snapshot-failed" : "snapshot-timeout" });
                 Apply(next);
-                ui.Motion.Fade(live!, 0, 1, MotionTokens.Fast);
+                if (!cts.IsCancellationRequested) ui.Motion.Fade(live!, 0, 1, MotionTokens.Fast);
                 return;
             }
             LastSnapshotMs = started.Elapsed.TotalMilliseconds;
             // 찍는 동안 닫기·움직임 줄이기·고대비·창 크기 변경이 들어왔으면 원형 없이 바로 끝낸다 (G4 M2 1라운드 지적 3)
-            if (cts.IsCancellationRequested || closing)
+            if (cts.IsCancellationRequested)
             {
                 Apply(next);
                 return;
@@ -181,7 +182,7 @@ public sealed class Theme
             // 전환 중 오류가 앱을 멈추지 않게: 기록하고 즉시 적용으로 끝낸다 (G5에서는 대체 1회로 잡혀 실패한다)
             Fallbacks++;
             ui.Log.Write("themeError", new { type = ex.GetType().Name, message = ex.Message, at = ex.StackTrace?.Split(Environment.NewLine).Take(5) });
-            Apply(next);
+            if (!closing) Apply(next);
         }
         finally
         {

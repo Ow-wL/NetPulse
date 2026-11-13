@@ -67,11 +67,13 @@ public sealed class NavRail : GroupPanel
         void Refresh()
         {
             bool on = button.IsChecked == true;
-            bg.Background = on ? ui.Brushes.Faint : button.IsPointerOver ? ui.Brushes.Faint : ui.Brushes.Transparent;
+            bool hover = button.IsPointerOver;
+            bg.Background = on || hover ? ui.Brushes.Faint : ui.Brushes.Transparent;
             bg.BorderBrush = on ? ui.Brushes.Edge : null;
             bg.BorderThickness = new Thickness(on ? Size.Hairline : 0);
-            text.Foreground = on ? ui.Brushes.Ink : ui.Brushes.Muted;
-            if (iconEl is Viewbox { Child: Canvas { Children: [Microsoft.UI.Xaml.Shapes.Path p] } }) p.Stroke = on ? ui.Brushes.Accent : ui.Brushes.Muted;
+            // 보조색 글자는 옅은 바탕(Faint) 위에 두지 않는다: 바탕이 깔리면 본문색으로 (대비 계산, G4 M2 2라운드 지적 1)
+            text.Foreground = on || hover ? ui.Brushes.Ink : ui.Brushes.Muted;
+            if (iconEl is Viewbox { Child: Canvas { Children: [Microsoft.UI.Xaml.Shapes.Path p] } }) p.Stroke = on ? ui.Brushes.Accent : hover ? ui.Brushes.Ink : ui.Brushes.Muted;
         }
         button.Checked += (_, _) => { Refresh(); Current = id; Selected?.Invoke(id); };
         button.Unchecked += (_, _) => Refresh();
@@ -198,10 +200,10 @@ public sealed class SegmentedChoice : GroupPanel
         }
         Children.Add(Pill.Apply(new Border
         {
-            Background = ui.Brushes.Faint,
+            Background = ui.Brushes.Transparent,   // 보조색 글자가 옅은 바탕 위에 오지 않게 (G4 M2 2라운드 지적 1)
             BorderBrush = ui.Brushes.Edge,
             BorderThickness = new Thickness(Size.Hairline),
-                        Padding = new Thickness(Space.S1),
+            Padding = new Thickness(Space.S1),
             Child = row,
         }));
         HorizontalAlignment = HorizontalAlignment.Left;

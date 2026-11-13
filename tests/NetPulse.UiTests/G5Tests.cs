@@ -274,7 +274,8 @@ public sealed class G5Tests
         var frames = new List<(double Ms, double DiffFromOld)>();
         var sw = System.Diagnostics.Stopwatch.StartNew();
         app.Select("toolbar.theme." + to);
-        while (sw.ElapsedMilliseconds < 400)
+        // 시작부터 전환이 끝난 뒤(원형 550 ms + 찍기)까지 이어서 찍는다: 끝 경계(클립 해제·아크릴 복귀)도 본다 (G4 M2 2라운드 지적 2)
+        while (sw.ElapsedMilliseconds < 1100)
         {
             using var f = app.CaptureBitmap();
             var px = ImageCompare.Pixels(f, corner);
@@ -284,11 +285,21 @@ public sealed class G5Tests
         Thread.Sleep(300);
         using var after = app.CaptureBitmap();
         double finalDiff = ImageCompare.Pixels(after, corner).Zip(oldCorner, (x, y) => Math.Abs(x - y)).Average();
-        Record($"boundary-{from}-to-{to}", new { frames = frames.Select(f => new { ms = Math.Round(f.Ms), diff = Math.Round(f.DiffFromOld, 1) }), finalDiff });
-        Assert.True(frames.Count >= 3, $"연속 캡처가 너무 적다: {frames.Count}");
-        var early = frames.Where(f => f.DiffFromOld > 12).ToArray();
-        Assert.True(early.Length == 0, "원형 밖 구석이 전환 중에 새 테마로 보였다: " + string.Join(", ", early.Select(f => $"{f.Ms:0} ms ({f.DiffFromOld:0.0})")));
+        // 구석은 "이전 테마 → 새 테마"로 한 번만 바뀌어야 한다. 중간(합성 중) 값은 이전에도 새것에도 가깝지 않은 프레임으로 센다.
+        var states = frames.Select(f => f.DiffFromOld <= 12 ? 'o' : Math.Abs(f.DiffFromOld - finalDiff) <= 12 ? 'n' : 'm').ToArray();
+        string sequence = new string(states);
+        int firstNew = Array.IndexOf(states, 'n');
+        Record($"boundary-{from}-to-{to}", new { frames = frames.Select(f => new { ms = Math.Round(f.Ms), diff = Math.Round(f.DiffFromOld, 1) }), finalDiff, sequence });
+        Assert.True(frames.Count >= 10, $"연속 캡처가 너무 적다: {frames.Count}");
         Assert.True(finalDiff > 40, $"전환이 끝났는데 구석이 새 테마가 아니다 (차이 {finalDiff:0.0})");
+        Assert.True(firstNew > 0, "구석이 처음부터 새 테마였거나 끝까지 바뀌지 않았다: " + sequence);
+        Assert.True(frames[firstNew].Ms >= 300, $"구석이 너무 일찍 새 테마가 됐다 ({frames[firstNew].Ms:0} ms): " + sequence);
+        // 한 번 새 테마가 된 뒤 이전 테마나 중간값으로 돌아가면 끝 경계의 깜빡임이다
+        Assert.True(states.Skip(firstNew).All(s => s == 'n'), "끝 경계에서 깜빡였다 (o=이전, n=새, m=중간): " + sequence);
+        // 원형 가장자리가 구석을 지나는 동안은 중간값이 나온다(감속 곡선이라 끝에서 느리다). 차이는 줄어들지 않고 늘기만 해야 한다.
+        for (int i = 1; i < frames.Count; i++)
+            Assert.True(frames[i].DiffFromOld >= frames[i - 1].DiffFromOld - 6,
+                $"구석이 새 테마 쪽으로 가다 되돌아갔다 ({frames[i - 1].Ms:0}→{frames[i].Ms:0} ms): " + sequence);
         Assert.Equal(0, app.Close());
     }
 

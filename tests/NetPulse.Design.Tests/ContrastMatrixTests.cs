@@ -77,6 +77,19 @@ public sealed class ContrastMatrixTests
     }
 
     [Theory, MemberData(nameof(Themes))]
+    public void InkStaysReadableOnFaintFills(ThemeKind theme)
+    {
+        // 포인터 올림·선택·칩 바탕(Faint)은 유리 위에 한 겹 더 깔린다. 그 위 글자는 본문색만 쓴다 (보조색은 이 위에 두지 않는다).
+        var p = Palette.For(theme);
+        foreach (var level in new[] { GlassLevel.Content, GlassLevel.Control, GlassLevel.Dialog })
+        {
+            var onFaint = Surface(theme, level).Under(p.Faint);
+            AtLeast(Text, onFaint.WorstRatio(p.Ink), $"{theme} {level} ink on faint");
+            AtLeast(Graphic, onFaint.WorstRatio(p.Accent), $"{theme} {level} accent icon on faint");
+        }
+    }
+
+    [Theory, MemberData(nameof(Themes))]
     public void TextOnAccentFillIsReadable(ThemeKind theme)
     {
         var p = Palette.For(theme);
