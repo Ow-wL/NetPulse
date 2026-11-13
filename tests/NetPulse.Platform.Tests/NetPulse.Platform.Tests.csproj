@@ -9,5 +9,7 @@
     <PackageReference Include="xunit.v3" />
     <Using Include="Xunit" />
     <ProjectReference Include="..\..\src\NetPulse.Platform\NetPulse.Platform.csproj" />
+    <!-- G3 대체 시나리오가 데모 시나리오를 실제 파일까지 돌린다 -->
+    <None Include="..\..\demo\scenarios\*.json" Link="scenarios\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

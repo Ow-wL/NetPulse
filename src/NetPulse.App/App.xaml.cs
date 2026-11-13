@@ -1,7 +1,9 @@
 using Microsoft.UI.Xaml;
 using NetPulse.App.Design.Showcase;
 using NetPulse.Core.Demo;
+using NetPulse.Core.Detection;
 using NetPulse.Core.Measurement;
+using NetPulse.Core.Records;
 using NetPulse.Core.Timing;
 using NetPulse.Design.Settings;
 using NetPulse.Platform;
@@ -17,6 +19,7 @@ public partial class App : Application
 {
     private Window? window;
     private MeasurementEngine? engine;
+    private MeasurementSession? session;
     private AppLog? log;
 
     public App()
@@ -48,6 +51,7 @@ public partial class App : Application
             return;
         }
         string mode;
+        string? liveStatus = null;
         if (options.Demo is { } demo)
         {
             var scenario = Scenario.Load(ResolveScenario(demo));
@@ -57,9 +61,8 @@ public partial class App : Application
         }
         else
         {
-            // M1: 대상 모델은 M3에서 만든다. 지금은 대상 없이 회차만 돈다.
-            engine = new MeasurementEngine(new SystemClock(), new IcmpProbe(TimeSpan.FromMilliseconds(800)), [], TimeSpan.FromSeconds(1));
             mode = "live";
+            liveStatus = StartLive(options, log);
         }
         var resources = new
         {
@@ -67,10 +70,49 @@ public partial class App : Application
             scenarios = Directory.Exists(Path.Combine(AppContext.BaseDirectory, "demo", "scenarios")),
         };
         log.Write("startup", new { mode, speed = options.DemoSpeed, version = typeof(App).Assembly.GetName().Version?.ToString(), resources });
-        engine.Start();
+        if (session is null) engine!.Start();
 
-        window = new ShellWindow(engine, mode, options.RunSeconds, ShutdownAsync);
+        window = new ShellWindow(engine!, mode, options.RunSeconds, ShutdownAsync, liveStatus);
         window.Activate();
+    }
+
+    /// <summary>
+    /// 실시간 모드 (M3 설계 9절): 탐지 제안 프로필로 세션을 돌린다. 첫 실행 확인 화면은 M5.
+    /// 제안이 없거나 시작하지 못하면 대상 없이 회차만 돈다 (이유를 상태와 기록에 남긴다. 주소는 남기지 않는다).
+    /// </summary>
+    private string StartLive(StartupOptions options, AppLog appLog)
+    {
+        DetectionResult detection;
+        try { detection = DetectionPlanner.Plan(NetworkInfo.Snapshot(DetectionPlanner.RouteProbeAddress)); }
+        catch (Exception ex) when (ex is System.Net.NetworkInformation.NetworkInformationException or DllNotFoundException or EntryPointNotFoundException)
+        {
+            detection = new DetectionResult(DetectionStatus.Unknown, null, ex.GetType().Name, null, Tristate.Unknown, 0);
+        }
+        appLog.Write("detection", new { status = detection.Status.ToString(), kind = detection.Kind?.ToString(), @virtual = detection.Virtual.ToString(),
+            targets = detection.Proposal?.ActiveTargets.Count ?? 0 });
+        if (detection.Proposal is { } profile)
+        {
+            try
+            {
+                var fallback = DiskRecordRoot.Defaults().Fallback;
+                session = MeasurementSession.Start(new SessionOptions
+                {
+                    Profile = profile, Clock = new SystemClock(), ProbeFor = t => ProbeFactory.For(t, profile.Timeout),
+                    Primary = new DiskRecordRoot(Path.Combine(options.UserData, "records"), "primary"), Fallback = fallback,
+                    Routes = new RouteObserver(), Power = new PowerEvents(),
+                    AppVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "0.0.0",
+                });
+                engine = session.Engine;
+                appLog.Write("session", new { id = session.Id, location = session.Status.LocationKind });
+                return $"실시간 · 대상 {profile.ActiveTargets.Count}개";
+            }
+            catch (SessionStartException ex)
+            {
+                appLog.Write("sessionFailed", new { message = ex.Message, inner = ex.InnerException?.GetType().Name });
+            }
+        }
+        engine = new MeasurementEngine(new SystemClock(), new IcmpProbe(TimeSpan.FromMilliseconds(800)), [], TimeSpan.FromSeconds(1));
+        return "측정 대상 없음 · " + (detection.Notice ?? detection.Status.ToString());
     }
 
     /// <summary>부품 전시 화면 (M2). 측정 엔진 없이 뜬다. 이번 실행의 테마·오로라 인수는 저장하지 않는다.</summary>
@@ -91,6 +133,18 @@ public partial class App : Application
 
     private async Task ShutdownAsync()
     {
+        if (session is { } running)
+        {
+            session = null;
+            engine = null;
+            var result = await running.StopAsync();
+            log?.Write("shutdown", new
+            {
+                stopCompleted = !result.SealFailed, rounds = running.Engine.State.Rounds, skipped = running.Engine.State.Skipped,
+                endReason = result.EndReason.ToString(), observed = result.Summary?.Observed, committed = result.Summary?.Committed, unsaved = result.Unsaved,
+            });
+            return;
+        }
         if (engine is null) return;
         var stopping = engine;
         engine = null;

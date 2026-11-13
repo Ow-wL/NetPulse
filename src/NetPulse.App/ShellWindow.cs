@@ -31,7 +31,7 @@ public sealed class ShellWindow : Window
     private bool closing;
     private bool closeAllowed;
 
-    public ShellWindow(MeasurementEngine engine, string mode, int runSeconds, Func<Task> beforeClose)
+    public ShellWindow(MeasurementEngine engine, string mode, int runSeconds, Func<Task> beforeClose, string? liveStatus = null)
     {
         this.beforeClose = beforeClose;
         Title = "NetPulse";
@@ -42,7 +42,7 @@ public sealed class ShellWindow : Window
         bar.InactiveForegroundColor = bar.ButtonInactiveForegroundColor = brushes.Muted.Color;
 
         var title = Fonts.Text("NetPulse", Typography.Title, brushes.Ink);
-        status = Fonts.Text(mode.StartsWith("demo:", StringComparison.Ordinal) ? "데모 · " + mode[5..] : "측정 대상 없음 (대상 설정은 다음 단계에서)",
+        status = Fonts.Text(mode.StartsWith("demo:", StringComparison.Ordinal) ? "데모 · " + mode[5..] : liveStatus ?? "측정 대상 없음",
             Typography.Body, brushes.Muted);
         round = Fonts.Text("—", Typography.Display, brushes.Ink);
         AutomationProperties.SetAutomationId(status, "shell.status");

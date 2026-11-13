@@ -59,6 +59,7 @@ public sealed class ScaledClock : IClock
 
 /// <summary>
 /// 테스트용 시계. <see cref="Advance"/>로만 시간이 흐른다. 기다리는 작업은 경과 시간이 목표에 닿으면 끝난다.
+/// 벽시계는 <see cref="ShiftWall"/>로 경과 시간과 따로 움직일 수 있다 (절전 중 단조 시계가 멈춘 경우, 시각 변경 재현. M3 설계 7절).
 /// <see cref="EarlyWake"/>를 켜면 기다림을 목표보다 일찍 끝내 "타이머가 일찍 깨는" 경우를 재현한다.
 /// </summary>
 public sealed class ManualClock : IClock
@@ -66,6 +67,7 @@ public sealed class ManualClock : IClock
     private readonly object gate = new();
     private readonly List<(TimeSpan Due, TaskCompletionSource Source)> waiters = [];
     private TimeSpan elapsed;
+    private TimeSpan wallShift;
 
     public ManualClock(DateTimeOffset startAt) => StartAt = startAt;
 
@@ -76,7 +78,10 @@ public sealed class ManualClock : IClock
 
     public TimeSpan Elapsed { get { lock (gate) return elapsed; } }
 
-    public DateTimeOffset Now => StartAt + Elapsed;
+    public DateTimeOffset Now { get { lock (gate) return StartAt + elapsed + wallShift; } }
+
+    /// <summary>벽시계만 옮긴다 (경과 시간과 기다림은 그대로).</summary>
+    public void ShiftWall(TimeSpan by) { lock (gate) wallShift += by; }
 
     /// <summary>지금 기다리는 작업 수 (테스트에서 엔진이 다음 회차를 기다리기 시작했는지 확인할 때 쓴다).</summary>
     public int WaiterCount { get { lock (gate) return waiters.Count; } }

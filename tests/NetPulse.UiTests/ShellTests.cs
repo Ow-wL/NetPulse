@@ -31,10 +31,12 @@ public sealed class ShellTests
     }
 
     [Fact]
-    public void LiveModeWithoutTargetsStillTicksAndSaysSo()
+    public void LiveModeRunsDetectedProfileOrSaysWhyNot()
     {
+        // M3: 탐지 제안 프로필로 세션을 돌린다. 제안이 없는 환경이면 이유를 보여 주고 대상 없이 회차만 돈다.
         using var app = AppDriver.Launch();
-        Assert.StartsWith("측정 대상 없음", app.Text("shell.status"));
+        var status = app.Text("shell.status");
+        Assert.True(status.StartsWith("실시간 · 대상 ", StringComparison.Ordinal) || status.StartsWith("측정 대상 없음", StringComparison.Ordinal), "상태: " + status);
         AppDriver.WaitFor(() => Round(app), r => r >= 1, "회차 1 이상");
         Assert.Equal(0, app.Close());
     }
