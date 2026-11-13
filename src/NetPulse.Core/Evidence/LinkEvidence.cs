@@ -92,16 +92,25 @@ public sealed record LinkEvidence(
         new Dictionary<string, IReadOnlyList<(long Ms, int Index)>>();
 
     /// <summary>그 시각에 그 인터페이스 번호를 쓰던 어댑터 별칭. 이력이 없으면 마지막 번호로.</summary>
+    /// <remarks>
+    /// 이력은 직접 관측(그 순간 그 어댑터를 읽은 것)으로만 만든다. 제거(removed)는 번호 대응을 닫는다(번호 -1).
+    /// 첫 표본보다 조금(2초 안) 이른 시각은 첫 표본의 번호로 본다 (첫 회차는 표본보다 먼저 시작한다).
+    /// 같은 시각에 같은 번호를 둘이 쓰면 판단하지 않는다(null). (M4 G4 2라운드 3)
+    /// </remarks>
     public string? AdapterFor(int interfaceIndex, long atMs)
     {
+        if (IndexHistory.Count == 0)
+            return Adapters.Values.Where(a => a.InterfaceIndex == interfaceIndex).Select(a => a.Alias).FirstOrDefault();
+        var matches = new List<string>();
         foreach (var (alias, history) in IndexHistory)
         {
             if (history.Count == 0) continue;
-            var at = history.LastOrDefault(h => h.Ms <= atMs);
-            int index = at == default ? history[0].Index : at.Index;
-            if (index == interfaceIndex) return alias;
+            int? index = null;
+            foreach (var h in history) if (h.Ms <= atMs) index = h.Index;
+            if (index is null && history[0].Ms - atMs <= 2000) index = history[0].Index;
+            if (index == interfaceIndex) matches.Add(alias);
         }
-        return IndexHistory.Count > 0 ? null : Adapters.Values.Where(a => a.InterfaceIndex == interfaceIndex).Select(a => a.Alias).FirstOrDefault();
+        return matches.Count == 1 ? matches[0] : null;
     }
 
     /// <summary>
@@ -198,6 +207,7 @@ public static class LinkEvidenceBuilder
         var raw = new Dictionary<(string, LinkSource), (LinkCapability Capability, string? Code, double? Coverage)>();
         int unmapped = 0, unlinked = 0;
         bool directOverflow = false;
+        var overflowSpans = new List<(long From, long To)>();
 
         foreach (var e in links)
         {
@@ -206,11 +216,11 @@ public static class LinkEvidenceBuilder
             if (alias is not null && Int(e, "interfaceIndex") is int idx)
             {
                 adapters[alias] = new AdapterAt(alias, idx, Str(e, "kind"), Bool(e, "virtual") ?? false);
-                if (Str(e, "link") is not ("historical" or "unlinked" or "ambiguous"))
+                if (source == LinkSource.Direct)   // 로그 줄의 번호는 지금(끝) 번호라 과거 시점의 근거가 아니다
                 {
                     long when = Long(e, "eventMs") ?? Long(e, "at") ?? 0;
                     if (!history.TryGetValue(alias, out var h)) history[alias] = h = [];
-                    h.Add((when, idx));
+                    h.Add((when, Str(e, "collection") == "removed" ? -1 : idx));
                 }
             }
             string collection = Str(e, "collection") ?? "";
@@ -244,7 +254,14 @@ public static class LinkEvidenceBuilder
                         tr.LastSeen[tr.Steps.Count - 1] = ll;
                     break;
                 case "overflow":
-                    if (source == LinkSource.Direct) directOverflow = true;
+                    if (source == LinkSource.Direct)
+                    {
+                        directOverflow = true;
+                        if (e["spans"] is JsonArray spans)
+                            foreach (var span in spans)
+                                if (span is JsonArray pair && pair.Count == 2 && Json.Long(pair[0]) is long f && Json.Long(pair[1]) is long t2)
+                                    overflowSpans.Add((f, t2));
+                    }
                     break;
                 case "unsupported" or "denied":
                     raw[(alias ?? "*", source)] = (collection == "denied" ? LinkCapability.Denied : LinkCapability.Unsupported, Str(e, "code"), null);
@@ -259,8 +276,11 @@ public static class LinkEvidenceBuilder
             {
                 var cur = t.Steps[i];
                 if (cur.State is not (LinkState.Down or LinkState.Removed)) continue;
-                long to = i + 1 < t.Steps.Count && t.Steps[i + 1].State == LinkState.Up ? t.Steps[i + 1].First
-                    : t.LastSeen.TryGetValue(i, out var seen) ? seen : cur.First;
+                long lastDown = t.LastSeen.TryGetValue(i, out var seen) ? seen : cur.First;
+                long to = i + 1 < t.Steps.Count && t.Steps[i + 1].State == LinkState.Up ? t.Steps[i + 1].First : lastDown;
+                // 넘침으로 표본을 잃은 구간을 가로지르면, 확정 다운은 넘침 전 마지막 다운 관측까지만 (2라운드 1)
+                foreach (var (oFrom, oTo) in overflowSpans)
+                    if (oFrom < to && oTo >= cur.First) to = Math.Min(to, Math.Min(lastDown, oFrom));
                 downs.Add(new DownSpan(alias, LinkSource.Direct, cur.First, Math.Max(cur.First, to), cur.Physical));
             }
         }

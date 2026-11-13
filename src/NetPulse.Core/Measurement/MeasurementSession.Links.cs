@@ -216,7 +216,13 @@ public sealed partial class MeasurementSession
         }
         LinkLogResult result;
         var watch = Stopwatch.StartNew();
-        try { result = logSource.Read(header.StartedAt - TimeSpan.FromSeconds(3), endWall + settle, tracks.Select(t => t.Info).ToArray(), options.LinkLogTimeout); }
+        // 조회 범위는 측정 중 본 벽시계 전체 (시각이 뒤로 갔으면 시작보다 이른 벽시계도 측정 중이다, 2라운드 2)
+        RoundData[] seenRounds;
+        lock (sync) seenRounds = observed.ToArray();
+        var walls = seenRounds.Select(r => r.Wall).Append(header.StartedAt).Append(endWall).ToArray();
+        var queryFrom = walls.Min() - TimeSpan.FromSeconds(3);
+        var queryTo = walls.Max() + settle;
+        try { result = logSource.Read(queryFrom, queryTo, tracks.Select(t => t.Info).ToArray(), options.LinkLogTimeout); }
         catch (Exception ex)
         {
             result = new LinkLogResult(new Dictionary<string, (LinkCapability, string?)>(), [], 0, LinkCapability.Unsupported, "read-exception:" + ex.GetType().Name);
@@ -249,9 +255,9 @@ public sealed partial class MeasurementSession
                 fields["link"] = "linked";
             }
             else fields["link"] = e.Match == LinkMatch.Linked ? "unlinked" : e.Match.ToString().ToLowerInvariant();
-            // 측정 전후 이벤트는 참고(historical)로만, 환산하지 않는다 (G4 1라운드 3)
-            if (e.Wall < header.StartedAt || e.Wall > endWall) fields["link"] = "historical";
-            else if (TimeMapping.ToElapsedMs(rounds, e.Wall, at) is long ms) fields["eventMs"] = ms;
+            // 측정 중으로 환산되는 것만 근거. 측정 밖이거나 불확실(시각 변경 사이)이면 참고(historical)로만 (G4 1·2라운드 3·2)
+            if (TimeMapping.ToElapsedMs(rounds, e.Wall, at) is long ms) fields["eventMs"] = ms;
+            else if (fields["link"] is not null && (string?)fields["link"] == "linked") fields["link"] = "historical";
             WriteEvent(RecordSchema.EventLine(Id, "link", null, at, endWall, fields));
         }
         foreach (var t in tracks)

@@ -493,6 +493,9 @@ public sealed partial class MeasurementSession : IAsyncDisposable
     private async Task<SessionResult> EndAsync(EndReason reason, string? error)
     {
         if (Interlocked.Exchange(ref ending, 1) != 0) return await completion.Task.ConfigureAwait(false);
+        // 측정 끝 경계는 정리(엔진 정지·배출·마감)를 기다리기 전에 고정한다 (M4 G4 2라운드 4)
+        var stopElapsed = clock.Elapsed;
+        var stopWall = clock.Now;
         try
         {
             await engine.StopAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
@@ -518,8 +521,8 @@ public sealed partial class MeasurementSession : IAsyncDisposable
                 if (!await Within(worker, options.SealTimeout).ConfigureAwait(false)) sealFailed = true;
             }
 
-            var endElapsed = clock.Elapsed;
-            var endWall = clock.Now;
+            var endElapsed = stopElapsed;
+            var endWall = stopWall;
             long endMs = Math.Min((long)endElapsed.TotalMilliseconds, header.PlannedMs);
             // 계획 시간 뒤에 끝났으면(계획 뒤 복귀) 끝 경계를 계획 시간으로 맞추고 벽시계도 같은 순간으로 되돌린다
             if ((long)endElapsed.TotalMilliseconds > endMs)

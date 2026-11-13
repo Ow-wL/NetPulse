@@ -239,7 +239,10 @@ public static class MeasurementAnalysis
         if (summary?.LastCommittedRound is long lc && lc > lastIndex) lastIndex = lc;
         // 측정 끝 경과 시각까지 지나간 회차 (끝부분의 미처리·미저장·건너뜀도 분모에 남긴다, G4 1라운드 1)
         long? endMs = elapsedMs ?? summary?.EndMs;
-        if (endMs is long em && em >= 0) lastIndex = Math.Max(lastIndex, em / Math.Max(1, header.IntervalMs));
+        // 끝 시각보다 이르게 예정된 회차까지 (끝 시각에 막 예정된 회차는 아직 낼 수 없었다), 계획 회차 상한 안에서 (2라운드 5)
+        long interval = Math.Max(1, header.IntervalMs);
+        if (endMs is long em && em > 0)
+            lastIndex = Math.Max(lastIndex, Math.Min((em - 1) / interval, header.PlannedMs / interval - 1));
         // 관측해야 했던 회차: 0 ~ 마지막 지난 회차, 절전 공백에 든 회차만 뺀다 (2-5)
         long suspendRounds = gaps.Where(g => g.Reason == GapReason.Suspend).Sum(g => Math.Max(0, (g.ToMs - g.FromMs) / Math.Max(1, header.IntervalMs)));
         long nonGap = rounds.Count(r => !r.Gap);
@@ -250,8 +253,10 @@ public static class MeasurementAnalysis
         long judgeable = judgeableRounds.Length;
         // 등급용 외부 손실률도 판정 가능한 회차에서만 (G4 1라운드 6)
         double? extLoss = judgeable == 0 ? null : ext.Average(id => judgeableRounds.Count(r => r.Results.Any(x => x.TargetId == id && x.Outcome == ProbeOutcome.Lost)) / (double)judgeable);
-        long latencyHigh = judgments.Count(j => j.Verdict == Verdict.LatencyHigh);
-        long targetFailure = judgments.Count(j => j.Verdict == Verdict.TargetFailure);
+        // 지연 상승·대상 응답 실패 비율도 판정 가능한 회차 집합에서 센다 (2라운드 6)
+        var judgeableSet = new HashSet<long>(judgeableRounds.Select(r => r.Round));
+        long latencyHigh = judgments.Count(j => j.Verdict == Verdict.LatencyHigh && judgeableSet.Contains(j.Round));
+        long targetFailure = judgments.Count(j => j.Verdict == Verdict.TargetFailure && judgeableSet.Contains(j.Round));
         long undecidable = judgments.Count(j => j.Verdict is Verdict.RouteHold or Verdict.Insufficient);
         long loss = judgments.Count(IsLoss);
         return new Coverage(expected, judgeable, nonGap, extLoss, latencyHigh, targetFailure, undecidable, loss);
