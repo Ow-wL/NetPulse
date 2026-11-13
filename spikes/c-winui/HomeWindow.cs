@@ -94,7 +94,7 @@ namespace NetPulseSpike
         private readonly List<Microsoft.UI.Dispatching.DispatcherQueueTimer> countTimers = new List<Microsoft.UI.Dispatching.DispatcherQueueTimer>();
 
         // 장면마다 따로 있는 그래프. 전환 중에는 두 장면이 함께 살아 있으므로 둘 다 같은 데이터로 다시 그린다.
-        private sealed class PlotView { public Grid Scene, Host; public Canvas Fixed, Moving; }
+        private sealed class PlotView { public Grid Scene, Host; public Canvas Fixed, Moving; public Tokens T; }
         private readonly List<PlotView> plots = new List<PlotView>();
         private Grid building;   // 지금 만드는 장면
         // 장면마다 시작한 반복 애니메이션. 장면을 뗄 때 멈춘다 (멈추지 않으면 떼어 낸 장면이 메모리에 남는다).
@@ -145,6 +145,8 @@ namespace NetPulseSpike
             secondTimer.Start();
             CompositionTarget.Rendering += OnRendering;
             log.Write("start", "theme", t.Dark ? "dark" : "light", "aurora", aurora, "problem", problem);
+            log.Write("veil", "requested", aurora, "visible", veilLayer.Visibility == Visibility.Visible, "opacity", Math.Round(veilLayer.Opacity, 2),
+                "lightsHidden", reduceTransparency, "acrylic", !reduceTransparency);
             if (runSeconds > 0) { closeTimer = DispatcherQueue.CreateTimer(); closeTimer.Interval = TimeSpan.FromSeconds(runSeconds); closeTimer.Tick += (s, e) => Close(); closeTimer.Start(); }
             measure.RoundCompleted += r => log.Write("round", "index", r.Index, "scheduledMs", Math.Round(r.ScheduledMs, 1), "actualMs", Math.Round(r.ActualMs, 1));
             _ = measure.RunAsync(stop.Token);
@@ -600,7 +602,7 @@ namespace NetPulseSpike
             g.RowDefinitions.Add(new RowDefinition());
             g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             g.Children.Add(CardHead("최근 2분", "실시간 · 1초 간격"));
-            var view = new PlotView { Scene = building, Host = new Grid(), Fixed = new Canvas(), Moving = new Canvas { RenderTransform = plotShift } };
+            var view = new PlotView { Scene = building, T = t, Host = new Grid(), Fixed = new Canvas(), Moving = new Canvas { RenderTransform = plotShift } };
             view.Host.Children.Add(view.Fixed);
             view.Host.Children.Add(view.Moving);
             view.Host.SizeChanged += (s, e) => { view.Host.Clip = new RectangleGeometry { Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height) }; DrawPlot(view); };
@@ -626,6 +628,7 @@ namespace NetPulseSpike
         private void DrawPlot(PlotView view)
         {
             var plotFixed = view.Fixed; var plotMoving = view.Moving;
+            var t = view.T;   // 이 그래프가 속한 장면의 테마 (전역 테마가 이미 바뀌었어도)
             double w = view.Host.ActualWidth, h = view.Host.ActualHeight;
             if (w <= 0 || h <= 0) return;
             plotFixed.Children.Clear(); plotMoving.Children.Clear();
@@ -804,7 +807,7 @@ namespace NetPulseSpike
         private string lastSwitchId;
         private async Task SwitchAsync(Point origin, Action change)
         {
-            if (switching) return;
+            if (switching) { log.Write("switchIgnored", "reason", "in-progress"); return; }
             switching = true;
             var sw = System.Diagnostics.Stopwatch.StartNew();
             try

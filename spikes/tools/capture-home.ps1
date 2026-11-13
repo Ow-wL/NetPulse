@@ -46,7 +46,8 @@ foreach ($set in @(
     @{ a = @('--chrome', '0', '--aurora', 'on'); n = 'c-dark-aurora' },
     @{ a = @('--chrome', '0', '--theme', 'light', '--aurora', 'on'); n = 'c-light-aurora' },
     @{ a = @('--chrome', '0', '--state', 'problem'); n = 'c-dark-problem' },
-    @{ a = @('--chrome', '0', '--reduce-transparency', '--reduce-motion'); n = 'c-dark-reduced' })) {
+    @{ a = @('--chrome', '0', '--reduce-transparency', '--reduce-motion'); n = 'c-dark-reduced' },
+    @{ a = @('--chrome', '0', '--aurora', 'on', '--reduce-transparency'); n = 'c-dark-aurora-reduced' })) {
     $p = Run $set.a $set.n
     Stop-Process -Id $p.Id -Force
 }
