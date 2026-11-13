@@ -130,7 +130,10 @@ public sealed class SessionLinkTests : IDisposable
         var clock = new ManualClock(Start);
         var links = new FakeLinks { ExtraNotifyPerPoll = 3000 };
         var s = MeasurementSession.Start(Options(clock, links));
-        await Rounds(clock, s, 2);
+        // M5 (M4 이월 3): 회차마다 알림 3000개 중 큐(1024)에 들어간 것은 모두 상태 변화라 줄마다 디스크까지 내린다.
+        // 느린 디스크에서는 처리가 몇 초 걸릴 수 있으므로 고정 5초가 아니라 처리 완료(관측 수)를 기다린다
+        for (int i = 0; i < 2; i++) await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));
+        await EventuallyWithin(() => s.Status.Observed >= 3, "넘침 회차 처리", TimeSpan.FromSeconds(60));
         await s.StopAsync();
         var rec = Reread();
         var overflow = Assert.Single(Links(rec), e => (string?)e["collection"] == "overflow");
@@ -216,6 +219,8 @@ public sealed class SessionLinkTests : IDisposable
     {
         // G4 5라운드 1: 넘친 표본의 넘침 등록이 늦어져도, 그 뒤 표본은 등록이 끝난 뒤에야 큐에 들어가므로
         // 넘침 전 다운과 넘침 뒤 다운이 하나로 이어지지 않는다 (2.7초에 유실된 업이 확정 다운 안에 들면 안 된다)
+        // M5 (M4 이월 2): 시간 대기 없이 신호로 단계를 고정한다. 넘친 표본(2.7초 업) 뒤에 들어온 재관측 다운이
+        // 넘침 순번을 건너 처리되어 앞의 다운과 이어지지 않음을, 두 다운 구간의 존재와 경계로 검사한다
         var clock = new ManualClock(Start);
         var links = new FakeLinks();
         var s = MeasurementSession.Start(Options(clock, links, routes: false) with { LinkQueueCapacity = 1 });
@@ -224,28 +229,119 @@ public sealed class SessionLinkTests : IDisposable
         await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));
         links.Notify(LinkState.Down);                                     // 1.0초 다운
         await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));         // 회차 2: 처리 작업이 1.0초 다운을 처리
-        await Eventually(() => s.Status.Observed == 3, "회차 2 처리");
+        await Eventually(() => s.Status.Observed == 3 && s.LinkQueueCount == 0, "회차 2 처리와 1.0초 다운 배출");
         clock.Advance(TimeSpan.FromMilliseconds(500));
         links.Notify(LinkState.Down);                                     // 2.5초 다운 → 큐가 가득 참
+        Assert.Equal(1, s.LinkQueueCount);
         clock.Advance(TimeSpan.FromMilliseconds(200));
         s.TestHookAfterLinkEnqueueFailed = () => { entered.Set(); release.Wait(TimeSpan.FromSeconds(10)); };
-        var lost = Task.Run(() => links.Notify(LinkState.Up), TestContext.Current.CancellationToken);            // 2.7초 업 → 넘침, 등록 전에 멈춤
+        var lost = Task.Run(() => links.Notify(LinkState.Up), TestContext.Current.CancellationToken);            // 2.7초 업 → 넘침, 등록 전(잠금 안)에 멈춤
         Assert.True(entered.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken), "넘침 지점 진입");
         s.TestHookAfterLinkEnqueueFailed = null;
-        await AdvanceWhenWaiting(clock, TimeSpan.FromMilliseconds(300));  // 회차 3: 처리 작업이 큐를 비우려 함
-        var reobserved = Task.Run(() => links.Notify(LinkState.Down), TestContext.Current.CancellationToken);    // 다른 생산자의 다운 재관측
-        await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));         // 회차 4
-        await Task.Delay(200, TestContext.Current.CancellationToken);
         release.Set();
-        await Task.WhenAll(lost, reobserved);
-        await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));         // 회차 5
-        links.Notify(LinkState.Up);
-        await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));         // 회차 6: 남은 표본 처리
+        await lost;                                                       // 넘침 등록 끝
+        await AdvanceWhenWaiting(clock, TimeSpan.FromMilliseconds(300));  // 회차 3: 처리 작업이 2.5초 다운을 배출
+        await Eventually(() => s.Status.Observed == 4 && s.LinkQueueCount == 0, "회차 3 처리와 2.5초 다운 배출");
+        links.Notify(LinkState.Down);                                     // 3.0초 다운 재관측 (넘침 뒤, 큐에 자리 있음)
+        Assert.Equal(1, s.LinkQueueCount);
+        await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));         // 회차 4: 재관측 처리
+        await Eventually(() => s.Status.Observed == 5 && s.LinkQueueCount == 0, "회차 4 처리와 재관측 배출");
+        clock.Advance(TimeSpan.FromMilliseconds(500));
+        links.Notify(LinkState.Up);                                       // 4.5초 업
+        await AdvanceWhenWaiting(clock, TimeSpan.FromMilliseconds(500));  // 회차 5: 업 처리
+        await Eventually(() => s.Status.Observed == 6 && s.LinkQueueCount == 0, "회차 5 처리");
         await s.StopAsync();
 
-        var ev = LinkEvidenceBuilder.FromEvents(Reread().Events);
-        Assert.NotEmpty(ev.Downs);
-        Assert.DoesNotContain(ev.Downs, d => d.FromMs <= 2700 && d.ToMs >= 2700);
+        var downs = LinkEvidenceBuilder.FromEvents(Reread().Events).Downs.OrderBy(d => d.FromMs).ToArray();
+        Assert.DoesNotContain(downs, d => d.FromMs <= 2700 && d.ToMs >= 2700);   // 유실된 업을 덮지 않는다
+        Assert.Equal(2, downs.Length);                                           // 넘침 전과 넘침 뒤가 따로
+        Assert.Equal(1000L, downs[0].FromMs);
+        Assert.True(downs[0].ToMs <= 2500, $"앞 구간 끝 {downs[0].ToMs}");
+        Assert.Equal(3000L, downs[1].FromMs);
+        Assert.True(downs[1].ToMs is >= 3000 and <= 4500, $"뒤 구간 끝 {downs[1].ToMs}");
+    }
+
+    [Fact]
+    public async Task CutoffRejectsSamplesWhenTheyArrive()
+    {
+        // M4 이월 1-가: 받을 때 검사. 마감 뒤 시각의 표본은 큐에 들어가지 않는다 (꺼낼 때 검사만 남으면 큐 수가 1이 되어 실패)
+        var clock = new ManualClock(Start);
+        var links = new FakeLinks();
+        var s = MeasurementSession.Start(Options(clock, links));
+        await Rounds(clock, s, 2);
+        s.TestSetLinkCutoff(1000);
+        links.Notify(LinkState.Down);                    // 2초 > 마감 1초
+        Assert.Equal(0, s.LinkQueueCount);
+        await s.StopAsync();
+        Assert.Empty(LinkEvidenceBuilder.FromEvents(Reread().Events).Downs);
+    }
+
+    [Fact]
+    public async Task CutoffDropsQueuedSamplesWhenTheyAreProcessed()
+    {
+        // M4 이월 1-나: 꺼낼 때 검사. 받을 때는 마감 전이라 큐에 들어갔지만, 처리 전에 마감이 앞당겨지면 버린다
+        // (받을 때 검사만 남으면 다운이 기록되어 실패)
+        var clock = new ManualClock(Start);
+        var links = new FakeLinks();
+        var s = MeasurementSession.Start(Options(clock, links, routes: false));
+        await Rounds(clock, s, 2);
+        clock.Advance(TimeSpan.FromMilliseconds(300));
+        links.Notify(LinkState.Down);                    // 2.3초, 큐에 들어감 (마감 = 계획 끝 60초)
+        Assert.Equal(1, s.LinkQueueCount);
+        s.TestSetLinkCutoff(2000);                       // 처리 전에 마감을 2초로
+        await AdvanceWhenWaiting(clock, TimeSpan.FromMilliseconds(700));
+        await Eventually(() => s.Status.Observed >= 4 && s.LinkQueueCount == 0, "회차 3 처리와 큐 배출");
+        await s.StopAsync();
+        Assert.Empty(LinkEvidenceBuilder.FromEvents(Reread().Events).Downs);
+    }
+
+    [Fact]
+    public async Task LiveLinkStateCarriesAnOngoingDownIntoTheProvisionalAnalysis()
+    {
+        // M5 설계 3.2 [1-5, 2-2]: 같은 상태의 반복 표본은 줄로 쓰지 않으므로 이벤트만으로는 진행 중 다운이 첫 표본에서 끝난다.
+        // 실시간 사본(LinkLive)을 분석에 넘기면 마지막 표본까지 이어지고, 그 회차들이 링크 끊김으로 판정된다
+        var clock = new ManualClock(Start);
+        var links = new FakeLinks { StateAt = p => p >= 70 ? LinkState.Down : LinkState.Up };
+        var s = MeasurementSession.Start(Options(clock, links) with
+        {
+            Profile = OneMinute with { Duration = TimeSpan.FromMinutes(5) },
+            ProbeFor = _ => new RecordingProbe((_, round) => round >= 70 ? ProbeResult.Lost("TimedOut") : ProbeResult.Success(2)),
+        });
+        await Rounds(clock, s, 80);
+        var inputs = s.Live.AnalysisInputs();
+        var adapter = Assert.Single(inputs.Links.Adapters);
+        Assert.Equal(LinkState.Down, adapter.State);
+        Assert.True(adapter.LastSampleMs > adapter.FirstMs, "반복 표본으로 마지막 관측이 늘어난다");
+        Assert.True(adapter.LastSampleMs <= inputs.ElapsedMs, "현재 시각까지 늘리지 않는다");
+
+        var withLive = NetPulse.Core.Analysis.MeasurementAnalysis.Analyze(inputs.Header, inputs.Rounds, inputs.Gaps, inputs.Events, null, true, inputs.ElapsedMs, inputs.Links);
+        var down = Assert.Single(withLive.Links.Downs);
+        Assert.Equal(adapter.LastSampleMs, down.ToMs);
+        var last = withLive.Rounds.Last(r => r.Verdict is not null);
+        Assert.Equal(NetPulse.Core.Analysis.Verdict.LinkDown, last.Verdict);
+        var ongoing = withLive.Episodes.Last();
+        Assert.Equal(NetPulse.Core.Analysis.CandidateKind.PcLink, ongoing.Parts[^1].Candidate.Kind);
+
+        // 이벤트만으로는 진행 중 다운의 마지막 표본을 모른다 (사본을 넘겨야 하는 이유)
+        var eventsOnly = NetPulse.Core.Analysis.MeasurementAnalysis.Analyze(inputs.Header, inputs.Rounds, inputs.Gaps, inputs.Events, null, true, inputs.ElapsedMs);
+        Assert.True(eventsOnly.Links.Downs.All(d => d.ToMs < adapter.LastSampleMs), "이벤트만으로는 마지막 표본까지 복원하지 못한다");
+        await s.StopAsync();
+    }
+
+    [Fact]
+    public async Task LiveSnapshotDoesNotDuplicateTheFinalSummary()
+    {
+        // 끝 요약을 쓴 뒤의 사본에는 잠정 요약을 붙이지 않는다 (실제 요약과 함께 보지 않게)
+        var clock = new ManualClock(Start);
+        var links = new FakeLinks();
+        var s = MeasurementSession.Start(Options(clock, links));
+        await Rounds(clock, s, 3);
+        Assert.False(s.Live.AnalysisInputs().Links.SummaryWritten);
+        await s.StopAsync();
+        var after = s.Live.AnalysisInputs();
+        Assert.True(after.Links.SummaryWritten);
+        Assert.Empty(after.Links.ToSummaryEvents(Id, after.ElapsedMs, after.Wall));
+        Assert.Single(after.Events, e => (string?)e["type"] == "link" && (string?)e["collection"] == "summary" && (string?)e["source"] == "direct");
     }
 
     [Fact]
