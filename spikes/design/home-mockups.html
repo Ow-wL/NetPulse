@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko" data-variant="aurora" data-theme="dark">
+<html lang="ko" data-variant="obsidian" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -290,6 +290,23 @@ main { min-width: 0; display: grid; grid-template-columns: 1.35fr 1fr; grid-temp
 [data-motion="reduce"] *, [data-motion="reduce"] *::before, [data-motion="reduce"] *::after { animation: none !important; transition: none !important; }
 [data-transparency="reduce"] .glass { backdrop-filter: none; background: rgb(var(--tint) / 1); }
 [data-transparency="reduce"] .lights { display: none; }
+
+/* 연한 오로라 (사용자가 켜고 끄는 옵션). 흑요석 대비 규칙을 해치지 않게 세기를 낮게 둔다. */
+:root { --aurora-strength: .30; }
+[data-theme="light"] { --aurora-strength: .38; }
+.veil { position: fixed; inset: -10%; z-index: 0; pointer-events: none; opacity: 0; transition: opacity .6s var(--ease-enter); }
+[data-aurora="on"] .veil { opacity: var(--aurora-strength); }
+.veil .band { position: absolute; width: 70vmax; height: 26vmax; border-radius: 50%; filter: blur(70px); mix-blend-mode: screen; will-change: transform; }
+[data-theme="light"] .veil .band { mix-blend-mode: multiply; }
+.veil .b1 { background: linear-gradient(90deg, #14b8a6, #22d3ee); left: -10%; top: 4%; transform: rotate(-12deg); animation: veil1 26s ease-in-out infinite alternate; }
+.veil .b2 { background: linear-gradient(90deg, #7c3aed, #2563eb); right: -14%; top: 30%; transform: rotate(10deg); animation: veil2 32s ease-in-out infinite alternate; }
+.veil .b3 { background: linear-gradient(90deg, #0ea5e9, #a78bfa); left: 18%; bottom: -8%; transform: rotate(-4deg); animation: veil1 38s ease-in-out infinite alternate-reverse; }
+[data-theme="light"] .veil .b1 { background: linear-gradient(90deg, #5eead4, #a5f3fc); }
+[data-theme="light"] .veil .b2 { background: linear-gradient(90deg, #c4b5fd, #93c5fd); }
+[data-theme="light"] .veil .b3 { background: linear-gradient(90deg, #bae6fd, #ddd6fe); }
+@keyframes veil1 { to { transform: translate(12vmax, 6vmax) rotate(-4deg) scale(1.1); } }
+@keyframes veil2 { to { transform: translate(-14vmax, -4vmax) rotate(16deg) scale(.92); } }
+[data-transparency="reduce"] .veil { display: none; }
 </style>
 </head>
 <body>
@@ -300,6 +317,7 @@ main { min-width: 0; display: grid; grid-template-columns: 1.35fr 1fr; grid-temp
   </defs>
 </svg>
 <div class="lights" aria-hidden="true"><div class="light l1"></div><div class="light l2"></div><div class="light l3"></div><div class="light l4"></div></div>
+<div class="veil" aria-hidden="true"><div class="band b1"></div><div class="band b2"></div><div class="band b3"></div></div>
 
 <div class="app">
   <nav class="glass control rail rise" style="--i:0" aria-label="탐색">
@@ -384,6 +402,8 @@ main { min-width: 0; display: grid; grid-template-columns: 1.35fr 1fr; grid-temp
   <span class="sep"></span>
   <button data-t="dark">다크</button><button data-t="light">라이트</button>
   <span class="sep"></span>
+  <button id="auroraToggle">연한 오로라</button>
+  <span class="sep"></span>
   <button id="problemToggle">끊김 연출</button>
 </div>
 
@@ -396,6 +416,7 @@ if (q.get('theme')) root.dataset.theme = q.get('theme');
 if (q.get('chrome') === '0') root.dataset.chrome = '0';
 if (q.get('motion') === 'reduce' || matchMedia('(prefers-reduced-motion: reduce)').matches) root.dataset.motion = 'reduce';
 if (q.get('transparency') === 'reduce') root.dataset.transparency = 'reduce';
+root.dataset.aurora = q.get('aurora') === 'on' ? 'on' : 'off';
 const css = (name) => getComputedStyle(root).getPropertyValue(name).trim();
 
 // ---- 숫자 올라가기 ----
@@ -521,11 +542,13 @@ function withTransition(change, x, y) {
   document.startViewTransition(change).finished.finally(() => root.classList.remove('theme-switching'));
 }
 function syncSwitch() {
+  document.getElementById('auroraToggle').setAttribute('aria-pressed', String(root.dataset.aurora === 'on'));
   document.querySelectorAll('[data-v]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === root.dataset.variant)));
   document.querySelectorAll('[data-t]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.t === root.dataset.theme)));
 }
 document.querySelectorAll('[data-v]').forEach(b => b.addEventListener('click', e => withTransition(() => { root.dataset.variant = b.dataset.v; syncSwitch(); }, e.clientX, e.clientY)));
 document.querySelectorAll('[data-t]').forEach(b => b.addEventListener('click', e => withTransition(() => { root.dataset.theme = b.dataset.t; syncSwitch(); }, e.clientX, e.clientY)));
+document.getElementById('auroraToggle').addEventListener('click', () => { root.dataset.aurora = root.dataset.aurora === 'on' ? 'off' : 'on'; syncSwitch(); });
 document.getElementById('problemToggle').addEventListener('click', () => { state = state === 'ok' ? 'problem' : 'ok'; applyState(); });
 document.getElementById('start').addEventListener('click', (e) => { const b = e.currentTarget; b.textContent = b.textContent === '측정 시작' ? '측정 중지' : '측정 시작'; });
 

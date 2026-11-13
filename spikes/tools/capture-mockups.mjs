@@ -23,6 +23,8 @@ for (const v of ['aurora', 'obsidian', 'prism']) {
   await shot(`variant=${v}&theme=dark&state=problem`, `${v}-dark-problem.png`);
 }
 await shot('variant=aurora&theme=dark&transparency=reduce&motion=reduce', 'aurora-dark-reduced.png', 800);
+// 흑요석 + 연한 오로라 (사용자 옵션)
+for (const t of ['dark', 'light']) await shot(`variant=obsidian&theme=${t}&aurora=on`, `obsidian-${t}-aurora.png`);
 
 // 테마 전환 연속 프레임: 비교 막대를 띄워 라이트 버튼을 누른다
 await page.goto(`${file}?variant=aurora&theme=dark`);

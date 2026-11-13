@@ -6,7 +6,7 @@ namespace NetPulseSpike
 {
     public partial class App : Application
     {
-        private MainWindow window;
+        private Window window;
 
         public App()
         {
@@ -27,7 +27,9 @@ namespace NetPulseSpike
 
         protected override void OnLaunched(LaunchActivatedEventArgs args)
         {
-            window = new MainWindow(SpikeOptions.Parse(Environment.GetCommandLineArgs().Skip(1).ToArray()));
+            var argv = Environment.GetCommandLineArgs().Skip(1).ToArray();
+            // --home: 사용자가 고른 흑요석 홈 시안을 재현하는 화면 (D1 확정 전 비교용)
+            window = argv.Contains("--home") ? (Window)new HomeWindow(argv) : new MainWindow(SpikeOptions.Parse(argv));
             window.Activate();
         }
     }

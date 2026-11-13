@@ -25,5 +25,7 @@
     <!-- WinUI 프로젝트에는 Windows Desktop 프레임워크가 없어 이벤트 로그 API를 패키지로 받는다. -->
     <PackageReference Include="System.Diagnostics.EventLog" Version="10.0.3" />
     <Compile Include="..\shared\SpikeCore.cs" Link="SpikeCore.cs" />
+    <!-- 시안과 같은 글꼴(Pretendard, SIL OFL)을 실행 파일 옆 Fonts 폴더로 복사한다 -->
+    <Content Include="..\..\fonts\Pretendard-*.otf" Link="Fonts\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
