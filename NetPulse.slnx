@@ -1,10 +1,14 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/NetPulse.App/NetPulse.App.csproj">
+      <Platform Project="x64" />
+    </Project>
     <Project Path="src/NetPulse.Core/NetPulse.Core.csproj" />
     <Project Path="src/NetPulse.Platform/NetPulse.Platform.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/NetPulse.Core.Tests/NetPulse.Core.Tests.csproj" />
     <Project Path="tests/NetPulse.Platform.Tests/NetPulse.Platform.Tests.csproj" />
+    <Project Path="tests/NetPulse.UiTests/NetPulse.UiTests.csproj" />
   </Folder>
 </Solution>

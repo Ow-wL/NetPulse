@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    빌드된 실행 파일을 띄워 UI Automation으로 검사한다 (G3). 로컬에서 build/ui-test.ps1로만 돈다. CI에서는 돌리지 않는다 (M1 설계 7절).
+    실행 파일 경로는 환경 변수 NETPULSE_EXE로만 받는다. 없으면 실패한다.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+    <UseWPF>true</UseWPF>                   <!-- System.Windows.Automation (UIAutomationClient) -->
+    <UseWindowsForms>true</UseWindowsForms> <!-- System.Drawing (캡처) -->
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

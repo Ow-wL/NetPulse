@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- WinUI 3 앱 (D1). 패키지 없는 배포, 런타임 포함. 단일 파일 배포는 build/build.ps1이 EnableMsixTooling을 켜서 만든다. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.22621.0</TargetPlatformMinVersion>
+    <SupportedOSPlatformVersion>10.0.22621.0</SupportedOSPlatformVersion>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Platforms>x64</Platforms>
+    <AssemblyName>NetPulse</AssemblyName>
+    <RootNamespace>NetPulse.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
+    <ProjectReference Include="..\NetPulse.Core\NetPulse.Core.csproj" />
+    <ProjectReference Include="..\NetPulse.Platform\NetPulse.Platform.csproj" />
+    <!-- 글꼴(Pretendard, SIL OFL)과 데모 시나리오는 실행 파일 옆에 둔다 (manifest 해시 대상) -->
+    <Content Include="..\..\assets\fonts\*.otf;..\..\assets\fonts\OFL-Pretendard.txt" Link="Fonts\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\demo\scenarios\*.json" Link="demo\scenarios\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <!-- 패키지 없는 배포에서 App.xbf와 앱 .pri가 배포 폴더로 복사되지 않는 것을 M0에서 관측했다. 직접 복사한다. -->
+  <Target Name="CopyXamlArtifactsToPublish" AfterTargets="Publish">
+    <Copy SourceFiles="$(OutDir)App.xbf;$(OutDir)$(AssemblyName).pri" DestinationFolder="$(PublishDir)" Condition="Exists('$(OutDir)App.xbf')" />
+  </Target>
+</Project>
