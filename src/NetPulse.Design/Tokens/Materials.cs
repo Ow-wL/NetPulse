@@ -63,6 +63,20 @@ public static class Materials
         _ => throw new ArgumentOutOfRangeException(nameof(theme)),
     };
 
+    /// <summary>
+    /// 효과 줄이기·저성능 대체·전환 중에 쓰는 불투명 표면색 (M2 설계 4.2).
+    /// 틴트를 배경 범위의 두 경계 중 본문색과 대비가 더 낮아지는 쪽에 합성한 색이다. 그래서 계산 대비가 그대로 성립한다.
+    /// </summary>
+    public static Rgba OpaqueSurface(ThemeKind theme, GlassLevel level)
+    {
+        var p = Palette.For(theme);
+        var range = BackgroundRange.For(theme, false, false).Union(BackgroundRange.For(theme, true, false));
+        var tint = Glass(theme, level).TintWithAlpha;
+        var low = tint.Over(range.Low);
+        var high = tint.Over(range.High);
+        return Contrast.Ratio(p.Ink, low) <= Contrast.Ratio(p.Ink, high) ? low : high;
+    }
+
     /// <summary>연한 오로라 띠 3개 (켰을 때만). 불투명도는 띠 자체 × 층 불투명도를 합친 상한.</summary>
     public static IReadOnlyList<LightSource> Aurora(ThemeKind theme) => theme == ThemeKind.Dark
         ? [new("teal", Rgba.Hex("#5eead4"), 0.10), new("violet", Rgba.Hex("#a78bfa"), 0.08), new("sky", Rgba.Hex("#7dd3fc"), 0.10)]

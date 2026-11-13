@@ -1,7 +1,9 @@
 using Microsoft.UI.Xaml;
+using NetPulse.App.Design.Showcase;
 using NetPulse.Core.Demo;
 using NetPulse.Core.Measurement;
 using NetPulse.Core.Timing;
+using NetPulse.Design.Settings;
 using NetPulse.Platform;
 
 namespace NetPulse.App;
@@ -13,7 +15,7 @@ namespace NetPulse.App;
 /// </summary>
 public partial class App : Application
 {
-    private ShellWindow? window;
+    private Window? window;
     private MeasurementEngine? engine;
     private AppLog? log;
 
@@ -25,8 +27,26 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        try { Launch(); }
+        catch (Exception ex)
+        {
+            // 기록을 만들기 전에 실패해도 원인을 남긴다 (임시 폴더, 예외 종류와 메시지만)
+            var text = ex.GetType().Name + ": " + ex.Message + Environment.NewLine + ex.StackTrace;
+            if (log is not null) log.Write("startupFailed", new { type = ex.GetType().Name, message = ex.Message, hresult = ex.HResult, at = ex.StackTrace?.Split(Environment.NewLine).Take(6) });
+            else File.WriteAllText(Path.Combine(Path.GetTempPath(), "netpulse-startup-error.log"), text);
+            throw;
+        }
+    }
+
+    private void Launch()
+    {
         var options = StartupOptions.Parse(Environment.GetCommandLineArgs().Skip(1).ToArray());
         log = new AppLog(options.UserData);
+        if (options.Showcase)
+        {
+            LaunchShowcase(options, log);
+            return;
+        }
         string mode;
         if (options.Demo is { } demo)
         {
@@ -50,6 +70,22 @@ public partial class App : Application
         engine.Start();
 
         window = new ShellWindow(engine, mode, options.RunSeconds, ShutdownAsync);
+        window.Activate();
+    }
+
+    /// <summary>부품 전시 화면 (M2). 측정 엔진 없이 뜬다. 이번 실행의 테마·오로라 인수는 저장하지 않는다.</summary>
+    private void LaunchShowcase(StartupOptions options, AppLog appLog)
+    {
+        var (settings, status, detail) = AppSettings.Load(options.UserData);
+        appLog.Write("settings", new { status = status.ToString().ToLowerInvariant(), detail });
+        if (options.Theme is { } t) settings = settings with { Theme = t };
+        if (options.Aurora is { } a) settings = settings with { Aurora = a };
+        appLog.Write("startup", new { mode = "showcase", version = typeof(App).Assembly.GetName().Version?.ToString() });
+        window = new ShowcaseWindow(options, appLog, settings, () =>
+        {
+            appLog.Write("shutdown", new { stopCompleted = true, rounds = 0, skipped = 0 });
+            return Task.CompletedTask;
+        });
         window.Activate();
     }
 

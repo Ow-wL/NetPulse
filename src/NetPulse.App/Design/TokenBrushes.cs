@@ -72,6 +72,29 @@ public static class Fonts
         return t;
     }
 
+    /// <summary>
+    /// 줄바꿈하는 한국어 글: 단어 안에서 줄이 끊기지 않게 글자 사이에 단어 결합자(U+2060)를 넣는다 (M0 방식).
+    /// 화면 읽기에는 원래 문장을 이름으로 준다.
+    /// </summary>
+    public static TextBlock Wrapped(string text, TypeStyle style, Brush foreground)
+    {
+        var t = Text(KeepAll(text), style, foreground);
+        t.TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(t, text);
+        return t;
+    }
+
+    public static string KeepAll(string text)
+    {
+        var sb = new System.Text.StringBuilder(text.Length * 2);
+        for (int i = 0; i < text.Length; i++)
+        {
+            sb.Append(text[i]);
+            if (i + 1 < text.Length && !char.IsWhiteSpace(text[i]) && !char.IsWhiteSpace(text[i + 1])) sb.Append('⁠');
+        }
+        return sb.ToString();
+    }
+
     public static void Apply(TextBlock t, TypeStyle style)
     {
         t.FontSize = style.Size;
