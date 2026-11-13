@@ -53,7 +53,11 @@ public sealed class MeasureScreen : Screen
         static bool Out(double? v, TimelinePoint? last, double axis) =>
             v is not double x ? last is not null : last is not { } p || x > p.MaxMs || x < p.MinMs || x > axis;
         for (int i = drawnRounds; i < reps.Count; i++)
+        {
+            // 회차 번호가 건너뛰면 그래프 선이 끊긴다 (공백 띠가 없을 만큼 짧아도, 2라운드 2)
+            if (i > 0 && s.Rounds[i].Round != s.Rounds[i - 1].Round + 1) return true;
             if (Out(reps.Router(i), lastRouter, f.AxisMaxMs) || Out(reps.Internet(i), lastInternet, f.AxisMaxMs)) return true;
+        }
         return false;
     }
     private readonly Dictionary<string, CardTexts> cardTexts = [];

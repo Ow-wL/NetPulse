@@ -357,6 +357,35 @@ public sealed class SessionLinkTests : IDisposable
     }
 
     [Fact]
+    public async Task SnapshotDuringTheSummaryWriteHasExactlyOneSummary()
+    {
+        // G4 M5 2라운드 1: 끝 요약을 디스크에 쓰는 중(멈춤)에 받은 사본도 실제 요약을 담고 잠정 요약은 붙이지 않는다.
+        // 게시 전에 "요약을 썼음"이 먼저 켜지면 둘 다 없는 사본이 나왔다
+        var clock = new ManualClock(Start);
+        var links = new FakeLinks();
+        var s = MeasurementSession.Start(Options(clock, links));
+        await Rounds(clock, s, 3);
+        links.Notify(LinkState.Down);
+        await Rounds(clock, s, 1);
+        var inWrite = new ManualResetEventSlim(false);
+        var release = new ManualResetEventSlim(false);
+        primary.DelayFor = n =>
+        {
+            if (s.LinkClosed && n.StartsWith("events", StringComparison.Ordinal) && !inWrite.IsSet) { inWrite.Set(); release.Wait(TimeSpan.FromSeconds(10)); }
+            return TimeSpan.Zero;
+        };
+        var stop = s.StopAsync();
+        Assert.True(inWrite.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken), "끝 쓰기의 이벤트 쓰기에 들어감");
+        var mid = s.Live.AnalysisInputs();
+        int real = mid.Events.Count(e => (string?)e["type"] == "link" && (string?)e["collection"] == "summary" && (string?)e["source"] == "direct");
+        int provisional = mid.Links.ToSummaryEvents(Id, mid.ElapsedMs, mid.Wall).Count;
+        release.Set();
+        await stop;
+        Assert.Equal(1, real + provisional);
+        Assert.Equal(mid.Events.Count, mid.EventStates.Count);
+    }
+
+    [Fact]
     public void OverflowSpansBeyondCapExtendTheLastSpan()
     {
         // G4 4라운드 1: 51번째부터의 넘침도 시각을 잃지 않는다 (마지막 범위를 늘려 보수적으로 덮음)

@@ -42,11 +42,14 @@ public sealed class RecentRecords(Func<IReadOnlyList<string>> roots, int max = 3
         for (int i = 0; i < list.Length; i++)
         {
             if (!list[i].Analyzing) continue;
+            var before = Key(list[i].Entry);
             var done = Analyze(list[i].Entry);
+            // 읽는 동안 노트가 바뀌었으면 캐시하지 않는다 (옛 메모를 새 열쇠로 넣지 않게, 2라운드 4). 다음 갱신이 다시 읽는다
+            bool stable = Key(list[i].Entry) == before;
             lock (gate)
             {
                 if (gen != generation) return;
-                cache[Key(list[i].Entry)] = done;
+                if (stable) cache[before] = done;
                 var copy = items.ToArray();
                 copy[i] = done;
                 items = copy;

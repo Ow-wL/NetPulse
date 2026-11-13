@@ -216,17 +216,18 @@ public sealed partial class MeasurementSession
         if (options.Links is not null && directCapability == LinkCapability.Supported)
         {
             // 요약 줄은 잠정 분석이 쓰는 것과 같은 함수로 만든다 (DirectSummary, M5 설계 3.2).
-            // 등록과 "요약을 썼음" 표시를 한 잠금 안에서: 실시간 사본이 실제 요약과 잠정 요약을 함께 보지 않게
-            var ids = new List<string>();
+            // 등록·게시·"요약을 썼음" 표시를 한 경계(linkGate → sync) 안에서: 사본(게시한 이벤트만 담음)과 전달이
+            // 실제 요약과 잠정 요약을 함께 보거나, 둘 다 못 보는 순간이 없게 (G4 M5 1라운드 A1·2라운드 1).
+            // 게시는 쓰기 대기 상태로 하고, 디스크 쓰기 결과는 상태 변경 항목으로 뒤따른다
             lock (linkGate)
             {
                 foreach (var t in tracks) CloseUnknown(t);
                 var lines = DirectSummary.Lines(tracks.Select(SnapshotTrack).ToArray(), linkOverflow, overflowSpans.ToArray());
-                foreach (var fields in lines) ids.Add(RegisterEvent(RecordSchema.EventLine(Id, "link", null, at, endWall, fields), null));
+                var ids = lines.Select(fields => RegisterEvent(RecordSchema.EventLine(Id, "link", null, at, endWall, fields), null)).ToArray();
+                foreach (var id in ids) PublishEvent(id);
                 linkSummaryWritten = true;
             }
             RetryEvents();
-            foreach (var id in ids) PublishEvent(id);
         }
 
         if (options.LinkLog is { } logSource) ReadLinkLog(logSource, tracks, at, endWall);
