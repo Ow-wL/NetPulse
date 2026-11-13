@@ -113,7 +113,8 @@ public sealed class DemoTimeBase
 /// <summary>측정 하나의 데모 규칙 (M5 설계 3.4): 멈춤 회차, 배속 전환 회차, 절전 공백.</summary>
 /// <param name="HoldRound">이 회차 + 0.5초에 시간축 전체가 멈춘다</param>
 /// <param name="SpeedAfter">이 회차에 닿으면 시간축 배속을 바꾼다</param>
-public sealed record DemoRunRules(long? HoldRound = null, (long Round, double Speed)? SpeedAfter = null);
+/// <param name="AtRound">시간축이 정확히 이 회차 + 0.5초일 때 한 번 부른다 (측정 작업자에서 동기로; 재현용 사용자 동작. 막히는 일을 하면 안 된다)</param>
+public sealed record DemoRunRules(long? HoldRound = null, (long Round, double Speed)? SpeedAfter = null, (long Round, Action Act)? AtRound = null);
 
 /// <summary>
 /// 측정 시계 (데모). <c>Elapsed</c>는 측정 시작부터, <c>Now</c>는 시간축의 벽시계. 멈춤·배속 전환·절전은 시간축에 건다.
@@ -126,7 +127,7 @@ public sealed class DemoClock : IClock
     private readonly Func<bool>? ready;
     private readonly ScenarioFaults? faults;
     private readonly DemoPower? power;
-    private bool switched, suspended;
+    private bool switched, suspended, acted;
 
     internal DemoClock(DemoTimeBase timeBase, DemoRunRules rules, Func<bool>? ready, ScenarioFaults? faults, DemoPower? power)
     {
@@ -159,6 +160,12 @@ public sealed class DemoClock : IClock
             timeBase.Jump(TimeSpan.FromSeconds(seconds));
             power?.Resume();
             target = Elapsed > target ? Elapsed : target;
+        }
+        if (rules.AtRound is { } ar && !acted && target >= TimeSpan.FromSeconds(ar.Round) + TimeSpan.FromMilliseconds(500))
+        {
+            await timeBase.WaitUntil(origin + TimeSpan.FromSeconds(ar.Round) + TimeSpan.FromMilliseconds(500), ready, cancellationToken).ConfigureAwait(false);
+            acted = true;
+            ar.Act();
         }
         if (rules.HoldRound is long hold && target >= TimeSpan.FromSeconds(hold) + TimeSpan.FromMilliseconds(500))
         {

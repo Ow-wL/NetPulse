@@ -82,6 +82,24 @@ public sealed class M5HostTests : IDisposable
     }
 
     [Fact]
+    public async Task ReplayMarkLandsExactlyOnItsRoundEvenAtFullSpeed()
+    {
+        // --demo-mark: 600배속(처리 속도 진행)에서도 표시는 정해진 회차 + 0.5초에 찍힌다 (화면 알림에서 누르면 멈춤 회차까지 밀렸다)
+        MeasurementHost? h = null;
+        SymptomTicket? ticket = null;
+        var (host, _) = NewHost(Load("outage-long"), new DemoRunRules(HoldRound: 125, AtRound: (110, () => ticket = h!.MarkSymptom("재현"))));
+        h = host;
+        var detection = await host.DetectAsync(TestContext.Current.CancellationToken);
+        host.SaveProfiles(new ProfileSet([detection.Proposal!], detection.Proposal!.Id));
+        Assert.True(await host.StartAsync());
+        var snap = await WaitFor(host, s => s.Rounds.Count >= 125 && s.Marks.Count == 1 && s.Marks[0].State == EventWriteState.Saved, "표시 저장");
+        Assert.NotNull(ticket);
+        Assert.Equal(110_500L, ticket!.AtMs);
+        Assert.Equal(110_500L, snap.Marks[0].AtMs);
+        await host.StopAsync();
+    }
+
+    [Fact]
     public async Task MemoAfterTheEndGoesToNotesAndDraftsAreFlushedOnStop()
     {
         var (host, world) = NewHost(Load("steady"), new DemoRunRules(HoldRound: 30));

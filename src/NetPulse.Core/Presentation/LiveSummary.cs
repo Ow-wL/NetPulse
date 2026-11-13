@@ -60,13 +60,24 @@ public static class LiveSummary
     /// 숫자 줄: "최근 10분 동안 끊김 1회 · 평균 지연 18 ms · 응답 성공 99.9%".
     /// 끊김 = 분석의 끊김 구간 수, 평균 지연 = 회차별 인터넷 대표값의 평균, 응답 성공 = 모든 대상의 성공 / (성공 + 손실).
     /// </summary>
-    public static string Numbers(long elapsedMs, AnalysisResult? analysis, IReadOnlyList<RoundData> rounds, IReadOnlyList<Target> targets, MeasurementStats stats)
+    public static string Numbers(long elapsedMs, AnalysisResult? analysis, IReadOnlyList<RoundData> rounds, IReadOnlyList<Target> targets, MeasurementStats stats,
+        RepresentativeCache? cache = null)
     {
         var parts = new List<string>();
         string span = TimelineModel.Seconds(elapsedMs);
         parts.Add(analysis is null ? $"{span} 측정" : $"{span} 동안 끊김 {analysis.Episodes.Count}회");
-        var reps = rounds.Where(r => !r.Gap).Select(r => TimelineModel.Representative(r, targets).Internet).Where(v => v is not null).Select(v => v!.Value).ToArray();
-        if (reps.Length > 0) parts.Add($"평균 지연 {PathMapModel.Ms(reps.Average())}");
+        double? average;
+        if (cache is not null)
+        {
+            cache.Update(rounds, targets);   // 그릴 때마다 전체를 다시 구하지 않는다 (M5 bench)
+            average = cache.InternetAverage;
+        }
+        else
+        {
+            var reps = rounds.Where(r => !r.Gap).Select(r => TimelineModel.Representative(r, targets).Internet).Where(v => v is not null).Select(v => v!.Value).ToArray();
+            average = reps.Length > 0 ? reps.Average() : null;
+        }
+        if (average is double avg) parts.Add($"평균 지연 {PathMapModel.Ms(avg)}");
         int success = stats.Targets.Sum(s => s.Success), lost = stats.Targets.Sum(s => s.Lost);
         if (success + lost > 0) parts.Add($"응답 성공 {Percent((double)success / (success + lost))}");
         return string.Join(" · ", parts);
@@ -78,8 +89,8 @@ public static class LiveSummary
         return p is > 0 and < 0.1 ? "0.1% 미만" : p.ToString("0.#", CultureInfo.InvariantCulture) + "%";
     }
 
-    /// <summary>"오후 2:32:10".</summary>
-    public static string Clock(DateTimeOffset t) => t.ToString("tt h:mm:ss", Ko);
+    /// <summary>시:분:초 ("오후 2:32:10"). 기록에서 읽은 시각은 UTC라 지금 시계의 시간대로 바꿔 쓴다 (<see cref="When"/>과 같게).</summary>
+    public static string Clock(DateTimeOffset t, DateTimeOffset now) => t.ToOffset(now.Offset).ToString("tt h:mm:ss", Ko);
 
     /// <summary>"오늘 오후 1:20", "어제 오후 9:02", "11월 10일 오후 8:45" (<paramref name="now"/>는 앱 벽시계).</summary>
     public static string When(DateTimeOffset t, DateTimeOffset now)

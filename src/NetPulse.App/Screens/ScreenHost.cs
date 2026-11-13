@@ -80,6 +80,17 @@ public sealed class ScreenHost : Grid
         return s;
     }
 
+    /// <summary>
+    /// 화면을 미리 만들어 숨겨 둔다 (시작 직후 한가할 때, 홈·측정). 처음 이동할 때 만드는 비용이 한 프레임 예산(50 ms)을 넘었다 (M5 bench).
+    /// </summary>
+    public void Prepare(string id)
+    {
+        var s = Get(id);
+        if (Children.Contains(s)) return;
+        s.Visibility = Visibility.Collapsed;
+        Children.Add(s);
+    }
+
     public void Show(string id, HostSnapshot snapshot, FrameworkElement? from)
     {
         var next = Get(id);
@@ -88,8 +99,11 @@ public sealed class ScreenHost : Grid
         // 출발 요소의 경계는 나가는 화면을 빼기 전에 잰다
         Windows.Foundation.Rect? fromRect = from is not null && from.ActualWidth > 0 && from.XamlRoot is not null
             ? from.TransformToVisual(this).TransformBounds(new Windows.Foundation.Rect(0, 0, from.ActualWidth, from.ActualHeight)) : null;
-        if (previous is not null) Children.Remove(previous);
+        // 나가는 화면은 트리에서 빼지 않고 숨긴다: 빼고 다시 넣으면 유리 표면·글자 배치를 처음부터 다시 만들어
+        // 12시간 측정 중 홈↔측정 이동에서 한 프레임이 예산(50 ms)을 넘었다 (M5 bench)
+        if (previous is not null) previous.Visibility = Visibility.Collapsed;
         if (!Children.Contains(next)) Children.Add(next);
+        next.Visibility = Visibility.Visible;
         Current = next;
         next.Render(snapshot);
         next.Entered();

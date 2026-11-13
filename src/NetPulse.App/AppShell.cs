@@ -118,17 +118,6 @@ public sealed partial class AppShell : Window
 
         rail.Selected += id => { if (!navigating) Navigate(id, null); };
         host.Changed += QueueRender;
-        if (options.DemoMark is long markRound && options.Demo is not null)
-        {
-            // 재현 인수: 그 회차에 한 번 증상 표시 + 메모 (실제 버튼과 같은 호스트 경로)
-            bool marked = false;
-            host.Changed += () =>
-            {
-                if (marked || host.Snapshot.State != HostState.Measuring || host.Snapshot.Rounds.Count <= markRound) return;
-                marked = true;
-                if (host.MarkSymptom() is { } t && host.Snapshot.SessionId is { } sid) _ = host.SaveMemoAsync(sid, t.Mark, "화상회의 중 끊김");
-            };
-        }
         host.Finished += f => DispatcherQueue.TryEnqueue(() => OnFinished(f));
         recent.Changed += QueueDiag;
         ui.Effects.Changed += (_, _) => QueueDiag();
@@ -148,6 +137,7 @@ public sealed partial class AppShell : Window
             log.Write("loaded", null);
             _ = recent.RefreshAsync(host.RunningId);
             StartScreen();
+            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => { if (!closing) foreach (var id in new[] { "home", "measure" }) screens.Prepare(id); });
             RenderStatus(host.Snapshot);
             QueueDiag();
             if (options.SelfTest is not null) selfTestTimer.Start();
@@ -263,7 +253,7 @@ public sealed partial class AppShell : Window
         DispatcherQueue.TryEnqueue(() =>
         {
             renderQueued = false;
-            try { Render(host.Snapshot); }
+            try { RenderProfile.Time("shell.render", () => Render(host.Snapshot)); }
             catch (Exception ex) { log.Write("renderFailed", new { type = ex.GetType().Name, message = ex.Message, at = ex.StackTrace?.Split(Environment.NewLine).Where(l => l.Contains("NetPulse")).Take(6) }); }
         });
     }
@@ -271,7 +261,7 @@ public sealed partial class AppShell : Window
     private void Render(HostSnapshot s)
     {
         screens.Render(s);
-        RenderStatus(s);
+        RenderProfile.Time("shell.status", () => RenderStatus(s));
         // 상태 반응: 끊김이 진행 중이면 배경 빛이 붉게 (회복되면 원래대로)
         bool outage = s.Measuring && (s.Bands.LastOrDefault(b => b.Kind == BandKind.ExternalNone) is { OpenEnd: true } || s.LinkDowns.Any(d => d.Ongoing));
         if (outage != lastOutage)

@@ -22,7 +22,7 @@ public sealed partial class AppShell
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             diagQueued = false;
-            try { WriteDiag(); }
+            try { RenderProfile.Time("shell.diag", WriteDiag); }
             catch (Exception ex) { log.Write("diagFailed", new { type = ex.GetType().Name, message = ex.Message, at = ex.StackTrace?.Split(Environment.NewLine).Take(4) }); }
         });
     }
@@ -107,11 +107,24 @@ public sealed partial class AppShell
             void Sample() { if (host.Snapshot.AnalysisAt is { } a) analyses[a.Seq] = a.DurationMs; }
             host.Changed += Sample;
             var segments = new List<object>();
+            var profile = new List<object>();
             async Task Segment(string name, Func<Task> body)
             {
+                RenderProfile.Take();
+                RenderProfile.On = true;
+                int[] gcBefore = [GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2)];
+                var pauseBefore = GC.GetTotalPauseDuration();
                 ui.Pacer.BeginSegment();
                 await body();
                 segments.Add(ui.Pacer.EndSegment(name));
+                RenderProfile.On = false;
+                var gc = new
+                {
+                    gen0 = GC.CollectionCount(0) - gcBefore[0], gen1 = GC.CollectionCount(1) - gcBefore[1], gen2 = GC.CollectionCount(2) - gcBefore[2],
+                    pauseMs = (GC.GetTotalPauseDuration() - pauseBefore).TotalMilliseconds,
+                    lastPausesMs = GC.GetGCMemoryInfo(GCKind.Any).PauseDurations.ToArray().Select(d => d.TotalMilliseconds),
+                };
+                profile.Add(new { segment = name, parts = RenderProfile.Take(), gc });
             }
             var measure = screens.Get("measure") as MeasureScreen;
             await Segment("idle-live", () => Task.Delay(BenchTokens.IdleLive));
@@ -122,12 +135,16 @@ public sealed partial class AppShell
                 for (int i = 0; i < BenchTokens.PanCount; i++) { measure?.Command(Design.Controls.TimelineCommand.PanLeft); await Task.Delay(BenchTokens.PanStep); }
                 measure?.Command(Design.Controls.TimelineCommand.ToNow);
             });
+            var navSteps = new List<object>();
             await Segment("nav", async () =>
             {
                 for (int i = 0; i < BenchTokens.NavCount; i++)
                 {
-                    Navigate(i % 2 == 0 ? "home" : "measure", null);
+                    int at = ui.Pacer.SegmentSamples;
+                    string to = i % 2 == 0 ? "home" : "measure";
+                    Navigate(to, null);
                     await Task.Delay(BenchTokens.NavStep);
+                    navSteps.Add(new { to, maxMs = ui.Pacer.SegmentMaxFrom(at) });
                 }
             });
             host.Changed -= Sample;
@@ -138,7 +155,7 @@ public sealed partial class AppShell
             long privateMb = System.Diagnostics.Process.GetCurrentProcess().PrivateMemorySize64 / (1024 * 1024);
             log.Write("bench", new
             {
-                kind = "measure", segments, rounds = host.Snapshot.Rounds.Count,
+                kind = "measure", segments, profile, navSteps, rounds = host.Snapshot.Rounds.Count,
                 analysis = new { samples = durations.Length, p95Ms = P95(durations), maxMs = durations.LastOrDefault() },
                 baselineMs = ui.Pacer.Baseline, privateMb,
             });

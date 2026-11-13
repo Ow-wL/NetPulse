@@ -252,6 +252,32 @@ public sealed class M5ModelTests : IDisposable
     }
 
     [Fact]
+    public void RepresentativeCacheGivesTheSameFrameAndNumbersAsRecomputing()
+    {
+        // 캐시(그릴 때마다 새 회차만 구함)와 매번 다시 구한 결과가 같다: 회차가 늘어날 때, 앞부분이 바뀐 다른 목록일 때, 대상 목록이 바뀔 때
+        var all = Enumerable.Range(0, 900).Select(i => i % 97 == 5 ? Out(i) : Fine(i, 15 + i % 13)).ToList();
+        var cache = new RepresentativeCache();
+        var stats = new Statistics.MeasurementStats(0, 0, 0, 0, []);
+        void Same(IReadOnlyList<RoundData> rounds, IReadOnlyList<Target> targets, long from, long to, int columns)
+        {
+            var plain = TimelineModel.Frame(rounds, targets, [], [], [], [], from, to, columns, 1000, "창");
+            var cached = TimelineModel.Frame(rounds, targets, [], [], [], [], from, to, columns, 1000, "창", cache);
+            Assert.Equal(Flat(plain.Internet), Flat(cached.Internet));
+            Assert.Equal(Flat(plain.Router), Flat(cached.Router));
+            Assert.Equal(plain.AxisMaxMs, cached.AxisMaxMs);
+            Assert.Equal(LiveSummary.Numbers(to, null, rounds, targets, stats), LiveSummary.Numbers(to, null, rounds, targets, stats, cache));
+        }
+        static string Flat(IReadOnlyList<IReadOnlyList<TimelinePoint>> s) => string.Join(" | ", s.Select(seg => string.Join(" ", seg.Select(p => p.ToString()))));
+
+        for (int n = 100; n <= 900; n += 200) Same(all.Take(n).ToArray(), Three, 0, n * 1000L, 50);      // 늘어남 (전체 보기, 칸마다)
+        Same(all.Take(900).ToArray(), Three, 800_000, 900_000, 400);                                       // 일부 창, 회차마다
+        var changed = all.Take(900).ToArray();
+        changed[10] = Out(10);                                                                              // 앞부분이 바뀐 목록
+        Same(changed, Three, 0, 900_000, 50);
+        Same(changed, Three.Take(2).ToArray(), 0, 900_000, 50);                                             // 대상 목록이 바뀜
+    }
+
+    [Fact]
     public void ViewFollowsNowUntilPannedAndKeepsCenterWhenZooming()
     {
         var v = new TimelineView();

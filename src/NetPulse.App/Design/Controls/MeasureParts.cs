@@ -75,11 +75,15 @@ public sealed class GlassTextBox : GroupPanel
     /// <summary>오류 문장 (없으면 숨김). 화면 읽기에는 입력 칸의 도움말로도 준다.</summary>
     public void SetError(string? message)
     {
+        bool appeared = message is not null && errorRow.Visibility == Visibility.Collapsed;
         error.Text = Fonts.KeepAll(message ?? "");
         AutomationProperties.SetName(error, message ?? "");
         errorRow.Visibility = message is null ? Visibility.Collapsed : Visibility.Visible;
         AutomationProperties.SetHelpText(Box, message ?? "");
         AutomationProperties.SetName((DependencyObject)errorRow, message ?? "");
+        // 입력 중에 오류가 생기면 스크롤이 글 상자까지만 보여 줘 아래 오류 글이 잘렸다: 배치가 끝난 뒤 오류 줄까지 보이게
+        if (appeared && Box.FocusState != FocusState.Unfocused)
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => errorRow.StartBringIntoView());
     }
 }
 

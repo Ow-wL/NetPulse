@@ -21,7 +21,9 @@ public sealed class M5MatrixTests
     public static TheoryData<string, string, string> Matrix()
     {
         var d = new TheoryData<string, string, string>();
-        foreach (var s in Scenes())
+        // 개발 중 일부 장면만 다시 돌릴 때: NETPULSE_SCENES=id1,id2 (게이트는 비워 두고 전부 돈다; ui-test.ps1이 결과 수를 검사)
+        var only = Environment.GetEnvironmentVariable("NETPULSE_SCENES")?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var s in Scenes().Where(s => only is not { Length: > 0 } || only.Contains(s.Id)))
             foreach (var t in new[] { "dark", "light" })
                 foreach (var scale in new[] { "1", "1.5" })
                     d.Add(s.Id, t, scale);

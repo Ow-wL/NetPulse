@@ -63,6 +63,7 @@ public sealed class MeasurementHost : IAsyncDisposable
     private readonly HostOptions options;
     private readonly object gate = new();
     private readonly NotesWriter notes = new();
+    /// <summary>메모 초안. 자기 잠금으로 지킨다 (화면이 그릴 때마다 읽으므로 장면 게시 잠금을 기다리지 않게). 잠금 순서: gate → drafts.</summary>
     private readonly Dictionary<(string Session, string Mark), string> drafts = [];
     private HostState state;
     private ProfileSet? profiles;
@@ -114,7 +115,11 @@ public sealed class MeasurementHost : IAsyncDisposable
     /// <summary>측정이 끝남 (최근 측정 목록을 다시 읽을 때).</summary>
     public event Action<FinishedMeasurement>? Finished;
 
-    public HostSnapshot Snapshot { get { lock (gate) return snapshot; } }
+    /// <summary>
+    /// 마지막으로 게시한 장면. 장면은 바뀌지 않는 값이고 참조 교체는 원자적이라 잠금 없이 읽는다:
+    /// 게시(<see cref="Build"/>)는 긴 측정에서 잠금 안에서 수십 ms가 걸려, 화면 스레드가 그동안 기다리며 프레임이 튀었다 (M5 bench).
+    /// </summary>
+    public HostSnapshot Snapshot => Volatile.Read(ref snapshot);
     public string? RunningId { get { lock (gate) return session is not null && state is HostState.Measuring or HostState.Stopping ? session.Id : null; } }
 
     private static Profile? Current(ProfileSet? set) =>
@@ -254,14 +259,14 @@ public sealed class MeasurementHost : IAsyncDisposable
     /// <summary>메모 초안 (표시 ID별). 저장이 확정될 때까지 남는다.</summary>
     public void SetDraft(string sessionId, string mark, string? text)
     {
-        lock (gate)
+        lock (drafts)
         {
             if (string.IsNullOrWhiteSpace(text)) drafts.Remove((sessionId, mark));
             else drafts[(sessionId, mark)] = text;
         }
     }
 
-    public string? Draft(string sessionId, string mark) { lock (gate) return drafts.GetValueOrDefault((sessionId, mark)); }
+    public string? Draft(string sessionId, string mark) { lock (drafts) return drafts.GetValueOrDefault((sessionId, mark)); }
 
     /// <summary>
     /// 메모 저장 (설계 4.5 [2-5]): 측정 중이면 세션 입력 통로, 끝났으면 노트. 결과가 저장이면 초안을 지운다.
@@ -273,7 +278,7 @@ public sealed class MeasurementHost : IAsyncDisposable
         long atMs;
         lock (gate)
         {
-            drafts[(sessionId, mark)] = memo ?? "";
+            lock (drafts) drafts[(sessionId, mark)] = memo ?? "";
             s = session is not null && session.Id == sessionId ? session : null;
             atMs = (snapshot.Marks.FirstOrDefault(m => m.Mark == mark) ?? finished?.Marks.FirstOrDefault(m => m.Mark == mark))?.AtMs ?? 0;
         }
@@ -286,7 +291,7 @@ public sealed class MeasurementHost : IAsyncDisposable
             result = folder is null ? EventWriteState.Lost
                 : await notes.WriteAsync(folder, sessionId, mark, atMs, world.Now, memo).ConfigureAwait(false);
         }
-        if (result == EventWriteState.Saved) lock (gate) drafts.Remove((sessionId, mark));
+        if (result == EventWriteState.Saved) lock (drafts) drafts.Remove((sessionId, mark));
         if (live is null && result == EventWriteState.Saved) RefreshFinishedMarks(sessionId);
         Publish();
         return result;
@@ -296,7 +301,7 @@ public sealed class MeasurementHost : IAsyncDisposable
     public async Task FlushDraftsAsync()
     {
         (string Session, string Mark, string Text)[] list;
-        lock (gate) list = drafts.Select(d => (d.Key.Session, d.Key.Mark, d.Value)).ToArray();
+        lock (drafts) list = drafts.Select(d => (d.Key.Session, d.Key.Mark, d.Value)).ToArray();
         foreach (var d in list) await SaveMemoAsync(d.Session, d.Mark, d.Text).ConfigureAwait(false);
     }
 
@@ -332,7 +337,7 @@ public sealed class MeasurementHost : IAsyncDisposable
     }
 
     /// <summary>창을 닫을 때 남은 초안 (표시 ID만, 메모 글은 남기지 않는다).</summary>
-    public IReadOnlyList<string> UnsavedDrafts() { lock (gate) return drafts.Keys.Select(k => k.Mark).ToArray(); }
+    public IReadOnlyList<string> UnsavedDrafts() { lock (drafts) return drafts.Keys.Select(k => k.Mark).ToArray(); }
 
     public async ValueTask DisposeAsync()
     {
@@ -446,7 +451,7 @@ public sealed class MeasurementHost : IAsyncDisposable
         lock (gate)
         {
             next = Build();
-            snapshot = next;
+            Volatile.Write(ref snapshot, next);
         }
         Changed?.Invoke();
     }
@@ -491,9 +496,17 @@ public sealed class MeasurementHost : IAsyncDisposable
                 null, null, PathMapModel.Idle(idleTargets, kind), kind, null, finished, startError);
         }
         var view = rounds.Snapshot();
-        var ids = header.Targets.Select(t => t.Id).ToArray();
-        var stats = StatsCalculator.Compute(view, ids, gaps);
-        var bands = TimelineModel.Bands(view, header.Targets, gaps, header.IntervalMs);
+        // 통계·구간은 회차와 공백으로만 정해진다. 링크·저장 상태만 바뀐 게시(0.25초마다)에서는 다시 쓴다:
+        // 12시간 기록에서 게시마다 처음부터 다시 구해 큰 배열이 쌓이고 gen2 GC가 초당 한 번 넘게 돌아 프레임이 튀었다 (M5 bench)
+        if (derived is not { } dv || !ReferenceEquals(dv.Header, header) || dv.Count != view.Count || !dv.Gaps.SequenceEqual(gaps))
+        {
+            var ids = header.Targets.Select(t => t.Id).ToArray();
+            var st = StatsCalculator.Compute(view, ids, gaps);
+            derived = dv = new Derived(header, view.Count, gaps.ToArray(), st, TimelineModel.Bands(view, header.Targets, gaps, header.IntervalMs),
+                LiveSummary.Cards(header.Targets, st, view.Count == 0 ? null : view[^1]));
+        }
+        var stats = dv.Stats;
+        var bands = dv.Bands;
         long elapsed = view.Count == 0 ? 0 : view[^1].EndMs ?? view[^1].AtMs;
         var linkEvents = events.Where(e => (string?)e["type"] == "link").Concat(links.ToSummaryEvents(header.Id, elapsed, header.StartedAt.AddMilliseconds(elapsed))).ToArray();
         var evidence = LinkEvidenceBuilder.FromEvents(linkEvents);
@@ -504,8 +517,12 @@ public sealed class MeasurementHost : IAsyncDisposable
         var tail = view.Count <= 10 ? (IReadOnlyList<RoundData>)view : Enumerable.Range(view.Count - 10, 10).Select(i => view[i]).ToArray();
         var map = PathMapModel.From(header.Targets, tail, connection, analysis, links, ended: false);
         return new HostSnapshot(++version, state, Current(profiles), session!.Id, header, elapsed, header.PlannedMs, view, gaps, CurrentMarks(), downs, bands,
-            stats, LiveSummary.Cards(header.Targets, stats, view.Count == 0 ? null : view[^1]), analysis, analysisAt, map, connection, status, null, startError);
+            stats, dv.Cards, analysis, analysisAt, map, connection, status, null, startError);
     }
+
+    /// <summary>회차·공백에서 나오는 무거운 값 (gate 안에서만).</summary>
+    private sealed record Derived(RecordHeader Header, int Count, GapSpan[] Gaps, MeasurementStats Stats, IReadOnlyList<TimelineBand> Bands, IReadOnlyList<TargetCard> Cards);
+    private Derived? derived;
 }
 
 /// <summary>

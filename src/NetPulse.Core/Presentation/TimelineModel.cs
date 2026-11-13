@@ -51,12 +51,25 @@ public static class TimelineModel
     /// <summary>회차 하나의 대표 값 (화면 카드·칩도 같은 함수를 쓴다).</summary>
     public static (double? Router, double? Internet) Representative(RoundData r, IReadOnlyList<Target> targets)
     {
-        var local = targets.FirstOrDefault(t => t.Role == TargetRole.Local);
-        double? router = local is null ? null : r.Results.FirstOrDefault(x => x.TargetId == local.Id) is { Outcome: ProbeOutcome.Success, RttMs: double ms } ? ms : null;
-        var externals = targets.Where(t => t.Role == TargetRole.External).Select(t => t.Id).ToHashSet();
-        var values = r.Results.Where(x => externals.Contains(x.TargetId) && x.Outcome == ProbeOutcome.Success && x.RttMs is not null)
-            .Select(x => x.RttMs!.Value).OrderBy(v => v).ToArray();
-        return (router, Median(values));
+        var (local, externals) = Roles(targets);
+        return Representative(r, local, externals, []);
+    }
+
+    internal static (string? Local, HashSet<string> Externals) Roles(IReadOnlyList<Target> targets) =>
+        (targets.FirstOrDefault(t => t.Role == TargetRole.Local)?.Id, targets.Where(t => t.Role == TargetRole.External).Select(t => t.Id).ToHashSet());
+
+    /// <summary>역할 조회를 미리 한 대표값 (보기 창의 회차마다 부르므로 할당을 줄인다). <paramref name="buffer"/>는 비워서 다시 쓴다.</summary>
+    internal static (double? Router, double? Internet) Representative(RoundData r, string? local, HashSet<string> externals, List<double> buffer)
+    {
+        double? router = null;
+        if (local is not null)
+            foreach (var x in r.Results)
+                if (x.TargetId == local) { router = x is { Outcome: ProbeOutcome.Success, RttMs: double ms } ? ms : null; break; }
+        buffer.Clear();
+        foreach (var x in r.Results)
+            if (externals.Contains(x.TargetId) && x.Outcome == ProbeOutcome.Success && x.RttMs is double v) buffer.Add(v);
+        buffer.Sort();
+        return (router, Median(buffer));
     }
 
     public static double? Median(IReadOnlyList<double> sorted) => sorted.Count switch
@@ -121,13 +134,32 @@ public static class TimelineModel
     /// <summary>보기 창 하나의 장면. <paramref name="columns"/>는 그래프 폭(픽셀). 점은 계열마다 열 수의 두 배를 넘지 않는다.</summary>
     public static TimelineFrame Frame(IReadOnlyList<RoundData> rounds, IReadOnlyList<Target> targets, IReadOnlyList<GapSpan> gaps,
         IReadOnlyList<SymptomMark> marks, IReadOnlyList<LinkDownView> linkDowns, IReadOnlyList<TimelineBand> bands,
-        long fromMs, long toMs, int columns, long intervalMs, string windowLabel)
+        long fromMs, long toMs, int columns, long intervalMs, string windowLabel, RepresentativeCache? cache = null)
     {
         if (toMs <= fromMs) toMs = fromMs + 1;
         columns = Math.Max(1, columns);
-        var inWindow = rounds.Where(r => r.DueMs + intervalMs > fromMs && r.DueMs < toMs).OrderBy(r => r.Round).ToArray();
-        var router = Series(inWindow, targets, gaps, fromMs, toMs, columns, intervalMs, internet: false);
-        var internet = Series(inWindow, targets, gaps, fromMs, toMs, columns, intervalMs, internet: true);
+        var (inWindow, offset) = InWindow(rounds, fromMs, toMs, intervalMs);
+        // 대표값은 회차마다 한 번만 (12시간 기록의 전체 보기에서 회차마다 네 번 다시 구하던 것이 프레임 예산을 넘겼다, M5 bench).
+        // 캐시가 있으면 지난 그리기에서 구한 값을 쓴다 (회차 목록은 뒤로만 늘어난다)
+        var routerValues = new double?[inWindow.Length];
+        var internetValues = new double?[inWindow.Length];
+        if (cache is not null && offset >= 0)
+        {
+            cache.Update(rounds, targets);
+            for (int i = 0; i < inWindow.Length; i++) (routerValues[i], internetValues[i]) = (cache.Router(offset + i), cache.Internet(offset + i));
+        }
+        else
+        {
+            var (local, externals) = Roles(targets);
+            var buffer = new List<double>();
+            for (int i = 0; i < inWindow.Length; i++)
+            {
+                if (inWindow[i].Gap) continue;
+                (routerValues[i], internetValues[i]) = Representative(inWindow[i], local, externals, buffer);
+            }
+        }
+        var router = Series(inWindow, routerValues, gaps, fromMs, toMs, columns, intervalMs);
+        var internet = Series(inWindow, internetValues, gaps, fromMs, toMs, columns, intervalMs);
         double max = router.Concat(internet).SelectMany(s => s).Select(p => p.MaxMs).DefaultIfEmpty(0).Max();
         double axis = Math.Max(MinAxisMs, Math.Ceiling(max / AxisStepMs) * AxisStepMs);
         if (max >= axis) axis += AxisStepMs;
@@ -138,8 +170,37 @@ public static class TimelineModel
             Summarize(windowLabel, visibleBands, visibleMarks.Length, visibleDowns));
     }
 
-    private static IReadOnlyList<IReadOnlyList<TimelinePoint>> Series(RoundData[] rounds, IReadOnlyList<Target> targets, IReadOnlyList<GapSpan> gaps,
-        long fromMs, long toMs, int columns, long intervalMs, bool internet)
+    /// <summary>
+    /// 보기 창의 회차 (회차 순)와 원래 목록에서의 시작 위치. 기록은 보통 회차·예정 시각 순이라 이분 탐색으로 자르고,
+    /// 순서가 아니면 걸러서 정렬한다 (위치 -1).
+    /// </summary>
+    private static (RoundData[] Rounds, int Offset) InWindow(IReadOnlyList<RoundData> rounds, long fromMs, long toMs, long intervalMs)
+    {
+        bool ordered = true;
+        for (int i = 1; i < rounds.Count && ordered; i++)
+            ordered = rounds[i].Round > rounds[i - 1].Round && rounds[i].DueMs >= rounds[i - 1].DueMs;
+        if (!ordered) return (rounds.Where(r => r.DueMs + intervalMs > fromMs && r.DueMs < toMs).OrderBy(r => r.Round).ToArray(), -1);
+        int lo = Lower(rounds, r => r.DueMs + intervalMs > fromMs);
+        int hi = Lower(rounds, r => r.DueMs >= toMs);
+        var result = new RoundData[Math.Max(0, hi - lo)];
+        for (int i = 0; i < result.Length; i++) result[i] = rounds[lo + i];
+        return (result, lo);
+
+        // 조건이 처음 참이 되는 위치 (조건은 순서에 대해 단조)
+        static int Lower(IReadOnlyList<RoundData> list, Func<RoundData, bool> pass)
+        {
+            int a = 0, b = list.Count;
+            while (a < b)
+            {
+                int m = (a + b) / 2;
+                if (pass(list[m])) b = m; else a = m + 1;
+            }
+            return a;
+        }
+    }
+
+    private static IReadOnlyList<IReadOnlyList<TimelinePoint>> Series(RoundData[] rounds, double?[] vals, IReadOnlyList<GapSpan> gaps,
+        long fromMs, long toMs, int columns, long intervalMs)
     {
         var segments = new List<IReadOnlyList<TimelinePoint>>();
         var current = new List<TimelinePoint>();
@@ -148,21 +209,18 @@ public static class TimelineModel
             if (current.Count > 0) segments.Add(current.ToArray());
             current.Clear();
         }
-        double? Value(RoundData r) => r.Gap ? null : internet ? Representative(r, targets).Internet : Representative(r, targets).Router;
-
         double width = (double)(toMs - fromMs) / columns;
         if (rounds.Length <= columns)
         {
             // 회차마다 한 점 (칸 가운데)
-            RoundData? prev = null;
-            foreach (var r in rounds)
+            for (int i = 0; i < rounds.Length; i++)
             {
-                var v = Value(r);
-                bool connected = prev is not null && r.Round == prev.Round + 1 && Value(prev) is not null && !GapBetween(gaps, prev, r);
-                if (v is null) { Break(); prev = r; continue; }
+                var r = rounds[i];
+                var v = vals[i];
+                bool connected = i > 0 && r.Round == rounds[i - 1].Round + 1 && vals[i - 1] is not null && !GapBetween(gaps, rounds[i - 1], r);
+                if (v is null) { Break(); continue; }
                 if (!connected) Break();
                 current.Add(new TimelinePoint(r.DueMs + intervalMs / 2.0, v.Value, v.Value));
-                prev = r;
             }
             Break();
             return segments;
@@ -170,30 +228,41 @@ public static class TimelineModel
 
         // 칸마다 최솟값·최댓값. 칸 안에 값 없는 회차가 있거나 칸 사이 회차가 이어지지 않으면 선을 끊는다
         int index = 0;
-        RoundData? lastOfPrev = null;
+        int lastOfPrev = -1;
         bool prevClean = false;
         for (int c = 0; c < columns && index < rounds.Length; c++)
         {
             double colEnd = fromMs + (c + 1) * width;
-            var inCol = new List<RoundData>();
-            while (index < rounds.Length && rounds[index].DueMs < colEnd) inCol.Add(rounds[index++]);
-            if (inCol.Count == 0) continue;
-            var values = inCol.Select(Value).ToArray();
-            var valid = values.Where(v => v is not null).Select(v => v!.Value).ToArray();
-            bool clean = valid.Length == inCol.Count && inCol.Zip(inCol.Skip(1)).All(p => p.Second.Round == p.First.Round + 1 && !GapBetween(gaps, p.First, p.Second));
-            bool connected = lastOfPrev is not null && prevClean && clean && inCol[0].Round == lastOfPrev.Round + 1 && !GapBetween(gaps, lastOfPrev, inCol[0]);
+            int start = index;
+            while (index < rounds.Length && rounds[index].DueMs < colEnd) index++;
+            if (index == start) continue;
+            double min = double.MaxValue, max = double.MinValue;
+            int valid = 0;
+            bool consecutive = true;
+            for (int i = start; i < index; i++)
+            {
+                if (vals[i] is double v) { valid++; min = Math.Min(min, v); max = Math.Max(max, v); }
+                if (i > start && consecutive) consecutive = rounds[i].Round == rounds[i - 1].Round + 1 && !GapBetween(gaps, rounds[i - 1], rounds[i]);
+            }
+            bool clean = valid == index - start && consecutive;
+            bool connected = lastOfPrev >= 0 && prevClean && clean && rounds[start].Round == rounds[lastOfPrev].Round + 1 && !GapBetween(gaps, rounds[lastOfPrev], rounds[start]);
             if (!connected) Break();
-            if (valid.Length > 0) current.Add(new TimelinePoint(fromMs + (c + 0.5) * width, valid.Min(), valid.Max()));
+            if (valid > 0) current.Add(new TimelinePoint(fromMs + (c + 0.5) * width, min, max));
             if (!clean) Break();
-            lastOfPrev = inCol[^1];
+            lastOfPrev = index - 1;
             prevClean = clean;
         }
         Break();
         return segments;
     }
 
-    private static bool GapBetween(IReadOnlyList<GapSpan> gaps, RoundData a, RoundData b) =>
-        gaps.Any(g => g.FromMs < b.AtMs && g.ToMs > a.AtMs);
+    private static bool GapBetween(IReadOnlyList<GapSpan> gaps, RoundData a, RoundData b)
+    {
+        // 회차 쌍마다 부르므로 할당 없이 (보통 공백은 없거나 몇 개)
+        for (int i = 0; i < gaps.Count; i++)
+            if (gaps[i].FromMs < b.AtMs && gaps[i].ToMs > a.AtMs) return true;
+        return false;
+    }
 
     /// <summary>화면 읽기용 요약 ("최근 2분: 외부 응답 없음 1번(약 7~9초), 증상 표시 1개, 관측 공백 없음").</summary>
     public static string Summarize(string windowLabel, IReadOnlyList<TimelineBand> bands, int marks, IReadOnlyList<LinkDownView> downs)
@@ -334,4 +403,52 @@ public sealed class TimelineView
 
     /// <summary>창 길이 문구 ("2분", "전체").</summary>
     public string Label => IsAll ? "전체" : TimelineModel.Seconds(Steps[StepIndex]);
+}
+
+/// <summary>
+/// 회차별 대표값(<see cref="TimelineModel.Representative(RoundData, IReadOnlyList{Target})"/>)의 누적 캐시. 화면 하나가 하나를 갖는다.
+/// 같은 측정의 회차 목록은 뒤로만 늘어나므로 새 회차만 구한다. 대상 목록이 다른 객체이거나 앞부분이 바뀌었으면 처음부터 다시 구한다.
+/// 12시간 기록에서 그릴 때마다 4만 회차를 다시 구하던 것이 프레임 예산을 넘겼다 (M5 bench).
+/// </summary>
+public sealed class RepresentativeCache
+{
+    private readonly List<double?> router = [], internet = [];
+    private readonly List<double> buffer = [];
+    private IReadOnlyList<Target>? targets;
+    private RoundData? last;
+    private string? local;
+    private HashSet<string> externals = [];
+    private double internetSum;
+    private int internetCount;
+
+    public int Count => router.Count;
+    public double? Router(int index) => router[index];
+    public double? Internet(int index) => internet[index];
+
+    /// <summary>값 있는 회차의 인터넷 대표값 평균 (없으면 null).</summary>
+    public double? InternetAverage => internetCount == 0 ? null : internetSum / internetCount;
+
+    public void Update(IReadOnlyList<RoundData> rounds, IReadOnlyList<Target> forTargets)
+    {
+        bool extends = ReferenceEquals(targets, forTargets) && rounds.Count >= router.Count
+            && (router.Count == 0 || ReferenceEquals(rounds[router.Count - 1], last));
+        if (!extends)
+        {
+            router.Clear();
+            internet.Clear();
+            internetSum = 0;
+            internetCount = 0;
+            targets = forTargets;
+            (local, externals) = TimelineModel.Roles(forTargets);
+        }
+        for (int i = router.Count; i < rounds.Count; i++)
+        {
+            var r = rounds[i];
+            var (a, b) = r.Gap ? (null, null) : TimelineModel.Representative(r, local, externals, buffer);
+            router.Add(a);
+            internet.Add(b);
+            if (b is double v) { internetSum += v; internetCount++; }
+        }
+        last = rounds.Count == 0 ? null : rounds[^1];
+    }
 }

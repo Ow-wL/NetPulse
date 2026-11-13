@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Media;
 using NetPulse.App.Design;
 using NetPulse.App.Design.Controls;
 using NetPulse.Core.Analysis;
+using NetPulse.Core.Presentation;
 using NetPulse.Design.Tokens;
 
 namespace NetPulse.App.Screens;
@@ -90,7 +91,8 @@ public static class ScreenParts
     }
 
     /// <summary>시각 표시 ("오후 2:31:05", 측정 시작 벽시계 + 경과).</summary>
-    public static Func<long, string> TimeLabel(DateTimeOffset startedAt) => ms => startedAt.AddMilliseconds(ms).ToString("tt h:mm:ss", Ko);
+    /// <summary>경과 → 시각 글. 끝난 측정의 시작 시각은 기록(UTC)에서 오므로 지금 시계의 시간대로 바꾼다.</summary>
+    public static Func<long, string> TimeLabel(DateTimeOffset startedAt, DateTimeOffset now) => ms => LiveSummary.Clock(startedAt.AddMilliseconds(ms), now);
 
     public static readonly System.Globalization.CultureInfo Ko = System.Globalization.CultureInfo.GetCultureInfo("ko-KR");
 }

@@ -36,7 +36,15 @@ public static class StatsCalculator
 {
     public static MeasurementStats Compute(IReadOnlyList<RoundData> rounds, IReadOnlyList<string> activeTargets, IReadOnlyList<GapSpan> gaps)
     {
-        var ordered = rounds.OrderBy(r => r.Round).ToArray();
+        // 측정 중에는 회차가 늘 때마다 다시 구하므로 큰 할당을 줄인다 (M5 bench): 이미 회차 순이면 정렬하지 않고 복사만
+        var ordered = new RoundData[rounds.Count];
+        bool sorted = true;
+        for (int i = 0; i < ordered.Length; i++)
+        {
+            ordered[i] = rounds[i];
+            if (i > 0 && ordered[i].Round < ordered[i - 1].Round) sorted = false;
+        }
+        if (!sorted) ordered = ordered.OrderBy(r => r.Round).ToArray();
         // 공백이 "직전 회차 a 뒤"에 있으면 a와 그 다음 회차 사이에서 구간을 끊는다
         var breakAfter = new HashSet<long>(gaps.Where(g => g.LastRoundBefore is not null).Select(g => g.LastRoundBefore!.Value));
         int gapRounds = ordered.Count(r => r.Gap);
@@ -49,7 +57,7 @@ public static class StatsCalculator
     private static TargetStats ForTarget(string id, RoundData[] rounds, HashSet<long> breakAfter)
     {
         int ok = 0, lost = 0, err = 0, maxRun = 0;
-        var rtts = new List<double>();
+        var rtts = new List<double>(rounds.Length);
         DateTimeOffset? lastOk = null, lastLoss = null, lastErr = null;
         var runs = new List<LossRun>();
 
@@ -127,7 +135,8 @@ public static class StatsCalculator
         double? p95 = null;
         if (rtts.Count > 0)
         {
-            var s = rtts.OrderBy(x => x).ToArray();
+            var s = rtts.ToArray();
+            Array.Sort(s);
             int rank = (int)Math.Ceiling(0.95 * s.Length);   // 최근접 순위법
             p95 = s[Math.Clamp(rank, 1, s.Length) - 1];
         }

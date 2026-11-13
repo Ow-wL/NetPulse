@@ -17,6 +17,7 @@ namespace NetPulse.App.Screens;
 /// </summary>
 public sealed class HomeScreen : Screen
 {
+    private readonly RepresentativeCache reps = new();
     private readonly PageHeader header;
     private readonly StackPanel chips = new() { Orientation = Orientation.Horizontal, Spacing = Space.S2 };
     private readonly GradeRing ring;
@@ -167,20 +168,20 @@ public sealed class HomeScreen : Screen
     {
         var now = Context.Now;
         header.SetOverline(LiveSummary.Date(now));
-        RenderChips(s);
-        RenderHero(s, now);
-        map.Show(s.Map);
+        RenderProfile.Time("home.chips", () => RenderChips(s));
+        RenderProfile.Time("home.hero", () => RenderHero(s, now));
+        RenderProfile.Time("home.map", () => map.Show(s.Map));
         if (s.Measuring && s.Header is { } h)
         {
             long end = Math.Max(s.ElapsedMs, 1);
             long from = Math.Max(0, end - 120_000L);
             var frame = TimelineModel.Frame(s.Rounds, h.Targets, s.Gaps, s.Marks.Select(m => new SymptomMark(m.Mark, null, m.AtMs, m.Wall, m.Memo, null, m.Truncated)).ToArray(),
-                s.LinkDowns, s.Bands, from, end, timeline.Columns, h.IntervalMs, "최근 2분");
-            timeline.Show(frame, ScreenParts.TimeLabel(h.StartedAt), followingNow: true, null);
+                s.LinkDowns, s.Bands, from, end, timeline.Columns, h.IntervalMs, "최근 2분", reps);
+            RenderProfile.Time("home.timeline", () => timeline.Show(frame, ScreenParts.TimeLabel(h.StartedAt, now), followingNow: true, null));
             chartBody.Set(timeline, "normal");
         }
         else chartBody.Set(chartEmpty, "empty");
-        RenderRecent();
+        RenderProfile.Time("home.recent", RenderRecent);
     }
 
     private void RenderChips(HostSnapshot s)
@@ -229,7 +230,7 @@ public sealed class HomeScreen : Screen
             Set(status, "측정 중 · 잠정 · " + LiveSummary.Progress(s.ElapsedMs, s.PlannedMs));
             Set(headline, g is null || g.Grade == Grade.Insufficient && g.Reason == "too-few-rounds"
                 ? "측정 중입니다. 1분 이상 측정해야 등급을 낼 수 있습니다." : g.Sentence);
-            Set(numbers, s.Stats is { } st && s.Header is { } h ? LiveSummary.Numbers(s.ElapsedMs, s.Analysis, s.Rounds, h.Targets, st) : "");
+            Set(numbers, s.Stats is { } st && s.Header is { } h ? LiveSummary.Numbers(s.ElapsedMs, s.Analysis, s.Rounds, h.Targets, st, reps) : "");
             return;
         }
         // 측정하지 않음: 이번 실행의 끝난 측정, 아니면 최근 측정의 첫 줄
@@ -239,7 +240,7 @@ public sealed class HomeScreen : Screen
             Set(status, "지난 측정 · " + LiveSummary.When(f.Record?.Header?.StartedAt ?? now, now));
             Set(headline, fa.Grade.Sentence);
             Set(numbers, f.Record?.Stats is { } st && f.Record.Header is { } fh
-                ? LiveSummary.Numbers(f.Record.Summary?.EndMs ?? 0, fa, f.Record.Rounds, fh.Targets, st) : "");
+                ? LiveSummary.Numbers(f.Record.Summary?.EndMs ?? 0, fa, f.Record.Rounds, fh.Targets, st, reps) : "");
             return;
         }
         var last = Context.Recent.Items.FirstOrDefault(i => i.Grade is not null);

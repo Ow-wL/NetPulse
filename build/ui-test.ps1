@@ -47,7 +47,9 @@ $commands += Invoke-Step 'ui-build' 300 'dotnet' @('build', 'tests/NetPulse.UiTe
 $trxDir = Join-Path $uiDir 'trx'
 $failed = $null
 try {
-    $commands += Invoke-Step 'ui-test' 600 'dotnet' @('test', '--project', 'tests/NetPulse.UiTests', '-c', 'Release', '--no-build', '--report-xunit-trx', '--results-directory', $trxDir) $uiDir
+    # M5: 캡처 매트릭스(약 8분)와 측정 화면 bench(약 7분)가 더해져 10분으로는 모자란다.
+    # 실측 시나리오(M5LiveRunTests, 설계 7.3)는 이 PC 네트워크를 쓰고 결과를 공개하지 않으므로 게이트에서 빼고 따로 돌린다.
+    $commands += Invoke-Step 'ui-test' 3000 'dotnet' @('test', '--project', 'tests/NetPulse.UiTests', '-c', 'Release', '--no-build', '--report-xunit-trx', '--results-directory', $trxDir, '--filter-not-class', 'NetPulse.UiTests.M5LiveRunTests') $uiDir
 } catch { $failed = $_.Exception.Message }
 $trx = Get-ChildItem $trxDir -Filter *.trx -ErrorAction SilentlyContinue | Select-Object -First 1
 $summary = if ($trx) { $neutral = Join-Path $uiDir 'ui-tests.trx'; Move-Item $trx.FullName $neutral; Read-TrxSummary $neutral } else { $null }

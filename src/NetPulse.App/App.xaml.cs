@@ -58,7 +58,10 @@ public partial class App : Application
             var scenario = Scenario.Load(ResolveScenario(demo));
             var timeBase = new DemoTimeBase(scenario.StartAt ?? DateTimeOffset.Now, options.DemoSpeed);
             // 데모의 대체 위치도 사용자 폴더 안에 둔다 (공용 임시 폴더면 다른 실행의 데모 기록이 최근 측정에 섞인다)
-            world = new DemoAppWorld(new DemoWorld(scenario, timeBase), options.UserData, new DemoRunRules(options.DemoHold, options.DemoSpeedAfter),
+            // 재현 인수 --demo-mark: 시간축이 정확히 그 회차일 때 증상 표시 + 메모 (실제 버튼과 같은 호스트 경로).
+            // 화면 쪽 알림에서 누르면 600배속에서는 이미 멈춤 회차까지 지나 있었다
+            (long, Action)? mark = options.DemoMark is long m ? (m, MarkForReplay) : null;
+            world = new DemoAppWorld(new DemoWorld(scenario, timeBase), options.UserData, new DemoRunRules(options.DemoHold, options.DemoSpeedAfter, mark),
                 Path.Combine(options.UserData, "demo-fallback"));
         }
         else world = new LiveAppWorld(options.UserData);
@@ -76,6 +79,11 @@ public partial class App : Application
         });
         window = new AppShell(options, log, settings, host, recent, ShutdownAsync);
         window.Activate();
+    }
+
+    private void MarkForReplay()
+    {
+        if (host?.MarkSymptom() is { } t && host.Snapshot.SessionId is { } sid) _ = host.SaveMemoAsync(sid, t.Mark, "화상회의 중 끊김");
     }
 
     /// <summary>부품 전시 화면 (M2). 측정 없이 뜬다. 이번 실행의 테마·오로라 인수는 저장하지 않는다.</summary>

@@ -63,6 +63,10 @@ public sealed class FramePacer
         return FrameStats.From(name, s, clock.Elapsed.TotalSeconds - segmentStart);
     }
 
+    /// <summary>지금 구간에 쌓인 표본 수와, 그 위치부터의 최대 간격 (bench가 단계별로 어디서 튀는지 본다).</summary>
+    public int SegmentSamples => segment?.Count ?? 0;
+    public double SegmentMaxFrom(int index) => segment is { } s && index < s.Count ? s.Skip(index).Max() : 0;
+
     public void Detach() => CompositionTarget.Rendering -= OnRendering;
 
     /// <summary>창 크기 조절처럼 표본을 넣지 않을 구간 (G4 M2 1라운드 지적 9).</summary>

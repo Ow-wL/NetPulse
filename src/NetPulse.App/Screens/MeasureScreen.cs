@@ -32,6 +32,12 @@ public sealed class MeasureScreen : Screen
     private readonly TextBlock range;
     private readonly StackPanel content = new() { Spacing = Space.S5 };
     private readonly StackPanel banners = new() { Spacing = Space.S2 };
+    private string? bannersKey, cardsKey, marksKey;
+    private object? resultFor;
+    private readonly RepresentativeCache reps = new();
+    private string? drawnKey;
+    private long drawnFrom, drawnTo;
+    private readonly Dictionary<string, CardTexts> cardTexts = [];
     private readonly Grid cards = new() { ColumnSpacing = Space.S4, RowSpacing = Space.S4 };
     private readonly GroupPanel memoPanel;
     private readonly TextBlock memoTitle, memoState;
@@ -182,13 +188,16 @@ public sealed class MeasureScreen : Screen
             HostState.Starting => $"{profile} · 시작하는 중",
             _ => s.Finished is not null ? $"{profile} · 끝남" : profile,
         });
-        meter.Set(s.PlannedMs <= 0 ? 0 : (double)s.ElapsedMs / s.PlannedMs, LiveSummary.Progress(s.ElapsedMs, s.PlannedMs));
-        progress.Text = s.Measuring || s.Finished is not null ? $"{LiveSummary.Progress(s.ElapsedMs, s.PlannedMs)} · 남은 시간 {TimelineModel.Seconds(Math.Max(0, s.PlannedMs - s.ElapsedMs))}" : "측정하지 않음";
-        RenderTimeline(s);
-        RenderBanners(s);
-        RenderCards(s);
-        RenderMarks(s);
-        RenderResult(s);
+        // 끝난 뒤의 경과는 마지막 회차의 시작이라 한 간격이 모자란다 (3분 계획이 "2분 59초 · 남은 1초"로 보였다): 마지막 회차가 덮는 시간까지
+        long shown = !s.Measuring && s.Finished is not null && s.Header is { } fh ? Math.Min(s.PlannedMs, s.ElapsedMs + fh.IntervalMs) : s.ElapsedMs;
+        meter.Set(s.PlannedMs <= 0 ? 0 : (double)shown / s.PlannedMs, LiveSummary.Progress(shown, s.PlannedMs));
+        progress.Text = s.Measuring ? $"{LiveSummary.Progress(s.ElapsedMs, s.PlannedMs)} · 남은 시간 {TimelineModel.Seconds(Math.Max(0, s.PlannedMs - s.ElapsedMs))}"
+            : s.Finished is not null ? $"{LiveSummary.Progress(shown, s.PlannedMs)} 측정함" : "측정하지 않음";
+        RenderProfile.Time("measure.timeline", () => RenderTimeline(s));
+        RenderProfile.Time("measure.banners", () => RenderBanners(s));
+        RenderProfile.Time("measure.cards", () => RenderCards(s));
+        RenderProfile.Time("measure.marks", () => RenderMarks(s));
+        RenderProfile.Time("measure.result", () => RenderResult(s));
         RenderMemoState(s);
     }
 
@@ -205,12 +214,24 @@ public sealed class MeasureScreen : Screen
         timelineBody.Set(timelineStack, "normal");
         long nowMs = Math.Max(1, s.ElapsedMs);
         var (from, to) = view.Window(nowMs);
-        var label = ScreenParts.TimeLabel(h.StartedAt);
-        var marks = s.Marks.Select(m => new SymptomMark(m.Mark, null, m.AtMs, m.Wall, m.Memo, null, m.Truncated)).ToArray();
-        var frame = TimelineModel.Frame(s.Rounds, h.Targets, s.Gaps, marks, s.LinkDowns, s.Bands, from, to, timeline.Columns, h.IntervalMs,
-            view.Follow && !view.IsAll ? $"최근 {view.Label}" : $"{label(from)}~{label(to)}");
+        var label = ScreenParts.TimeLabel(h.StartedAt, Context.Now);
         bool ended = !s.Measuring;
-        timeline.Show(frame, label, view.Follow && !ended, $"{label(from)}부터 {label(to)}까지 ({view.Label})");
+        // 칸 하나(1 px)가 여러 회차를 덮는 넓은 보기에서는, 보이는 것(구간·표시·링크·공백·보기)이 그대로이고 창이 칸 하나만큼도
+        // 움직이지 않았으면 다시 그리지 않는다. 12시간 전체 보기에서 1초마다 다시 그리던 것이 프레임 예산을 넘겼다 (M5 bench)
+        long columnMs = (to - from) / Math.Max(1, timeline.Columns);
+        var lastBand = s.Bands.Count == 0 ? null : s.Bands[^1];
+        var drawKey = $"{s.SessionId}|{view.Label}|{view.Follow}|{view.IsAll}|{ended}|{timeline.Columns}|{s.Bands.Count}|{lastBand?.Kind}|{lastBand?.FromMs}|{lastBand?.OpenEnd}"
+            + $"|{s.Marks.Count}|{(s.Marks.Count == 0 ? null : s.Marks[^1].Mark)}|{s.LinkDowns.Count}|{s.LinkDowns.Count(d => d.Ongoing)}|{s.Gaps.Count}";
+        bool unchanged = columnMs > 2 * h.IntervalMs && drawKey == drawnKey && Math.Abs(from - drawnFrom) < columnMs && Math.Abs(to - drawnTo) < columnMs;
+        if (!unchanged)
+        {
+            var marks = s.Marks.Select(m => new SymptomMark(m.Mark, null, m.AtMs, m.Wall, m.Memo, null, m.Truncated)).ToArray();
+            TimelineFrame frame = null!;
+            RenderProfile.Time("measure.frame", () => frame = TimelineModel.Frame(s.Rounds, h.Targets, s.Gaps, marks, s.LinkDowns, s.Bands, from, to, timeline.Columns, h.IntervalMs,
+                view.Follow && !view.IsAll ? $"최근 {view.Label}" : $"{label(from)}~{label(to)}", reps));
+            RenderProfile.Time("measure.draw", () => timeline.Show(frame, label, view.Follow && !ended, $"{label(from)}부터 {label(to)}까지 ({view.Label})"));
+            (drawnKey, drawnFrom, drawnTo) = (drawKey, from, to);
+        }
         range.Text = $"{label(from)} ~ {(view.Follow && !ended ? "지금" : label(to))} · {view.Label}";
         AutomationProperties.SetName(range, range.Text);
         zoomIn.IsEnabled = view.StepIndex > 0 || view.IsAll;
@@ -243,44 +264,81 @@ public sealed class MeasureScreen : Screen
 
     private void RenderBanners(HostSnapshot s)
     {
-        banners.Children.Clear();
-        if (s.StartError is { } err) banners.Children.Add(new Banner(Ui, "measure.banner.starterror", BannerKind.Error, "측정을 시작하지 못했습니다: " + err));
+        // 1초마다 그리므로 내용이 바뀔 때만 다시 만든다 (bench: 매번 새로 만들면 프레임이 튄다)
+        var specs = new List<(string Id, BannerKind Kind, string Text)>();
+        if (s.StartError is { } err) specs.Add(("measure.banner.starterror", BannerKind.Error, "측정을 시작하지 못했습니다: " + err));
         if (s.Status is { } st)
         {
             if (st.StorageFailing)
-                banners.Children.Add(new Banner(Ui, "measure.banner.storage", BannerKind.Error,
+                specs.Add(("measure.banner.storage", BannerKind.Error,
                     $"기록을 저장하지 못하고 있습니다. 측정은 계속하며 다시 시도합니다 (저장 대기 {st.Pending}회차)."));
             else if (st.LocationKind == "fallback")
-                banners.Children.Add(new Banner(Ui, "measure.banner.fallback", BannerKind.Warn, "기본 위치에 쓸 수 없어 대체 위치에 기록하고 있습니다."));
-            if (st.InGap) banners.Children.Add(new Banner(Ui, "measure.banner.gap", BannerKind.Info, "절전 중이었거나 측정이 멈춘 시간입니다. 이 시간은 관측하지 못한 공백으로 남깁니다."));
+                specs.Add(("measure.banner.fallback", BannerKind.Warn, "기본 위치에 쓸 수 없어 대체 위치에 기록하고 있습니다."));
+            if (st.InGap) specs.Add(("measure.banner.gap", BannerKind.Info, "절전 중이었거나 측정이 멈춘 시간입니다. 이 시간은 관측하지 못한 공백으로 남깁니다."));
         }
         if (s.Analysis is { } a && s.Header is { } h)
         {
             if (a.StartedDisconnected)
-                banners.Children.Add(new Banner(Ui, "measure.banner.disconnected", BannerKind.Warn, "어느 대상도 응답한 적이 없습니다. 끊긴 상태에서 측정을 시작했을 수 있습니다."));
+                specs.Add(("measure.banner.disconnected", BannerKind.Warn, "어느 대상도 응답한 적이 없습니다. 끊긴 상태에서 측정을 시작했을 수 있습니다."));
             else if (a.NoBaselineTargets.Count > 0)
             {
                 var names = h.Targets.Where(t => a.NoBaselineTargets.Contains(t.Id)).Select(t => t.Name);
-                banners.Children.Add(new Banner(Ui, "measure.banner.nobaseline", BannerKind.Info,
+                specs.Add(("measure.banner.nobaseline", BannerKind.Info,
                     $"응답 기준선이 없는 대상: {string.Join(", ", names)}. 응답을 막는 장비일 수 있어 구간 판단에서 뺍니다."));
             }
             if (a.Grade.Reason == "undecidable")
-                banners.Children.Add(new Banner(Ui, "measure.banner.routehold", BannerKind.Info, "경로가 예상과 달라진 순간이 있어 그때의 원인은 판단하지 않습니다."));
+                specs.Add(("measure.banner.routehold", BannerKind.Info, "경로가 예상과 달라진 순간이 있어 그때의 원인은 판단하지 않습니다."));
         }
+        string key = string.Join(" ¦ ", specs.Select(x => $"{x.Id}|{x.Kind}|{x.Text}"));
+        if (key == bannersKey) return;
+        bannersKey = key;
+        banners.Children.Clear();
+        foreach (var (id, kind, text) in specs) banners.Children.Add(new Banner(Ui, id, kind, text));
         banners.Visibility = banners.Children.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
     }
 
+    /// <summary>카드 하나의 바뀌는 글. 대상 구성이 같으면 카드(유리 표면)는 그대로 두고 글만 바꾼다.</summary>
+    private sealed record CardTexts(TextBlock Latest, TextBlock Loss, TextBlock Avg, TextBlock Streak, TextBlock Last);
+
     private void RenderCards(HostSnapshot s)
+    {
+        // 1초마다 그린다: 카드마다 유리 표면을 새로 만들면 프레임이 튀었다 (bench). 대상 구성(이름·역할)이 바뀔 때만 다시 만든다
+        string key = string.Join(" ¦ ", s.Cards.Select(c => $"{c.TargetId}|{c.Name}|{c.Role}"));
+        if (key != cardsKey)
+        {
+            cardsKey = key;
+            BuildCards(s);
+        }
+        var now = Context.Now;
+        foreach (var card in s.Cards)
+        {
+            if (!cardTexts.TryGetValue(card.TargetId, out var t)) continue;
+            Set(t.Latest, card.Latest);
+            Set(t.Loss, $"손실 {card.LossRate} · {card.LossSentence}");
+            Set(t.Avg, $"평균 지연 {card.Average}" + (card.Errors > 0 ? $" · 검사 오류 {card.Errors}회 (손실에서 뺌)" : ""));
+            Set(t.Streak, $"최대 연속 실패 {card.MaxConsecutiveLoss}회");
+            Set(t.Last, $"마지막 성공 {(card.LastSuccess is { } ls ? LiveSummary.Clock(ls, now) : "없음")} · 마지막 실패 {(card.LastLoss is { } ll ? LiveSummary.Clock(ll, now) : "없음")}");
+        }
+
+        static void Set(TextBlock t, string text)
+        {
+            if (t.Text == text) return;
+            t.Text = text;
+            AutomationProperties.SetName(t, text);
+        }
+    }
+
+    private void BuildCards(HostSnapshot s)
     {
         cards.Children.Clear();
         cards.ColumnDefinitions.Clear();
         cards.RowDefinitions.Clear();
+        cardTexts.Clear();
         int perRow = 3;
         for (int c = 0; c < perRow; c++) cards.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         if (s.Cards.Count == 0) return;
         int rows = (s.Cards.Count + perRow - 1) / perRow;
         for (int r = 0; r < rows; r++) cards.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var now = Context.Now;
         for (int i = 0; i < s.Cards.Count; i++)
         {
             var card = s.Cards[i];
@@ -295,19 +353,17 @@ public sealed class MeasureScreen : Screen
             Grid.SetColumn(role, 1);
             head.Children.Add(role);
             stack.Children.Add(head);
-            var latest = Fonts.Text(card.Latest, Typography.Headline, Ui.Brushes.Ink);
+            var latest = Fonts.Text("", Typography.Headline, Ui.Brushes.Ink);
             AutomationProperties.SetAutomationId(latest, $"measure.card.{card.TargetId}.latest");
             stack.Children.Add(latest);
-            void Line(string id, string text)
+            TextBlock Line(string id)
             {
-                var t = Fonts.Wrapped(text, Typography.Caption, Ui.Brushes.Muted);
+                var t = Fonts.Wrapped("", Typography.Caption, Ui.Brushes.Muted);
                 AutomationProperties.SetAutomationId(t, $"measure.card.{card.TargetId}.{id}");
                 stack.Children.Add(t);
+                return t;
             }
-            Line("loss", $"손실 {card.LossRate} · {card.LossSentence}");
-            Line("avg", $"평균 지연 {card.Average}" + (card.Errors > 0 ? $" · 검사 오류 {card.Errors}회 (손실에서 뺌)" : ""));
-            Line("streak", $"최대 연속 실패 {card.MaxConsecutiveLoss}회");
-            Line("last", $"마지막 성공 {(card.LastSuccess is { } ls ? LiveSummary.Clock(ls) : "없음")} · 마지막 실패 {(card.LastLoss is { } ll ? LiveSummary.Clock(ll) : "없음")}");
+            cardTexts[card.TargetId] = new CardTexts(latest, Line("loss"), Line("avg"), Line("streak"), Line("last"));
             var panel = new GroupPanel($"measure.card.{card.TargetId}", card.Name);
             panel.Children.Add(Ui.Glass.Surface(GlassLevel.Content, stack, Radius.Outer, new Thickness(Space.S5)));
             Grid.SetRow(panel, i / perRow);
@@ -320,16 +376,26 @@ public sealed class MeasureScreen : Screen
     {
         if (s.Marks.Count == 0)
         {
+            if (marksKey == "") return;
+            marksKey = "";
             marksBody.Set(ScreenParts.Message(Ui, "measure.marks.empty", Icons.Flag, Ui.Brushes.Muted, "표시한 증상이 없습니다",
                 "끊김을 느낀 순간 [증상 표시]를 누르세요 (Ctrl+M). 누른 시각이 기록에 남습니다."), "empty");
             return;
         }
-        marksList.Children.Clear();
-        foreach (var m in s.Marks)
+        var now = Context.Now;
+        var rows = s.Marks.Select(m =>
         {
             string state = m.State switch { EventWriteState.Pending => " · 저장 다시 시도 중", EventWriteState.Lost => " · 기록하지 못함", _ => "" };
             string draft = s.SessionId is { } sid && Context.Host.Draft(sid, m.Mark) is { } d ? " · 저장하지 않은 메모 있음" : "";
-            string text = $"{LiveSummary.Clock(m.Wall)} · {m.Memo ?? "메모 없음"}{state}{draft}";
+            return (Mark: m, Text: $"{LiveSummary.Clock(m.Wall, now)} · {m.Memo ?? "메모 없음"}{state}{draft}");
+        }).ToArray();
+        // 1초마다 그리므로 목록이 바뀔 때만 다시 만든다
+        string key = string.Join(" ¦ ", rows.Select(r => r.Mark.Mark + "|" + r.Text));
+        if (key == marksKey) return;
+        marksKey = key;
+        marksList.Children.Clear();
+        foreach (var (m, text) in rows)
+        {
             var t = Fonts.Text(text, Typography.Body, Ui.Brushes.Ink);
             t.TextTrimming = TextTrimming.CharacterEllipsis;
             var row = new RowButton(Ui, $"measure.marks.{m.Mark}", text, t);
@@ -342,7 +408,9 @@ public sealed class MeasureScreen : Screen
 
     private void RenderResult(HostSnapshot s)
     {
-        if (s.Measuring || s.Finished is not { } f) { resultHost.Content = null; return; }
+        if (s.Measuring || s.Finished is not { } f) { resultHost.Content = null; resultFor = null; return; }
+        if (ReferenceEquals(f, resultFor)) return;   // 같은 결과면 유리 표면을 다시 만들지 않는다
+        resultFor = f;
         var stack = new StackPanel { Spacing = Space.S3 };
         string reason = f.Result.EndReason switch { EndReason.Completed => "계획한 시간을 마쳤습니다", EndReason.Stopped => "중지했습니다", EndReason.Error => "오류로 멈췄습니다", _ => "끝났습니다" };
         var title = Fonts.Text("측정이 끝났습니다 · " + reason, Typography.Label, Ui.Brushes.Muted);
@@ -394,7 +462,7 @@ public sealed class MeasureScreen : Screen
         OpenMemo(session, ticket.Mark, ticket.AtMs, ticket.Wall, null);
         var saved = await ticket.Saved;
         if (saved == EventWriteState.Lost)
-            Context.Toasts.Show(ToastKind.Error, "증상을 기록하지 못했습니다", $"이 시각을 따로 적어 두세요: {LiveSummary.Clock(ticket.Wall)}", autoClose: false);
+            Context.Toasts.Show(ToastKind.Error, "증상을 기록하지 못했습니다", $"이 시각을 따로 적어 두세요: {LiveSummary.Clock(ticket.Wall, Context.Now)}", autoClose: false);
         RenderMemoState(Context.Host.Snapshot);
     }
 
@@ -404,7 +472,7 @@ public sealed class MeasureScreen : Screen
         suppressDraft = true;
         memoBox.Text = Context.Host.Draft(session, markId) ?? existing ?? "";
         suppressDraft = false;
-        memoTitle.Text = $"{LiveSummary.Clock(wall)}에 증상을 표시했습니다";
+        memoTitle.Text = $"{LiveSummary.Clock(wall, Context.Now)}에 증상을 표시했습니다";
         AutomationProperties.SetName(memoTitle, memoTitle.Text);
         memoBox.SetError(null);
         memoPanel.Visibility = Visibility.Visible;
@@ -428,7 +496,7 @@ public sealed class MeasureScreen : Screen
         string text = ended ? "측정이 끝났습니다. 메모는 기록에 따로 붙습니다." : view?.State switch
         {
             EventWriteState.Pending => "아직 저장하지 못해 다시 시도 중입니다.",
-            EventWriteState.Lost => $"기록하지 못했습니다. 이 시각을 따로 적어 두세요: {LiveSummary.Clock(m.Wall)}",
+            EventWriteState.Lost => $"기록하지 못했습니다. 이 시각을 따로 적어 두세요: {LiveSummary.Clock(m.Wall, Context.Now)}",
             _ => "누른 시각은 기록에 남았습니다. 메모는 선택입니다.",
         };
         memoState.Text = Fonts.KeepAll(text);
