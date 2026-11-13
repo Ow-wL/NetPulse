@@ -216,6 +216,26 @@ public sealed class MeasurementEngineTests
     }
 
     [Fact]
+    public async Task StoppingAgainWaitsForTheSameUnfinishedWork()
+    {
+        // 첫 호출이 시간 초과로 끝난 뒤 다시 불러도, 작업이 실제로 끝나기 전에는 true가 아니다 (M1 G4 3라운드 이월 1)
+        var clock = new ManualClock(Start);
+        var gate = new TaskCompletionSource();
+        var probe = new SlowProbe(gate.Task);
+        var engine = new MeasurementEngine(clock, probe, [Target("a")], Second);
+        engine.Start();
+        await Eventually(() => probe.Started, "측정 시작");
+        Assert.False(await engine.StopAsync(TimeSpan.FromMilliseconds(100)));
+        Assert.False(await engine.StopAsync(TimeSpan.FromMilliseconds(100)));
+        Assert.False(engine.IsStopCompleted);
+        gate.SetResult();   // 취소를 무시하던 측정이 이제 끝난다
+        Assert.True(await engine.StopAsync(TimeSpan.FromSeconds(3)));
+        Assert.True(engine.IsStopCompleted);
+        Assert.Equal(0, engine.State.Rounds);
+        await engine.DisposeAsync();
+    }
+
+    [Fact]
     public async Task StartTwiceThrows()
     {
         await using var engine = new MeasurementEngine(new ManualClock(Start), new RecordingProbe(), [Target("a")], Second);

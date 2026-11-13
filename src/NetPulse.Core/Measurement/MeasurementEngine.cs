@@ -34,6 +34,7 @@ public sealed class MeasurementEngine : IAsyncDisposable
     private int deliveryPending;   // 배달할 것이 있음 (0/1)
     private int delivering;        // 배달 작업이 돌고 있음 (0/1)
     private bool stopped;
+    private Task? stopCompletion;  // 취소 처리와 측정 작업이 모두 끝나면 완료 (첫 StopAsync가 만든다)
 
     public MeasurementEngine(IClock clock, IProbe probe, IReadOnlyList<ProbeTarget> targets, TimeSpan interval, long? roundLimit = null)
     {
@@ -74,31 +75,53 @@ public sealed class MeasurementEngine : IAsyncDisposable
     /// 멈춘다: 취소 요청 → 취소 처리와 실행 중인 회차가 끝날 때까지 기다림(제한시간) → 이후 결과는 버림.
     /// 제한시간 안에 끝났으면 true.
     /// 취소 콜백은 공급자 코드라 멈출 수 있다. 잠금 밖에서 비동기로 취소하고(CancelAsync), 제한시간은 취소 전부터 잰다.
+    /// 여러 번 불러도 같은 정리 작업을 기다린다. 앞선 호출이 시간 초과로 끝났어도, 뒤 호출은 그 작업이 실제로 끝났을 때만 true다.
     /// </summary>
     public async Task<bool> StopAsync(TimeSpan timeout)
     {
-        Task? running;
-        CancellationTokenSource? source;
+        var deadline = Task.Delay(timeout);
+        Task completion;
+        bool first = false;
+        Task? running = null;
+        CancellationTokenSource? source = null;
+        TaskCompletionSource? done = null;
         lock (gate)
         {
-            if (stopped) return true;
-            stopped = true;   // 이 순간부터 도착하는 결과는 버린다
-            source = cancellation;
-            running = loop;
+            if (stopCompletion is null)
+            {
+                first = true;
+                stopped = true;   // 이 순간부터 도착하는 결과는 버린다
+                source = cancellation;
+                running = loop;
+                done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                stopCompletion = done.Task;
+            }
+            completion = stopCompletion;
         }
-        var deadline = Task.Delay(timeout);
-        var cancelling = source?.CancelAsync() ?? Task.CompletedTask;
-        var all = Task.WhenAll(cancelling, running ?? Task.CompletedTask);
-        bool completed = await Task.WhenAny(all, deadline).ConfigureAwait(false) == all;
-        lock (gate) SetState(state with { Running = false });
-        RequestDelivery();
+        if (first)
+        {
+            var cancelling = source?.CancelAsync() ?? Task.CompletedTask;
+            _ = Task.WhenAll(cancelling, running ?? Task.CompletedTask).ContinueWith(_ => done!.TrySetResult(), TaskScheduler.Default);
+        }
+        bool completed = await Task.WhenAny(completion, deadline).ConfigureAwait(false) == completion;
+        if (first)
+        {
+            lock (gate) SetState(state with { Running = false });
+            RequestDelivery();
+        }
         return completed;
     }
 
+    /// <summary>멈추기를 요청했고, 취소 처리와 측정 작업이 실제로 끝났으면 true.</summary>
+    public bool IsStopCompleted { get { lock (gate) return stopCompletion is { IsCompleted: true }; } }
+
+    /// <summary>
+    /// 멈추고 자원을 정리한다. 정리 작업이 제한시간 안에 끝나지 않으면 취소 원본을 정리하지 않는다
+    /// (아직 실행 중인 취소 콜백·측정 작업이 쓰고 있을 수 있다. 가비지 수집에 맡긴다). 결과는 <see cref="IsStopCompleted"/>로 본다.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
-        await StopAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
-        cancellation?.Dispose();
+        if (await StopAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false)) cancellation?.Dispose();
     }
 
     private async Task RunAsync(CancellationToken token)

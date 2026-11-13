@@ -44,7 +44,9 @@ public sealed class PlatformTests
         EngineState final;
         lock (gate) final = last!;
         Assert.Equal(3, final.Rounds + final.Skipped);
-        Assert.InRange(final.Latest!.Tick.Index, 0, 2);
+        // 러너가 느려 세 회차를 모두 건너뛰면 마지막 회차가 없다 (M1 G4 3라운드 이월 2)
+        if (final.Rounds > 0) Assert.InRange(final.Latest!.Tick.Index, 0, 2);
+        else Assert.Null(final.Latest);
         await engine.DisposeAsync();
     }
 }
