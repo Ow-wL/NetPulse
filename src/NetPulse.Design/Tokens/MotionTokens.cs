@@ -55,3 +55,25 @@ public static class FrameBudget
     /// <summary>전환 20회→60회 사이 전용 메모리 증가 상한, 60회 뒤 전용 메모리 상한 (MB). 상한은 M0 스파이크 합격선 400 MB</summary>
     public const double PlateauGrowthMb = 20, PrivateLimitMb = 400;
 }
+
+/// <summary>기다림 기준 (M5): 이보다 오래 걸리면 화면이 "오래 걸린다"를 알리고 다시 시도할 수 있게 한다.</summary>
+public static class Waits
+{
+    /// <summary>첫 실행 탐지 (M5 설계 8절: 5초 뒤 "다시 확인")</summary>
+    public static readonly TimeSpan Detect = TimeSpan.FromSeconds(5);
+    /// <summary>창을 닫을 때 진행 중인 테마 전환의 정리를 기다리는 한도 (M2 이월 1)</summary>
+    public static readonly TimeSpan ThemeCleanup = TimeSpan.FromSeconds(2);
+    /// <summary>창을 닫을 때 메모·노트 쓰기를 기다리는 한도 (M5 설계 4.5)</summary>
+    public static readonly TimeSpan CloseWrites = TimeSpan.FromSeconds(3);
+}
+
+/// <summary>측정 화면 bench 구간 (M5 설계 5절 재현 절차).</summary>
+public static class BenchTokens
+{
+    public static readonly TimeSpan Warmup = TimeSpan.FromSeconds(10);
+    public static readonly TimeSpan IdleLive = TimeSpan.FromSeconds(90);
+    public static readonly TimeSpan ZoomFull = TimeSpan.FromSeconds(30);
+    public static readonly TimeSpan PanStep = TimeSpan.FromSeconds(1);
+    public static readonly TimeSpan NavStep = TimeSpan.FromMilliseconds(1500);
+    public const int PanCount = 10, NavCount = 6;
+}

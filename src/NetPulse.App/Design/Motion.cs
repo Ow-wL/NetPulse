@@ -114,6 +114,16 @@ public sealed class Motion
         Run(element, MotionKind.Fade, visual, ("Opacity", a), null, () => visual.Opacity = to);
     }
 
+    /// <summary>
+    /// 교차 페이드 (M2 설계 4.5가 약속한 화면 전환, M5에서 만듦): 나가는 요소를 짧게 흐리고, 들어오는 요소들을 차례로 등장시킨다.
+    /// 줄이기면 들어오는 쪽도 짧은 페이드만 (Enter가 보장).
+    /// </summary>
+    public void CrossFade(UIElement? outgoing, IReadOnlyList<UIElement> incoming)
+    {
+        if (outgoing is not null) Fade(outgoing, (float)Emphasis.Full, 0, MotionTokens.Fade);
+        Stagger(incoming);
+    }
+
     /// <summary>요소를 지정 위치(Translation)로 옮김. 줄이기면 바로 옮김.</summary>
     public void MoveTo(UIElement element, Vector3 to, TimeSpan? duration = null)
     {
@@ -227,8 +237,14 @@ public sealed class Motion
     /// </summary>
     public void SharedMove(FrameworkElement from, FrameworkElement to, UIElement relativeTo)
     {
-        if (Reduced || from.ActualWidth <= 0 || to.ActualWidth <= 0) { Fade(to, 0, (float)Emphasis.Full); return; }
-        var f = from.TransformToVisual(relativeTo).TransformBounds(new Windows.Foundation.Rect(0, 0, from.ActualWidth, from.ActualHeight));
+        if (from.ActualWidth <= 0) { Fade(to, 0, (float)Emphasis.Full); return; }
+        SharedMove(from.TransformToVisual(relativeTo).TransformBounds(new Windows.Foundation.Rect(0, 0, from.ActualWidth, from.ActualHeight)), to, relativeTo);
+    }
+
+    /// <summary>출발 요소가 이미 화면에서 빠진 경우: 빠지기 전에 잰 경계에서 옮겨 온다 (M5 화면 전환).</summary>
+    public void SharedMove(Windows.Foundation.Rect f, FrameworkElement to, UIElement relativeTo)
+    {
+        if (Reduced || f.Width <= 0 || to.ActualWidth <= 0) { Fade(to, 0, (float)Emphasis.Full); return; }
         var t = to.TransformToVisual(relativeTo).TransformBounds(new Windows.Foundation.Rect(0, 0, to.ActualWidth, to.ActualHeight));
         var visual = Prepare(to);
         visual.CenterPoint = Vector3.Zero;

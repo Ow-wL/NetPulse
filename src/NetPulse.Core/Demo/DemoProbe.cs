@@ -29,12 +29,18 @@ public sealed class DemoProbe(Scenario scenario) : IProbe
         return ProbeResult.Success(Math.Max(0, Math.Round(rtt.Base + rtt.Jitter * u, 1)));
     }
 
-    /// <summary>(시드, 대상, 회차)로 정해지는 0~1 값. FNV-1a 64비트.</summary>
+    /// <summary>
+    /// (시드, 대상, 회차)로 정해지는 0~1 값. FNV-1a 64비트 뒤에 섞기 단계(splitmix64 끝 단계)를 둔다:
+    /// FNV-1a만으로는 회차 끝자리만 다를 때 높은 비트가 거의 안 바뀌어 10회차 동안 같은 값이 나왔다 (M5 화면에서 발견).
+    /// </summary>
     internal static double Unit(long seed, string targetId, long round)
     {
         const ulong offset = 14695981039346656037, prime = 1099511628211;
         ulong hash = offset;
         foreach (byte b in Encoding.UTF8.GetBytes($"{seed}|{targetId}|{round}")) { hash ^= b; hash *= prime; }
+        hash ^= hash >> 30; hash *= 0xbf58476d1ce4e5b9;
+        hash ^= hash >> 27; hash *= 0x94d049bb133111eb;
+        hash ^= hash >> 31;
         return (hash >> 11) / (double)(1UL << 53);
     }
 }

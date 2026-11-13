@@ -70,6 +70,10 @@ public sealed class ScenarioTests
         Assert.Equal(ProbeOutcome.Success, probe.Resolve("gateway", 120).Outcome);      // 다른 대상은 영향 없음
         Assert.Equal(ProbeOutcome.Error, probe.Resolve("gateway", 300).Outcome);
         Assert.Equal(ProbeOutcome.Error, probe.Resolve("ext-a", 600).Outcome);          // 범위 밖
+        // 흔들림은 이웃한 회차끼리도 다르다 (회차 끝자리만 다를 때 같은 값이 나오지 않게, M5)
+        var values = Enumerable.Range(10, 100).Select(r => probe.Resolve("ext-a", r)).Where(x => x.Outcome == ProbeOutcome.Success).Select(x => x.RttMs).ToArray();
+        int same = values.Zip(values.Skip(1)).Count(p => p.First == p.Second);
+        Assert.True(same < values.Length / 5, $"이웃 회차 같은 값 {same}/{values.Length}");
     }
 
     [Fact]

@@ -95,6 +95,18 @@ public static class Fonts
         return sb.ToString();
     }
 
+    /// <summary>입력 칸 같은 컨트롤에 글자 단계를 적용한다 (M5).</summary>
+    public static void Apply(Microsoft.UI.Xaml.Controls.Control c, TypeStyle style)
+    {
+        c.FontSize = style.Size;
+        (c.FontFamily, c.FontWeight) = style.Weight switch
+        {
+            FontWeightToken.Bold => (Bold, FontWeights.Bold),
+            FontWeightToken.SemiBold => (SemiBold, FontWeights.SemiBold),
+            _ => (Regular, FontWeights.Normal),
+        };
+    }
+
     public static void Apply(TextBlock t, TypeStyle style)
     {
         t.FontSize = style.Size;

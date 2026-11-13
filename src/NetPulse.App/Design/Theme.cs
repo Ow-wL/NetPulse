@@ -29,6 +29,9 @@ public sealed class Theme
     private CancellationTokenSource? transition;
     private EffectiveMode? pending;
     private bool closing;
+    private TaskCompletionSource? transitionDone;   // 진행 중 전환의 정리가 끝나면 완료 (M2 이월 1)
+    private Action? cleanup;                        // 진행 중 전환의 정리 (한 번만 일한다)
+    private bool renderingSubscribed;
     private Compositor? compositor;
 
     public Theme(Ui ui)
@@ -69,12 +72,14 @@ public sealed class Theme
         host.SizeChanged += (_, _) => transition?.Cancel();   // 창 크기가 바뀌면 전환을 끝으로 건너뛴다
         compositor = ElementCompositionPreview.GetElementVisual(liveContent).Compositor;
         CompositionTarget.Rendering += OnRendering;
+        renderingSubscribed = true;
         return host;
     }
 
     /// <summary>적용 모드가 바뀌었을 때. 테마만 바뀌었고 움직임 줄이기·고대비가 아니면 원형으로, 아니면 즉시.</summary>
     public void OnModeChanged(EffectiveMode previous, EffectiveMode next)
     {
+        if (closing) return;   // 닫는 중에는 새 전환도 대기 요청도 받지 않는다 (M2 이월 1)
         if (transition is not null)
         {
             if (next.ReduceMotion || next.HighContrast) { pending = next; transition.Cancel(); return; }   // 바로 끝내고 최신 모드
@@ -122,6 +127,21 @@ public sealed class Theme
         var started = System.Diagnostics.Stopwatch.StartNew();
         var visual = ElementCompositionPreview.GetElementVisual(live!);
         CompositionEllipseGeometry? ellipse = null;
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        transitionDone = done;
+        bool cleaned = false;
+        cleanup = () =>
+        {
+            if (cleaned) return;
+            cleaned = true;
+            // 정리: 클립 해제, 찍은 화면 제거, 유리를 현재 모드대로
+            visual.Clip = null;
+            clipInstalled = false;
+            appliedDuringTransition = null;
+            snapshotLayer.Source = null;
+            snapshotLayer.Visibility = Visibility.Collapsed;
+            ui.Glass.ForceOpaque(false);
+        };
         try
         {
             // 1~2. 직전 화면 찍기 (기다리는 동안 아무것도 바꾸지 않는다). 시간 제한을 넘거나 실패하면 페이드로 대체.
@@ -163,18 +183,18 @@ public sealed class Theme
             var grow = compositor.CreateVector2KeyFrameAnimation();
             grow.InsertKeyFrame(1, new Vector2(max, max), ui.Motion.EnterEasing);
             grow.Duration = MotionTokens.ThemeReveal;
-            var done = new TaskCompletionSource();
+            var animated = new TaskCompletionSource();
             var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
             ellipse.StartAnimation("Radius", grow);
             batch.End();
-            batch.Completed += (_, _) => done.TrySetResult();
+            batch.Completed += (_, _) => animated.TrySetResult();
             if (HoldAt is { } p && ellipse.TryGetAnimationController("Radius") is { } controller)
             {
                 controller.Pause();
                 controller.Progress = (float)p;
                 ui.Log.Write("themeHold", new { progress = p });
             }
-            using (cts.Token.Register(() => done.TrySetResult())) await done.Task;
+            using (cts.Token.Register(() => animated.TrySetResult())) await animated.Task;
             ellipse.StopAnimation("Radius");
         }
         catch (Exception ex)
@@ -186,13 +206,9 @@ public sealed class Theme
         }
         finally
         {
-            // 정리: 클립 해제, 찍은 화면 제거, 유리를 현재 모드대로, 최신 입력 적용
-            visual.Clip = null;
-            clipInstalled = false;
-            appliedDuringTransition = null;
-            snapshotLayer.Source = null;
-            snapshotLayer.Visibility = Visibility.Collapsed;
-            ui.Glass.ForceOpaque(false);
+            // 정리 후 최신 입력 적용
+            cleanup?.Invoke();
+            cleanup = null;
             transition = null;
             cts.Dispose();
             TransitionChanged?.Invoke();
@@ -203,6 +219,33 @@ public sealed class Theme
                 pending = null;
                 if (p2 != next) OnModeChanged(next, p2); else Apply(p2);
             }
+            done.TrySetResult();
+            if (ReferenceEquals(transitionDone, done)) transitionDone = null;
+        }
+    }
+
+    /// <summary>진단: 렌더링 콜백을 구독 중인지 (닫기 정리 확인).</summary>
+    public bool RenderingSubscribed => renderingSubscribed;
+
+    /// <summary>
+    /// 창을 닫을 때 (M2 이월 1, M5 설계 6절): 새 전환을 막고, 진행 중 전환에 취소를 요청한 뒤 <b>UI가 살아 있는 동안</b> 그 정리가 끝나기를 기다린다.
+    /// 한도 안에 끝나지 않으면 같은 정리를 UI 스레드에서 직접 실행한다 (정리는 한 번만 일한다). 그 다음 렌더링 구독을 푼다.
+    /// </summary>
+    public async Task ShutdownAsync(TimeSpan limit)
+    {
+        closing = true;
+        pending = null;
+        var waiting = transitionDone;
+        transition?.Cancel();
+        if (waiting is not null && await Task.WhenAny(waiting.Task, Task.Delay(limit)) != waiting.Task)
+        {
+            ui.Log.Write("themeCleanupTimeout", new { limitMs = limit.TotalMilliseconds });
+            cleanup?.Invoke();
+        }
+        if (renderingSubscribed)
+        {
+            CompositionTarget.Rendering -= OnRendering;
+            renderingSubscribed = false;
         }
     }
 
@@ -212,6 +255,11 @@ public sealed class Theme
         closing = true;
         pending = null;
         transition?.Cancel();
-        CompositionTarget.Rendering -= OnRendering;
+        cleanup?.Invoke();
+        if (renderingSubscribed)
+        {
+            CompositionTarget.Rendering -= OnRendering;
+            renderingSubscribed = false;
+        }
     }
 }

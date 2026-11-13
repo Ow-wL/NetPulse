@@ -22,13 +22,14 @@ public sealed class ToastHost : StackPanel
     private readonly List<DispatcherQueueTimer> timers = [];   // 필드로 붙잡아 둔다 (M0 교훈)
     private int sequence;
 
-    public ToastHost(Ui ui)
+    /// <param name="bottom">메인 창 (M5): 화면 머리·카드를 가리지 않게 오른쪽 아래. 전시 화면은 도구 막대 아래 (M2).</param>
+    public ToastHost(Ui ui, bool bottom = false)
     {
         this.ui = ui;
         Spacing = Space.S3;
         HorizontalAlignment = HorizontalAlignment.Right;
-        VerticalAlignment = VerticalAlignment.Top;
-        Margin = new Thickness(0, Space.S8 + Space.S8, Space.S6, 0);   // 도구 막대 아래
+        VerticalAlignment = bottom ? VerticalAlignment.Bottom : VerticalAlignment.Top;
+        Margin = bottom ? new Thickness(0, 0, Space.S6, Space.S6) : new Thickness(0, Space.S8 + Space.S8, Space.S6, 0);
         Width = Size.ToastWidth;
     }
 

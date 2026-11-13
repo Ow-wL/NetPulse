@@ -9,7 +9,7 @@ namespace NetPulse.Core.Live;
 /// </summary>
 /// <param name="Notice">읽기 중 누락·손상 안내 (RecordReader의 누락 안내와 손상 수)</param>
 public sealed record RecentItem(RecordEntry Entry, bool Analyzing, GradeBadge? Badge, int? Outages, long? LongestMinMs, string? ConnectionKind,
-    string? FirstMemo, long? DurationMs, string? Notice, string? Error);
+    string? FirstMemo, long? DurationMs, string? Notice, string? Error, string? Sentence = null, Grade? Grade = null);
 
 /// <summary>
 /// 최근 측정 목록과 분석 캐시 (M5 설계 3.3). 분석 결과는 파일에 저장하지 않고 앱 실행 동안 (측정 ID, 수명, 끝 사유)로 캐시한다.
@@ -74,7 +74,8 @@ public sealed class RecentRecords(Func<IReadOnlyList<string>> roots, int max = 3
             if (record.Damage.Total > 0) notice = (notice is null ? "" : notice + " · ") + $"손상된 줄 {record.Damage.Total}개";
             if (e.Lifecycle == RecordLifecycle.NoSummary) notice = (notice is null ? "" : notice + " · ") + "끝 기록 없음";
             return new RecentItem(e, false, LiveSummary.Badge(a.Grade.Grade), a.Episodes.Count,
-                a.Episodes.Count == 0 ? null : a.Episodes.Max(x => x.MinDurationMs), PathMapModel.ConnectionKind(record.Events), memo, duration, notice, null);
+                a.Episodes.Count == 0 ? null : a.Episodes.Max(x => x.MinDurationMs), PathMapModel.ConnectionKind(record.Events), memo, duration, notice, null,
+                a.Grade.Sentence, a.Grade.Grade);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         {

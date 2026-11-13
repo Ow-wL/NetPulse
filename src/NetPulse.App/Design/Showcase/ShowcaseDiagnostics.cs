@@ -131,66 +131,9 @@ public sealed partial class ShowcaseWindow
         log.Write("selftest", new { kind = "dialog", initialFocus = initial, focusAfterClose = after, closed = !dialog.IsOpen });
     }
 
-    /// <summary>이름 있는 요소마다 경계, 보이는 영역(조상 스크롤·창과의 교차), 스크롤 안 여부. 글자 잘림, 상호작용 요소 겹침.</summary>
-    private object LayoutReport()
-    {
-        var items = new List<object>();
-        var interactive = new List<(string Id, Rect Bounds)>();
-        var trimmed = new List<string>();
-        var rootRect = new Rect(0, 0, root.ActualWidth, root.ActualHeight);
-        void Walk(DependencyObject node, Rect clip, bool inScroll)
-        {
-            if (node is UIElement { Visibility: Visibility.Collapsed }) return;
-            // 자동화에서 빠진 하위 트리(대화상자 뒤 화면, 장식)는 검사하지 않는다
-            if (node is UIElement ue && !ReferenceEquals(node, root) && AutomationProperties.GetAccessibilityView(ue) == AccessibilityView.Raw) return;
-            if (ReferenceEquals(node, diag)) return;   // 진단 출력용 글자는 화면 요소가 아니다
-            if (node is FrameworkElement fe && fe.ActualWidth > 0)
-            {
-                // 명시적 Clip도 보이는 영역을 줄인다 (G4 M2 1라운드 지적 6)
-                if (fe.Clip is RectangleGeometry rg)
-                    clip = Intersect(clip, fe.TransformToVisual(root).TransformBounds(rg.Rect));
-                var bounds = fe.TransformToVisual(root).TransformBounds(new Rect(0, 0, fe.ActualWidth, fe.ActualHeight));
-                var id = AutomationProperties.GetAutomationId(fe);
-                if (fe is TextBlock { IsTextTrimmed: true } tb) trimmed.Add(id.Length > 0 ? id : tb.Text);
-                if (id.Length > 0 && AutomationProperties.GetAccessibilityView(fe) != AccessibilityView.Raw)
-                {
-                    var visible = Intersect(bounds, clip);
-                    items.Add(new { id, x = bounds.X, y = bounds.Y, w = bounds.Width, h = bounds.Height, vw = visible.Width, vh = visible.Height, inScroll });
-                    if (fe is ButtonBase or ToggleButton) interactive.Add((id, bounds));
-                }
-                if (fe is ScrollViewer sv)
-                {
-                    clip = Intersect(clip, bounds);
-                    inScroll = true;
-                }
-            }
-            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++) Walk(VisualTreeHelper.GetChild(node, i), clip, inScroll);
-        }
-        Walk(root, rootRect, false);   // 오버레이(대화상자, 알림)까지 포함
-        var overlaps = new List<string>();
-        for (int a = 0; a < interactive.Count; a++)
-            for (int b = a + 1; b < interactive.Count; b++)
-            {
-                var r = Intersect(interactive[a].Bounds, interactive[b].Bounds);
-                if (r.Width > 1 && r.Height > 1) overlaps.Add(interactive[a].Id + "|" + interactive[b].Id);
-            }
-        return new { root = new { w = root.ActualWidth, h = root.ActualHeight }, items, trimmed, overlaps };
-    }
+    private object LayoutReport() => LayoutProbe.Report(root, diag);
 
-    private static Rect Intersect(Rect a, Rect b)
-    {
-        double x = Math.Max(a.X, b.X), y = Math.Max(a.Y, b.Y);
-        double r = Math.Min(a.X + a.Width, b.X + b.Width), btm = Math.Min(a.Y + a.Height, b.Y + b.Height);
-        return r <= x || btm <= y ? new Rect(x, y, 0, 0) : new Rect(x, y, r - x, btm - y);
-    }
+    private static string Id(object? element) => LayoutProbe.Id(element);
 
-    private static string Id(object? element) => element is DependencyObject d ? AutomationProperties.GetAutomationId(d) is { Length: > 0 } id ? id : d.GetType().Name : "(none)";
-
-    private static DependencyObject? FindById(DependencyObject node, string id)
-    {
-        if (AutomationProperties.GetAutomationId(node) == id) return node;
-        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
-            if (FindById(VisualTreeHelper.GetChild(node, i), id) is { } found) return found;
-        return null;
-    }
+    private static DependencyObject? FindById(DependencyObject node, string id) => LayoutProbe.FindById(node, id);
 }

@@ -42,7 +42,8 @@ public sealed class GlassCard : GroupPanel
         Children.Add(ui.Glass.Surface(GlassLevel.Content, stack, Radius.Outer, new Thickness(Space.S6)));
     }
 
-    private static UIElement Skeleton(Ui ui)
+    /// <summary>불러오는 중 윤곽 (화면이 카드 안 일부만 바꿀 때도 쓴다, M5).</summary>
+    public static UIElement Skeleton(Ui ui)
     {
         var lines = new StackPanel { Spacing = Space.S3 };
         foreach (var width in new[] { Space.S8 * 5, Space.S8 * 4, Space.S8 * 3 })
@@ -52,7 +53,8 @@ public sealed class GlassCard : GroupPanel
         return lines;
     }
 
-    private static UIElement Message(Ui ui, string icon, Microsoft.UI.Xaml.Media.Brush iconBrush, string title, string body)
+    /// <summary>아이콘 + 제목 + 본문 한 덩어리 (빈 상태·오류).</summary>
+    public static UIElement Message(Ui ui, string icon, Microsoft.UI.Xaml.Media.Brush iconBrush, string title, string body)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
         row.Children.Add(Icons.Make(icon, iconBrush, Size.IconL));

@@ -78,6 +78,25 @@ public static class Icons
     public const string Question = "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01";
     public const string Play = "M7 4v16l13-8z";
     public const string Refresh = "M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7";
+    // M5
+    public const string Stop = "M7 7h10v10H7z";
+    public const string Pencil = "M4 20h4L19 9l-4-4L4 16zM14 6l4 4";
+    public const string Plus = "M12 5v14M5 12h14";
+    public const string Minus = "M5 12h14";
+    public const string Up = "M12 19V5M5 12l7-7 7 7";
+    public const string Down = "M12 5v14M5 12l7 7 7-7";
+    public const string Trash = "M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3";
+    public const string Back = "M19 12H5M12 5l-7 7 7 7";
+    public const string Flag = "M5 21V4M5 4h11l-2 4 2 4H5";
+    public const string Pc = "M3 5h18v11H3zM8 20h8M12 16v4";
+    public const string Router = "M3 14h18v6H3zM7 17h.01M11 17h.01M8 10a6 6 0 0 1 8 0M5 7a10 10 0 0 1 14 0";
+    public const string Globe = "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18";
+    public const string Clock = "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2";
+    public const string Report = "M6 3h9l4 4v14H6zM14 3v5h5M9 13h6M9 17h6";
+    public const string Diagnose = "M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.8l-5.4 2.7 1.2-6-4.5-4.2 6.1-.7z";
+    public const string Chevron = "M9 6l6 6-6 6";
+    public const string ZoomAll = "M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6";
+    public const string Now = "M13 5l7 7-7 7M4 5l7 7-7 7";
 
     /// <summary>아이콘 하나 (테마 브러시로 그리는 선). 장식이면 자동화 트리에서 뺀다.</summary>
     public static FrameworkElement Make(string data, Brush stroke, double size, bool decorative = true)
