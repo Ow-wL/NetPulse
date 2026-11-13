@@ -53,3 +53,17 @@ $script:ApprovePattern = '^\s*\**\s*판정\s*:\s*\**\s*APPROVE\s*\**\s*$'
 function Get-FirstVerdictLine([string] $AnswerPath) {
     Get-Content $AnswerPath -Encoding UTF8 | Where-Object { $_ -match $script:VerdictLinePattern } | Select-Object -First 1
 }
+
+function Write-BenchSummary($Bench, [string] $Path) {
+    <# 공개용 벤치 요약 (식별 정보 없음, M2 설계 5.9). 원본 표본은 비공개 산출물에 둔다. #>
+    $lines = @('| 구간 | 표본 | 95백분위 (ms) | 최대 (ms) | 33 ms 초과 |', '| --- | --- | --- | --- | --- |')
+    foreach ($s in $Bench.segments) { $lines += "| $($s.Segment) | $($s.Samples) | $($s.P95) | $($s.Max) | $($s.Over33) |" }
+    $m = $Bench.memory
+    $lines += ''
+    $lines += "- 기준 간격 T: $([math]::Round($Bench.baselineMs, 2)) ms (CompositionTarget.Rendering 콜백 간격, 실제 표시 프레임과 다를 수 있음)"
+    $lines += "- 원형 전환 $($Bench.transitions)회, 대체(페이드) $($Bench.fallbacks)회, 클립 없이 새 색이 그려진 콜백 $($Bench.unclippedNewThemeFrames)회, 마지막 화면 찍기 $([math]::Round($Bench.lastSnapshotMs, 1)) ms"
+    $lines += "- 전용 메모리: 전환 2회 뒤 $($m.after2Mb) MB, 20회 뒤 $($m.after20Mb) MB, 60회 뒤 $($m.after60Mb) MB (20→60회 증가 $($m.plateauGrowthMb) MB)"
+    $l = $Bench.leftovers
+    $lines += "- 남은 것: 찍은 화면 $($l.snapshotLayers), 반복 모션 $($l.repeatsAtStart)→$($l.repeatsAtEnd), 모드 구독자 $($l.subscribersAtStart)→$($l.subscribersAtEnd)"
+    $lines | Set-Content $Path -Encoding UTF8
+}

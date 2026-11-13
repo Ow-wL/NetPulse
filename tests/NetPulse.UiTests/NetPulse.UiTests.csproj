@@ -13,5 +13,7 @@
   <ItemGroup>
     <PackageReference Include="xunit.v3" />
     <Using Include="Xunit" />
+    <!-- 토큰 색과 대비 계산 (G5 실측 대비가 같은 함수로 판정한다) -->
+    <ProjectReference Include="..\..\src\NetPulse.Design\NetPulse.Design.csproj" />
   </ItemGroup>
 </Project>

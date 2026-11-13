@@ -28,6 +28,9 @@ public static class LightLayout
 
     /// <summary>원형 그라디언트 가장자리: 중심 불투명 → 이 비율부터 옅어져 → 끝에서 투명.</summary>
     public const double FalloffStart = 0.15;
+
+    /// <summary>오로라 띠의 가장 진한 자리 (띠 높이에 대한 비율)</summary>
+    public const double RibbonCenter = 0.5;
 }
 
 /// <summary>

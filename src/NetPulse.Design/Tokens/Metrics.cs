@@ -80,4 +80,7 @@ public static class Typography
     public static readonly TypeStyle Caption = new("caption", 12.5, FontWeightToken.Regular, 1.4);
 
     public static IReadOnlyList<TypeStyle> All { get; } = [Display, Title, Headline, Body, Label, Caption];
+
+    /// <summary>숫자 한 자리 칸의 너비 (글자 크기에 대한 비율, Pretendard 숫자 너비 근사)</summary>
+    public const double DigitWidth = 0.62;
 }

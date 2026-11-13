@@ -195,6 +195,8 @@ public sealed class SegmentedChoice : GroupPanel
 
     public event Action<string>? Changed;
 
+    public FrameworkElement? Item(string value) => byValue.GetValueOrDefault(value);
+
     public void Set(string value)
     {
         if (byValue.TryGetValue(value, out var b)) b.IsChecked = true;

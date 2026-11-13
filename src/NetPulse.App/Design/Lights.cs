@@ -45,14 +45,15 @@ public sealed class Lights
         }
         for (int i = 0; i < LightLayout.Ribbons.Count; i++)
         {
-            var stops = new[] { new GradientStop { Offset = 0 }, new GradientStop { Offset = 0.5 }, new GradientStop { Offset = 1 } };
-            var brush = new LinearGradientBrush { StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(0, 1) };
-            foreach (var s in stops) brush.GradientStops.Add(s);
-            var shape = new Rectangle { Fill = brush };
+            var shape = new Rectangle();
             aurora.Children.Add(shape);
-            ribbons.Add(new Ribbon(shape, stops, LightLayout.Ribbons[i], i));
+            ribbons.Add(new Ribbon(shape, [], LightLayout.Ribbons[i], i));
         }
-        Root.SizeChanged += (_, _) => Layout();
+        Root.SizeChanged += (_, e) =>
+        {
+            Root.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, e.NewSize.Width, e.NewSize.Height) };   // 창 밖으로 뻗은 빛은 그리지 않는다
+            Layout();
+        };
         motion.ReduceChanged += _ => RestartDrift();
     }
 
@@ -66,20 +67,15 @@ public sealed class Lights
     {
         theme = mode.Theme;
         Root.Visibility = mode.LightsVisible ? Visibility.Visible : Visibility.Collapsed;
+        // 그라디언트 정지점의 색만 바꾸면 이미 그려진 원형 그라디언트에 반영되지 않았다 (관측: 테마를 바꿔도 이전 테마의 빛이 남음).
+        // 테마가 바뀌면 브러시를 새로 만들어 끼운다 (요소는 그대로, 8+3개라 비용이 작다).
         foreach (var l in lights)
         {
-            var normal = Materials.Lights(theme, false)[l.Index];
-            var bad = Materials.Lights(theme, true)[l.Index];
-            SetStops(l.NormalStops, normal.Color);
-            SetStops(l.ProblemStops, bad.Color);
+            l.Normal.Fill = Radial(Materials.Lights(theme, false)[l.Index].Color);
+            l.Problem.Fill = Radial(Materials.Lights(theme, true)[l.Index].Color);
         }
         var colors = Materials.Aurora(theme);
-        foreach (var r in ribbons)
-        {
-            var c = TokenBrushes.ToColor(colors[r.Index].Color);
-            r.Stops[0].Color = r.Stops[2].Color = TokenBrushes.ToColor(colors[r.Index].Color.WithAlpha(0));
-            r.Stops[1].Color = c;
-        }
+        foreach (var r in ribbons) r.Shape.Fill = RibbonBrush(colors[r.Index].Color);
         SetState(problem, animate: false);
         SetAurora(mode.AuroraVisible, animate: false);
         if (mode.LightsMoving != moving) { moving = mode.LightsMoving; RestartDrift(); }
@@ -115,18 +111,24 @@ public sealed class Lights
         motion.RunOnce(Root, visual, "Opacity", a, () => visual.Opacity = to);
     }
 
-    private static (Ellipse, GradientStop[]) Blob()
+    private static (Ellipse, GradientStop[]) Blob() => (new Ellipse(), []);
+
+    private static RadialGradientBrush Radial(NetPulse.Design.Rgba color)
     {
-        var stops = new[] { new GradientStop { Offset = 0 }, new GradientStop { Offset = LightLayout.FalloffStart }, new GradientStop { Offset = 1 } };
         var brush = new RadialGradientBrush();
-        foreach (var s in stops) brush.GradientStops.Add(s);
-        return (new Ellipse { Fill = brush }, stops);
+        brush.GradientStops.Add(new GradientStop { Offset = 0, Color = TokenBrushes.ToColor(color) });
+        brush.GradientStops.Add(new GradientStop { Offset = LightLayout.FalloffStart, Color = TokenBrushes.ToColor(color) });
+        brush.GradientStops.Add(new GradientStop { Offset = 1, Color = TokenBrushes.ToColor(color.WithAlpha(0)) });
+        return brush;
     }
 
-    private static void SetStops(GradientStop[] stops, NetPulse.Design.Rgba color)
+    private static LinearGradientBrush RibbonBrush(NetPulse.Design.Rgba color)
     {
-        stops[0].Color = stops[1].Color = TokenBrushes.ToColor(color);
-        stops[2].Color = TokenBrushes.ToColor(color.WithAlpha(0));
+        var brush = new LinearGradientBrush { StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(0, 1) };
+        brush.GradientStops.Add(new GradientStop { Offset = 0, Color = TokenBrushes.ToColor(color.WithAlpha(0)) });
+        brush.GradientStops.Add(new GradientStop { Offset = LightLayout.RibbonCenter, Color = TokenBrushes.ToColor(color) });
+        brush.GradientStops.Add(new GradientStop { Offset = 1, Color = TokenBrushes.ToColor(color.WithAlpha(0)) });
+        return brush;
     }
 
     private void Layout()
@@ -166,7 +168,7 @@ public sealed class Lights
                 v.StopAnimation("Scale");
                 if (!moving || m <= 0) continue;
                 var a = motion.Compositor.CreateVector3KeyFrameAnimation();
-                a.InsertKeyFrame(0, Vector3.Zero);
+                a.InsertExpressionKeyFrame(0, "this.StartingValue");   // 멈췄던 자리에서 이어서 (화면 찍기 뒤 다시 시작해도 튀지 않게)
                 a.InsertKeyFrame(1, new Vector3((float)(l.Place.DriftX * m), (float)(l.Place.DriftY * m), 0), motion.MoveEasing);
                 a.Duration = MotionTokens.LightDrift[l.Index % MotionTokens.LightDrift.Length];
                 a.IterationBehavior = Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
@@ -180,7 +182,7 @@ public sealed class Lights
             v.StopAnimation("Translation");
             if (!moving || m <= 0) continue;
             var a = motion.Compositor.CreateVector3KeyFrameAnimation();
-            a.InsertKeyFrame(0, Vector3.Zero);
+            a.InsertExpressionKeyFrame(0, "this.StartingValue");
             a.InsertKeyFrame(1, new Vector3((float)(r.Place.DriftX * w), 0, 0), motion.MoveEasing);
             a.Duration = MotionTokens.LightDrift[(r.Index + 1) % MotionTokens.LightDrift.Length];
             a.IterationBehavior = Microsoft.UI.Composition.AnimationIterationBehavior.Forever;

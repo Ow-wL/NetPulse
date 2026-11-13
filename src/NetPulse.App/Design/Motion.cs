@@ -184,6 +184,66 @@ public sealed class Motion
     /// <summary>모션 하나를 멈추고 최종(쉬는) 상태로 맞춘다.</summary>
     public void Stop(MotionHandle? handle) => handle?.Stop();
 
+    /// <summary>
+    /// 가로지르기 반복 (펄스의 빛이 화면을 가로지름). 줄이기·고정이면 시작하지 않는다. 줄이기를 끄면 다시 시작.
+    /// </summary>
+    public void Sweep(UIElement element, float distance, TimeSpan period)
+    {
+        void Start()
+        {
+            var visual = Prepare(element);
+            if (Reduced || Frozen) { visual.Opacity = 0; return; }
+            visual.Opacity = (float)Emphasis.Full;
+            var a = compositor.CreateVector3KeyFrameAnimation();
+            a.InsertKeyFrame(0, Vector3.Zero);
+            a.InsertKeyFrame(1, new Vector3(distance, 0, 0), enter);
+            a.Duration = period;
+            a.IterationBehavior = AnimationIterationBehavior.Forever;
+            Run(element, MotionKind.Repeat, visual, ("Translation", a), null, () => { visual.Properties.InsertVector3("Translation", Vector3.Zero); visual.Opacity = 0; });
+        }
+        Start();
+        Action<bool> restart = reduced => { if (!reduced) Start(); };
+        ReduceChanged += restart;
+        element.RegisterUnloaded(() => ReduceChanged -= restart);
+    }
+
+    /// <summary>깜빡임 (끊긴 구간 강조). 정해진 횟수만 돌고 끝난다. 줄이기면 없음.</summary>
+    public void Blink(UIElement element, int times)
+    {
+        if (Reduced) return;
+        var visual = Prepare(element);
+        var a = compositor.CreateScalarKeyFrameAnimation();
+        a.InsertKeyFrame(0, (float)Emphasis.Full);
+        a.InsertKeyFrame(0.5f, (float)Emphasis.Disabled, linear);
+        a.InsertKeyFrame(1, (float)Emphasis.Full, linear);
+        a.Duration = MotionTokens.Slow * 2;
+        a.IterationBehavior = AnimationIterationBehavior.Count;
+        a.IterationCount = times;
+        Run(element, MotionKind.Repeat, visual, ("Opacity", a), null, () => visual.Opacity = (float)Emphasis.Full);
+    }
+
+    /// <summary>
+    /// 공통 요소 이동 (화면 전환): 대상 요소가 출발 요소의 자리·크기에서 자기 자리로 커지며 옮겨 온다. 줄이기면 교차 페이드만.
+    /// </summary>
+    public void SharedMove(FrameworkElement from, FrameworkElement to, UIElement relativeTo)
+    {
+        if (Reduced || from.ActualWidth <= 0 || to.ActualWidth <= 0) { Fade(to, 0, (float)Emphasis.Full); return; }
+        var f = from.TransformToVisual(relativeTo).TransformBounds(new Windows.Foundation.Rect(0, 0, from.ActualWidth, from.ActualHeight));
+        var t = to.TransformToVisual(relativeTo).TransformBounds(new Windows.Foundation.Rect(0, 0, to.ActualWidth, to.ActualHeight));
+        var visual = Prepare(to);
+        visual.CenterPoint = Vector3.Zero;
+        var scale = compositor.CreateVector3KeyFrameAnimation();
+        scale.InsertKeyFrame(0, new Vector3((float)(f.Width / t.Width), (float)(f.Height / t.Height), 1));
+        scale.InsertKeyFrame(1, Vector3.One, move);
+        scale.Duration = MotionTokens.Slow;
+        var offset = compositor.CreateVector3KeyFrameAnimation();
+        offset.InsertKeyFrame(0, new Vector3((float)(f.X - t.X), (float)(f.Y - t.Y), 0));
+        offset.InsertKeyFrame(1, Vector3.Zero, move);
+        offset.Duration = MotionTokens.Slow;
+        Run(to, MotionKind.Move, visual, ("Scale", scale), ("Translation", offset), () => { visual.Scale = Vector3.One; visual.Properties.InsertVector3("Translation", Vector3.Zero); });
+        Fade(to, 0, (float)Emphasis.Full, MotionTokens.Mid);
+    }
+
     /// <summary>한 번 도는 색·투명도 변화 (상태 반응). 줄이기면 바로 최종값.</summary>
     internal void RunOnce(UIElement owner, Visual visual, string property, CompositionAnimation animation, Action final)
     {

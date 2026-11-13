@@ -21,6 +21,7 @@ param(
     [Parameter(Mandatory)] [string] $Title,
     [Parameter(Mandatory)] [string] $BodyFile,
     [switch] $UiOptional,
+    [switch] $Screens,
     [int] $CiTimeoutMinutes = 15
 )
 $ErrorActionPreference = 'Stop'
@@ -69,6 +70,14 @@ try {
         $ui = Get-Content $uiPath -Encoding UTF8 -Raw | ConvertFrom-Json
         if (-not $ui.passed -or -not (Test-AllPassed $ui.tests) -or $ui.sourceCommit -ne $X -or $ui.manifestSha256 -ne $manifestHash) { throw 'G3 결과가 X의 통과 증거가 아닙니다.' }
         $gate.uiTestSha256 = Get-Sha256Text $uiPath
+    }
+    if ($Screens) {
+        # G5 자동 검사 묶음 (M2 설계 7.5). 화면이 있는 마일스톤은 필수
+        $g5Path = Join-Path $artifacts 'g5.json'
+        if (-not (Test-Path $g5Path)) { throw 'G5 결과(g5.json)가 없습니다.' }
+        $g5 = Get-Content $g5Path -Encoding UTF8 -Raw | ConvertFrom-Json
+        if (-not $g5.passed -or $g5.sourceCommit -ne $X -or $g5.manifestSha256 -ne $manifestHash) { throw 'G5 결과가 X의 통과 증거가 아닙니다.' }
+        $gate.g5Sha256 = Get-Sha256Text $g5Path
     }
     # G4: 대상이 X인 G4 요청문 중 가장 높은 라운드, 그 짝 답변의 첫 판정 줄
     $requests = Get-ChildItem (Join-Path $root '.loop\reviews') -Filter '*-request.md' -ErrorAction SilentlyContinue | ForEach-Object {

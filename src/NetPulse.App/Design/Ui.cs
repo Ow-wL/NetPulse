@@ -17,12 +17,24 @@ public sealed class Ui
         Options = options;
         Log = log;
         Brushes = new TokenBrushes(Palette.Dark);
-        Glass = new Glass(Brushes);
         Motion = new Motion(window.Compositor) { Frozen = options.FreezeMotion };
+        Glass = new Glass(Brushes, Motion);
         Lights = new Lights(Motion);
         Effects = new Effects(window.DispatcherQueue, settings, options, log);
-        Theme = new Theme(this);
-        Effects.Changed += (_, mode) => Theme.Apply(mode);
+        Theme = new Theme(this) { HoldAt = options.RevealHold };
+        Effects.Changed += (previous, mode) => Theme.OnModeChanged(previous, mode);
+        Pacer = new FramePacer(() => Theme.InTransition, low => Effects.SetLowPerformance(low || options.SimulateLowPerformance));
+    }
+
+    public FramePacer Pacer { get; }
+
+    /// <summary>창을 닫기 전에: OS 이벤트, 렌더링 구독, 진행 중인 전환, 실행 중인 모션을 모두 정리한다.</summary>
+    public void Detach()
+    {
+        Theme.Detach();
+        Pacer.Detach();
+        Effects.Detach();
+        Motion.SetReduced(true);
     }
 
     public Window Window { get; }

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -137,6 +137,15 @@ public sealed class AppDriver : IDisposable
         return full.Clone(rect, PixelFormat.Format32bppArgb);
     }
 
+    /// <summary>화면 좌표(UI Automation 경계)를 클라이언트 캡처 좌표로 옮긴다.</summary>
+    public Rectangle ToClient(System.Windows.Rect screen)
+    {
+        var hwnd = new IntPtr(Window.Current.NativeWindowHandle);
+        var origin = new Native.POINT();
+        Native.ClientToScreen(hwnd, ref origin);
+        return new Rectangle((int)Math.Round(screen.X - origin.X), (int)Math.Round(screen.Y - origin.Y), (int)Math.Round(screen.Width), (int)Math.Round(screen.Height));
+    }
+
     /// <summary>캡처를 저장한다.</summary>
     public string Save(Bitmap bitmap, string name)
     {
@@ -169,6 +178,14 @@ public sealed class AppDriver : IDisposable
     public JsonElement WaitSelfTest(string kind) =>
         WaitFor(() => ReadLog().FirstOrDefault(e => e.GetProperty("kind").GetString() == "selftest" && e.GetProperty("data").GetProperty("kind").GetString() == kind),
             e => e.ValueKind == JsonValueKind.Object, "자체 시험 " + kind).GetProperty("data");
+
+    /// <summary>앱이 스스로 닫힐 때까지 기다린다 (벤치처럼 끝나면 닫히는 실행).</summary>
+    public int WaitExit(TimeSpan timeout)
+    {
+        if (!process.WaitForExit((int)timeout.TotalMilliseconds)) throw new TimeoutException("앱이 스스로 끝나지 않았습니다.");
+        closed = true;
+        return process.ExitCode;
+    }
 
     /// <summary>창 닫기 버튼과 같은 경로로 닫고, 끝날 때까지 기다려 종료 코드를 돌려준다.</summary>
     public int Close()

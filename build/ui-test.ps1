@@ -9,7 +9,7 @@
 
   결과는 artifacts/<SHA>/ui-test.json. 시작할 때 이전 결과를 지운다 (재사용하지 않는다).
 #>
-param([Parameter(Mandatory)] [string] $Artifacts)
+param([Parameter(Mandatory)] [string] $Artifacts, [int] $MatrixExpected = 44)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $root = Split-Path $PSScriptRoot -Parent
@@ -67,5 +67,36 @@ $result = [ordered]@{
     at             = (Get-Date).ToString('o')
 }
 $result | ConvertTo-Json -Depth 6 | Set-Content $resultPath -Encoding UTF8
+
+# ---- G5 묶음 (M2 설계 7.5): 캡처 해시, 실측 대비, 전환 충실도, 효과 줄이기 표면, 벤치 ----
+$g5Dir = Join-Path $env:NETPULSE_UITEST_OUT 'g5'
+$g5Path = Join-Path $Artifacts 'g5.json'
+if (Test-Path $g5Path) { Remove-Item $g5Path }
+if (Test-Path $g5Dir) {
+    $read = { param($n) $f = Join-Path $g5Dir "$n.json"; if (Test-Path $f) { Get-Content $f -Encoding UTF8 -Raw | ConvertFrom-Json } else { $null } }
+    $required = @('bench', 'contrast-dark', 'contrast-light', 'reduced-surface', 'fidelity-dark-overview', 'fidelity-light-overview', 'fidelity-dark-toasts', 'fidelity-light-toasts', 'switch-dark-to-light', 'switch-light-to-dark')
+    $missing = @($required | Where-Object { -not (Test-Path (Join-Path $g5Dir "$_.json")) })
+    $matrix = @(Get-ChildItem $g5Dir -Filter 'matrix-*.json' | Sort-Object Name)
+    $captures = @(Get-ChildItem $env:NETPULSE_UITEST_OUT -Filter *.png | Sort-Object Name | ForEach-Object { [ordered]@{ file = "ui/captures/$($_.Name)"; sha256 = Get-Sha256Text $_.FullName } })
+    $bench = & $read 'bench'
+    $g5 = [ordered]@{
+        sourceCommit   = $head
+        manifestSha256 = Get-Sha256Text $manifestPath
+        uiTestsPassed  = $result.passed
+        missing        = $missing
+        matrixCount    = $matrix.Count
+        passed         = [bool]($result.passed -and $missing.Count -eq 0 -and $matrix.Count -ge $MatrixExpected)
+        bench          = $bench
+        contrast       = [ordered]@{ dark = & $read 'contrast-dark'; light = & $read 'contrast-light' }
+        reducedSurface = & $read 'reduced-surface'
+        fidelity       = @('dark-overview', 'light-overview', 'dark-toasts', 'light-toasts' | ForEach-Object { [ordered]@{ case = $_; result = & $read "fidelity-$_" } })
+        runtimeSwitch  = [ordered]@{ darkToLight = & $read 'switch-dark-to-light'; lightToDark = & $read 'switch-light-to-dark' }
+        captures       = $captures
+    }
+    $g5 | ConvertTo-Json -Depth 8 | Set-Content $g5Path -Encoding UTF8
+    if ($bench) { Write-BenchSummary $bench.bench (Join-Path $uiDir 'bench.md') }
+    if (-not $g5.passed) { Write-Warning "G5 미완료: 누락 $($missing -join ', '), 매트릭스 $($matrix.Count)/$MatrixExpected" }
+}
 if (-not $result.passed) { throw "UI 테스트 실패: $failed" }
+if ((Test-Path $g5Path) -and -not (Get-Content $g5Path -Encoding UTF8 -Raw | ConvertFrom-Json).passed) { throw 'G5 묶음이 완전하지 않습니다.' }
 Write-Host "UI 테스트 통과: $($summary.passed)/$($summary.total)"

@@ -65,7 +65,9 @@ public sealed partial class ShowcaseWindow : Window
 
         BuildLayout();
         RegisterSections();
-        Content = ScaleHost();
+        var scaled = ScaleHost();
+        Content = ui.Theme.Host(scaled);
+        liveContent = scaled;
         ui.Root = root;
         ui.Theme.Apply(ui.Effects.Mode);
         ui.Lights.SetState(options.Problem, animate: false);
@@ -73,10 +75,11 @@ public sealed partial class ShowcaseWindow : Window
 
         rail.Selected += ShowSection;
         rail.Select(options.Section is { } s && sections.ContainsKey(s) ? s : "overview");
-        themeChoice.Changed += v => ui.Effects.UpdateSettings(ui.Effects.Settings with { Theme = v switch { "light" => ThemePreference.Light, "system" => ThemePreference.System, _ => ThemePreference.Dark } }, persist: true);
+        themeChoice.Changed += v => { SetRevealOrigin(themeChoice.Item(v)); ui.Effects.UpdateSettings(ui.Effects.Settings with { Theme = v switch { "light" => ThemePreference.Light, "system" => ThemePreference.System, _ => ThemePreference.Dark } }, persist: true); };
         stateChoice.Changed += v => { ui.Lights.SetState(v == "problem"); QueueDiag(); };
         ui.Effects.Changed += (_, _) => { QueueDiag(); if (rail.Current == "contrast") ShowSection("contrast"); };
         ui.Motion.ActiveChanged += QueueDiag;
+        ui.Theme.TransitionChanged += QueueDiag;
         dialog.Closed += _ => QueueDiag();
         root.GotFocus += (_, _) => QueueDiag();
 
@@ -85,7 +88,13 @@ public sealed partial class ShowcaseWindow : Window
         selfTestTimer.Interval = MotionTokens.Slow * 3;
         selfTestTimer.IsRepeating = false;
         selfTestTimer.Tick += (_, _) => RunSelfTest();
-        root.Loaded += (_, _) => { QueueDiag(); if (options.SelfTest is not null) selfTestTimer.Start(); };
+        root.Loaded += (_, _) =>
+        {
+            log.Write("loaded", null);
+            QueueDiag();
+            if (options.SelfTest is not null) selfTestTimer.Start();
+            if (options.Bench) DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RunBench);
+        };
         if (options.RunSeconds > 0)
         {
             var t = DispatcherQueue.CreateTimer();
@@ -97,6 +106,7 @@ public sealed partial class ShowcaseWindow : Window
     }
 
     private readonly DispatcherQueueTimer? runTimer;
+    private UIElement liveContent = null!;
 
     public Ui Ui => ui;
 
@@ -261,6 +271,7 @@ public sealed partial class ShowcaseWindow : Window
     {
         var theme = ui.Effects.Mode.Theme;
         var swatches = ContrastScene.Swatches(theme).Select(c => new SolidColorBrush(TokenBrushes.ToColor(c))).ToArray();
+        if (options.AltPattern) swatches = [swatches[1], swatches[0], .. swatches.Skip(2).Reverse()];   // 효과 줄이기 표면 검사: 무늬를 바꿔도 표면이 같아야 한다
         var scene = new GroupPanel("contrast.scene", "대비 시험 장면") { Height = Space.S8 * 8 };
         var pattern = new Grid();
         for (int c = 0; c < ContrastScene.CheckerCells; c++) pattern.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -418,10 +429,39 @@ public sealed partial class ShowcaseWindow : Window
 
     private IEnumerable<UIElement> MotionSection()
     {
-        var replay = new GlassButton(ui, ButtonKind.Secondary, "motion.replay", "등장 다시 보기", Icons.Refresh);
+        var replay = new GlassButton(ui, ButtonKind.Secondary, "motion.replay", "차례로 등장", Icons.Refresh);
         replay.Click += (_, _) => ui.Motion.Stagger(sectionHost.Children.ToArray());
-        yield return new GlassCard(ui, "card.motion", "모션", CardState.Normal, replay, ui.Motion.Reduced ? "움직임 줄이기 켜짐" : "토큰: 167 / 250 / 333 ms");
+        var roller = new DigitRoller(ui, "motion.digits", 3, Typography.Display, "ms");
+        roller.Set(23, animate: false);
+        var roll = new GlassButton(ui, ButtonKind.Secondary, "motion.roll", "숫자 바꾸기");
+        int step = 0;
+        roll.Click += (_, _) => roller.Set(new[] { 23, 148, 31, 9, 260 }[++step % 5]);
+        var blinkTarget = new StatusChip(ui, "motion.blink.chip", Controls.Status.Bad, "공유기 → 인터넷 구간");
+        var blink = new GlassButton(ui, ButtonKind.Secondary, "motion.blink", "끊김 깜빡임");
+        blink.Click += (_, _) => ui.Motion.Blink(blinkTarget, MotionTokens.BlinkTimes);
+        var detail = new GlassCard(ui, "card.motion.detail", "상세 패널", CardState.Normal, Fonts.Text("카드를 누르면 같은 요소가 자리를 이어받아 커진다.", Typography.Body, ui.Brushes.Muted)) { Visibility = Visibility.Collapsed };
+        var open = new GlassButton(ui, ButtonKind.Secondary, "motion.shared", "공통 요소 이동");
+        open.Click += (_, _) =>
+        {
+            detail.Visibility = detail.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+            if (detail.Visibility == Visibility.Visible) detail.UpdateLayout();
+            if (detail.Visibility == Visibility.Visible) ui.Motion.SharedMove(open, detail, root);
+        };
+        var stack = new StackPanel { Spacing = Space.S4 };
+        stack.Children.Add(new PulseLine(ui, "motion.pulse"));
+        stack.Children.Add(Row(roller, roll));
+        stack.Children.Add(Row(blinkTarget, blink));
+        stack.Children.Add(Row(replay, open));
+        yield return new GlassCard(ui, "card.motion", "모션", CardState.Normal, stack, ui.Motion.Reduced ? "움직임 줄이기 켜짐" : "토큰: 167 / 250 / 333 ms");
+        yield return detail;
         yield return new GlassCard(ui, "card.motion.loading", "반복 (불러오는 중)", CardState.Loading);
+    }
+
+    /// <summary>원형 전환이 퍼져 나갈 점: 누른 선택지의 가운데 (살아 있는 화면 좌표).</summary>
+    private void SetRevealOrigin(FrameworkElement? item)
+    {
+        if (item is null || item.ActualWidth <= 0) { ui.Theme.RevealOrigin = null; return; }
+        ui.Theme.RevealOrigin = item.TransformToVisual(liveContent).TransformPoint(new Windows.Foundation.Point(item.ActualWidth / 2, item.ActualHeight / 2));
     }
 
     private IEnumerable<UIElement> SettingsSection()
@@ -483,8 +523,7 @@ public sealed partial class ShowcaseWindow : Window
         try { await beforeClose(); }
         finally
         {
-            ui.Effects.Detach();
-            ui.Motion.SetReduced(true);   // 실행 중인 모션을 모두 멈춘 뒤 닫는다
+            ui.Detach();   // OS 이벤트·렌더링 구독·진행 중인 전환·모션을 정리한 뒤 닫는다
             closeAllowed = true;
             Close();
         }

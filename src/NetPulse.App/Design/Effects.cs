@@ -78,6 +78,9 @@ public sealed class Effects
     /// <summary>모드가 바뀌었을 때 (이전, 새). UI 스레드에서 부른다.</summary>
     public event Action<EffectiveMode, EffectiveMode>? Changed;
 
+    /// <summary>진단: 모드 변경 구독자 수 (전환을 거듭해도 늘지 않아야 한다)</summary>
+    public int SubscriberCount => Changed?.GetInvocationList().Length ?? 0;
+
     public void UpdateSettings(AppSettings next, bool persist)
     {
         Settings = next;

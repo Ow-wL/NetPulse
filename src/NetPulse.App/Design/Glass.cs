@@ -15,13 +15,17 @@ public sealed class Glass
 {
     private readonly Dictionary<GlassLevel, AcrylicBrush> brushes = [];
     private readonly TokenBrushes tokens;
+    private readonly Motion motion;
     private readonly List<WeakReference<UIElement>> shadowed = [];
     private MaterialMode mode = MaterialMode.Acrylic;
     private bool forceOpaque;
+    private ThemeKind theme = ThemeKind.Dark;
+    private Palette palette = Palette.Dark;
 
-    public Glass(TokenBrushes tokens)
+    public Glass(TokenBrushes tokens, Motion motion)
     {
         this.tokens = tokens;
+        this.motion = motion;
         foreach (var level in Enum.GetValues<GlassLevel>())
             brushes[level] = new AcrylicBrush { TintTransitionDuration = TimeSpan.Zero };
     }
@@ -34,13 +38,14 @@ public sealed class Glass
     public void Apply(ThemeKind theme, MaterialMode material, Palette palette)
     {
         mode = material;
+        this.theme = theme;
+        this.palette = palette;
         foreach (var (level, b) in brushes)
         {
             var m = Materials.Glass(theme, level);
             b.TintColor = TokenBrushes.ToColor(m.Tint);
             b.TintOpacity = m.TintOpacity;
             b.TintLuminosityOpacity = m.TintOpacity;
-            b.FallbackColor = TokenBrushes.ToColor(material == MaterialMode.HighContrast ? palette.Bg : Materials.OpaqueSurface(theme, level));
         }
         UpdateFallback();
         bool shadows = material != MaterialMode.HighContrast;
@@ -57,7 +62,38 @@ public sealed class Glass
 
     private void UpdateFallback()
     {
-        foreach (var b in brushes.Values) b.AlwaysUseFallback = forceOpaque || mode != MaterialMode.Acrylic;
+        foreach (var (level, b) in brushes)
+        {
+            // 전환 중 대체색은 아크릴처럼 보이게 바탕 위 틴트 (효과 줄이기의 최악 배경 기준 색과 다르다: 그 색은 라이트에서 누렇게 보였다)
+            var m = Materials.Glass(theme, level);
+            b.FallbackColor = TokenBrushes.ToColor(
+                mode == MaterialMode.HighContrast ? palette.Bg
+                : forceOpaque && mode == MaterialMode.Acrylic ? m.TintWithAlpha.Over(palette.Bg)
+                : Materials.OpaqueSurface(theme, level));
+            b.AlwaysUseFallback = forceOpaque || mode != MaterialMode.Acrylic;
+        }
+    }
+
+    /// <summary>
+    /// 유리의 반응: 포인터를 올리면 하이라이트가 포인터를 따라간다 (기획서 7.4). 움직임 줄이기·고대비면 보이지 않는다.
+    /// 애니메이션이 아니라 포인터 위치를 그대로 옮기는 것이다.
+    /// </summary>
+    private void AddPointerGlow(Grid host, double radius)
+    {
+        var glow = new RadialGradientBrush { MappingMode = BrushMappingMode.Absolute, RadiusX = Size.ControlL * 4, RadiusY = Size.ControlL * 4 };
+        glow.GradientStops.Add(new GradientStop { Offset = 0, Color = TokenBrushes.ToColor(NetPulse.Design.Rgba.White(Emphasis.PointerGlow)) });
+        glow.GradientStops.Add(new GradientStop { Offset = 1, Color = TokenBrushes.ToColor(NetPulse.Design.Rgba.White(0)) });
+        var layer = new Border { Background = glow, CornerRadius = new CornerRadius(radius), IsHitTestVisible = false, Opacity = 0 };
+        host.Children.Add(layer);
+        host.PointerMoved += (_, e) =>
+        {
+            if (motion.Reduced || mode == MaterialMode.HighContrast) { layer.Opacity = 0; return; }
+            var p = e.GetCurrentPoint(host).Position;
+            glow.Center = p;
+            glow.GradientOrigin = p;
+            layer.Opacity = Emphasis.Full;
+        };
+        host.PointerExited += (_, _) => layer.Opacity = 0;
     }
 
     /// <summary>
@@ -85,6 +121,7 @@ public sealed class Glass
         var host = new Grid();
         host.Children.Add(body);
         host.Children.Add(highlight);
+        if (level is GlassLevel.Content or GlassLevel.Control) AddPointerGlow(host, radius);
         // 그림자는 둥근 표면 자체에 건다 (바깥 사각 틀에 걸면 모서리가 각진 그림자가 보인다)
         double depth = Materials.Glass(ThemeKind.Dark, level).ShadowDepth;
         body.Translation = new Vector3(0, 0, (float)depth);

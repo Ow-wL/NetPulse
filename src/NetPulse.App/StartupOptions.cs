@@ -29,6 +29,10 @@ public sealed record StartupOptions
     public bool HideMeasuredText { get; init; }
     public bool Bench { get; init; }
     public string? SelfTest { get; init; }
+    /// <summary>원형 전환을 이 진행도(0~1)에서 멈춘다 (캡처용)</summary>
+    public double? RevealHold { get; init; }
+    /// <summary>대비 시험 장면의 무늬를 바꾼다 (효과 줄이기 표면 검사용)</summary>
+    public bool AltPattern { get; init; }
 
     /// <summary>시뮬레이션: 고대비(aquatic|desert), 투명 효과 끔, 애니메이션 끔, 배터리 절약, 저성능</summary>
     public string? SimulateHighContrast { get; init; }
@@ -69,6 +73,8 @@ public sealed record StartupOptions
                 "--hide-measured-text" => o with { HideMeasuredText = true },
                 "--bench" => o with { Bench = true },
                 "--selftest" => o with { SelfTest = Next() },
+                "--reveal-hold" => o with { RevealHold = double.Parse(Next(), CultureInfo.InvariantCulture) },
+                "--alt-pattern" => o with { AltPattern = true },
                 "--simulate-high-contrast" => o with { SimulateHighContrast = Next() is "aquatic" or "desert" ? args[i] : throw new ArgumentException("aquatic 또는 desert") },
                 "--simulate-transparency-off" => o with { SimulateTransparencyOff = true },
                 "--simulate-animations-off" => o with { SimulateAnimationsOff = true },
