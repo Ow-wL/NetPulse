@@ -81,4 +81,21 @@ public sealed class RoundSchedulerTests
         await run.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         Assert.Equal([0L, 1, 2], ticks.Select(t => t.Index));
     }
+
+    [Fact]
+    public async Task OverrunningTheLimitCountsTheRemainingRoundsAsSkipped()
+    {
+        // 상한 3, 0번 회차 뒤 3.5초가 지나 끝나면 1·2번 회차는 내지 못했다 (G4 1라운드 지적 7).
+        var clock = new ManualClock(Start);
+        var scheduler = new RoundScheduler(clock, Second, roundLimit: 3);
+        var ticks = new List<RoundTick>();
+        var run = Task.Run(async () => { await foreach (var t in scheduler.RunAsync(CancellationToken.None)) lock (ticks) ticks.Add(t); },
+            TestContext.Current.CancellationToken);
+        await Eventually(() => Count(ticks) == 1, "0번 회차");
+        Assert.Equal(0, scheduler.TrailingSkipped);
+        await AdvanceWhenWaiting(clock, TimeSpan.FromMilliseconds(3500));
+        await run.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.Single(ticks);
+        Assert.Equal(2, scheduler.TrailingSkipped);
+    }
 }

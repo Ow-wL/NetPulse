@@ -8,7 +8,8 @@ namespace NetPulse.App;
 
 /// <summary>
 /// 앱이 측정 엔진의 수명을 소유한다 (M1 설계 2절). 창은 구독만 소유한다.
-/// 종료 순서: 취소 요청 → 실행 중인 측정 작업이 끝날 때까지 기다림(3초) → 기록 → 종료.
+/// 종료 순서: 취소 요청 → 실행 중인 측정 작업이 끝날 때까지 기다림(3초) → 기록 → 창 닫기 → 종료.
+/// 기다리는 동안 UI 스레드를 막지 않는다 (창은 숨긴 상태로 남는다).
 /// </summary>
 public partial class App : Application
 {
@@ -48,18 +49,16 @@ public partial class App : Application
         log.Write("startup", new { mode, speed = options.DemoSpeed, version = typeof(App).Assembly.GetName().Version?.ToString(), resources });
         engine.Start();
 
-        window = new ShellWindow(engine, mode, options.RunSeconds);
-        window.Closed += (_, _) => Shutdown();
+        window = new ShellWindow(engine, mode, options.RunSeconds, ShutdownAsync);
         window.Activate();
     }
 
-    private void Shutdown()
+    private async Task ShutdownAsync()
     {
         if (engine is null) return;
         var stopping = engine;
         engine = null;
-        // UI 스레드를 막지 않도록 다른 스레드에서 기다린다. 제한시간 안에 끝났는지 기록한다.
-        bool completed = Task.Run(() => stopping.StopAsync(TimeSpan.FromSeconds(3))).GetAwaiter().GetResult();
+        bool completed = await stopping.StopAsync(TimeSpan.FromSeconds(3));
         var state = stopping.State;
         log?.Write("shutdown", new { stopCompleted = completed, rounds = state.Rounds, skipped = state.Skipped });
     }

@@ -38,3 +38,18 @@ function Read-TrxSummary([string] $Path) {
 }
 
 function Get-Sha256Text([string] $Path) { (Get-FileHash $Path -Algorithm SHA256).Hash }
+
+function Test-AllPassed($Summary) {
+    <# 하나라도 실패·미실행이면 거짓. 테스트가 0개여도 거짓 (G4 1라운드 지적 8) #>
+    return [bool]($Summary -and [int]$Summary.total -gt 0 -and [int]$Summary.passed -eq [int]$Summary.total -and
+        [int]$Summary.failed -eq 0 -and [int]$Summary.notExecuted -eq 0)
+}
+
+# G4 답변의 판정 줄: 강조(**)만 허용하고 줄 전체가 판정이어야 한다 (G4 1라운드 지적 2).
+# 첫 판정 줄은 '판정:'으로 시작하는 첫 줄이다. 그 줄이 정확히 APPROVE여야 승인이다.
+$script:VerdictLinePattern = '^\s*\**\s*판정\s*:'
+$script:ApprovePattern = '^\s*\**\s*판정\s*:\s*\**\s*APPROVE\s*\**\s*$'
+
+function Get-FirstVerdictLine([string] $AnswerPath) {
+    Get-Content $AnswerPath -Encoding UTF8 | Where-Object { $_ -match $script:VerdictLinePattern } | Select-Object -First 1
+}

@@ -54,7 +54,7 @@ try {
         Move-Item $trx.FullName $neutral
         Remove-Item -Recurse -Force $out
         $tests[$project] = Read-TrxSummary $neutral
-        if ($tests[$project].failed -gt 0 -or $tests[$project].total -eq 0) { throw "테스트 실패: $project" }
+        if (-not (Test-AllPassed $tests[$project])) { throw "테스트가 모두 통과하지 않았습니다 (실패·미실행 포함): $project" }
     }
 
     # ---- 4. 단일 파일 배포 ----

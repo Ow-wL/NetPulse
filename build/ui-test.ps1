@@ -62,7 +62,7 @@ $result = [ordered]@{
     commands       = $commands
     tests          = $summary
     captures       = @(Get-ChildItem $env:NETPULSE_UITEST_OUT -Filter *.png -ErrorAction SilentlyContinue | ForEach-Object { "ui/captures/$($_.Name)" })
-    passed         = [bool]($null -eq $failed -and $summary -and $summary.failed -eq 0 -and $summary.total -gt 0)
+    passed         = [bool]($null -eq $failed -and (Test-AllPassed $summary))
     error          = $failed
     at             = (Get-Date).ToString('o')
 }

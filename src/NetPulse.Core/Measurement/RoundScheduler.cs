@@ -23,6 +23,9 @@ public sealed class RoundScheduler(IClock clock, TimeSpan interval, long? roundL
 {
     public TimeSpan Interval { get; } = interval > TimeSpan.Zero ? interval : throw new ArgumentOutOfRangeException(nameof(interval));
 
+    /// <summary>상한에 닿아 끝날 때 늦어서 내지 못한 나머지 회차 수. 그 전에는 0. (회차 + 건너뜀 = 상한)</summary>
+    public long TrailingSkipped { get; private set; }
+
     public async IAsyncEnumerable<RoundTick> RunAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         long next = 0;
@@ -38,7 +41,11 @@ public sealed class RoundScheduler(IClock clock, TimeSpan interval, long? roundL
                 continue;   // 일찍 깼을 수 있으니 다시 확인한다
             }
             long slot = (long)(now.Ticks / Interval.Ticks);
-            if (roundLimit is long cap && slot >= cap) yield break;
+            if (roundLimit is long cap && slot >= cap)
+            {
+                TrailingSkipped = cap - next;   // 늦어서 상한을 넘겼다. 내지 못한 나머지 회차 수
+                yield break;
+            }
             long skipped = slot - next;
             next = slot + 1;
             yield return new RoundTick(slot, Interval * slot, now, skipped);

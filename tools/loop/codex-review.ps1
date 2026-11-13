@@ -82,6 +82,7 @@ if (-not $ok) {
     Write-Error '교차 검토 미완료: 두 번 모두 답을 받지 못했습니다.' -ErrorAction Continue
     exit 2
 }
-$verdict = (Get-Content $answerPath -Encoding UTF8 | Where-Object { $_ -match '판정:' } | Select-Object -First 1)
+. (Join-Path $root 'build\common.ps1')
+$verdict = Get-FirstVerdictLine $answerPath
 Write-Host "답변: .loop/reviews/$Id-answer.md"
 if ($verdict) { Write-Host "첫 판정 줄: $($verdict.Trim())" } else { Write-Host '판정 줄 없음' }
