@@ -110,6 +110,12 @@ public sealed class MeasurementSession : IAsyncDisposable
 
     public string Id { get; }
 
+    /// <summary>시험 전용: 처리 작업이 회차를 꺼낸 직후(분류 잠금 전) 부른다.</summary>
+    internal Action<long>? TestHookAfterDequeue { get; set; }
+
+    /// <summary>시험 전용: 마감됐는지.</summary>
+    internal bool Sealed { get { lock (sync) return sealedOff; } }
+
     /// <summary>화면용 상태 구독은 엔진에서 직접 한다 (수명은 세션이 소유).</summary>
     public MeasurementEngine Engine => engine;
 
@@ -256,6 +262,7 @@ public sealed class MeasurementSession : IAsyncDisposable
     /// </summary>
     private void Process(RoundSnapshot s)
     {
+        TestHookAfterDequeue?.Invoke(s.Tick.Index);   // 시험 전용: 꺼낸 뒤·분류 잠금 전에 끼어든다 (M3 이월 3)
         long startMs = (long)s.Tick.Actual.TotalMilliseconds;
         long endMs = (long)(s.Completed == default ? s.Tick.Actual : s.Completed).TotalMilliseconds;
         var results = s.Results.Select(x => new TargetResult(x.Target.Id, x.Result.Outcome,

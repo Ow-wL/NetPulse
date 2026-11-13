@@ -35,6 +35,7 @@ public sealed class GapTracker(TimeSpan interval)
         public DateTimeOffset? ToWall;
         public long? LastRoundBefore;
         public bool Emitted;
+        public bool ClockRebased;   // 복귀 뒤 첫 표본에서 시각 기준을 다시 잡았는지
     }
 
     private readonly object gate = new();
@@ -139,10 +140,15 @@ public sealed class GapTracker(TimeSpan interval)
             long now = Ms(elapsed);
             var offset = wall.UtcDateTime - DateTime.UnixEpoch - elapsed;
             // 직전 표본과 이 표본 사이에 절전 시작 또는 복귀가 있었거나, 이 표본이 절전 중이면 기준만 다시 잡는다
-            bool crossed = suspends.Any(s =>
-                (s.FromMs >= lastClockMs && s.FromMs <= now)
-                || (s.ToMs is long to && to > lastClockMs && to <= now)
-                || (s.FromMs <= now && (s.ToMs is null || now < s.ToMs)));
+            // 복귀 경계는 "아직 반영하지 않은 복귀"로 따로 기억한다: 복귀 시각이 직전 표본과 같아도(단조 시계 정지, 밀리초 절삭)
+            // 복귀 뒤 첫 표본에서 반드시 기준을 다시 잡는다 (M3 G4 3라운드 이월 1)
+            bool crossed = false;
+            foreach (var s in suspends)
+            {
+                if (s.FromMs >= lastClockMs && s.FromMs <= now) crossed = true;
+                if (s.FromMs <= now && (s.ToMs is null || now < s.ToMs)) crossed = true;
+                if (s.ToMs is long to && !s.ClockRebased && now >= to) { s.ClockRebased = true; crossed = true; }
+            }
             lastClockMs = now;
             if (clockBaseline is null || crossed)
             {

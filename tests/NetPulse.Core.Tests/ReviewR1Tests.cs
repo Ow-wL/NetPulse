@@ -95,7 +95,8 @@ public sealed class ReviewR1Tests : IDisposable
         var s = MeasurementSession.Start(Options(clock));
         await Rounds(clock, s, 11);
         // 처리 작업이 회차 11의 (실패한) 쓰기 시도까지 마쳤을 때 단계를 바꾼다 (관측 수만으로는 쓰기 완료를 보장하지 못함)
-        await Eventually(() => s.Status.Observed == 12 && primary.Writes("rounds") == 12, "회차 쓰기 시도 12");
+        // 회차 11의 실패한 쓰기가 끝난 뒤(고장 결정 이후)에 단계를 바꾼다 (M3 이월 2)
+        await Eventually(() => s.Status.Observed == 12 && primary.WritesDone("rounds") == 12, "회차 쓰기 완료 12");
         Volatile.Write(ref slow, true);
         Volatile.Write(ref failing, false);
         var watch = Stopwatch.StartNew();
@@ -117,7 +118,7 @@ public sealed class ReviewR1Tests : IDisposable
         primary.DelayFor = name => { if (Volatile.Read(ref stuck) && name.StartsWith("rounds", StringComparison.Ordinal)) release.Wait(TimeSpan.FromSeconds(10)); return TimeSpan.Zero; };
         var s = MeasurementSession.Start(Options(clock) with { SealTimeout = TimeSpan.FromMilliseconds(300) });
         await Rounds(clock, s, 2);
-        await Eventually(() => s.Status.Pending == 3 && primary.Writes("rounds") == 3, "회차 쓰기 시도 3");
+        await Eventually(() => s.Status.Pending == 3 && primary.WritesDone("rounds") == 3, "회차 쓰기 완료 3");
         Volatile.Write(ref stuck, true);
         Volatile.Write(ref failing, false);
         var watch = Stopwatch.StartNew();
