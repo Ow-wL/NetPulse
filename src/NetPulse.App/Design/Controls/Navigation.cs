@@ -77,7 +77,7 @@ public sealed class NavRail : GroupPanel
         button.Unchecked += (_, _) => Refresh();
         button.RegisterPropertyChangedCallback(ButtonBase.IsPointerOverProperty, (_, _) => Refresh());
         // 위아래 화살표로 초점만 옮긴다 (Space/Enter로 고름). 자동 XY 이동은 이 템플릿에서 움직이지 않아 직접 처리한다 (키 시험에서 발견).
-        button.KeyDown += (_, e) =>
+        button.PreviewKeyDown += (_, e) =>
         {
             if (e.Key is not (Windows.System.VirtualKey.Down or Windows.System.VirtualKey.Up)) return;
             int i = items.Children.IndexOf(button) + (e.Key == Windows.System.VirtualKey.Down ? 1 : -1);
@@ -183,7 +183,7 @@ public sealed class SegmentedChoice : GroupPanel
                 t.Foreground = on ? ui.Brushes.AccentInk : ui.Brushes.Muted;
             }
             b.Checked += (_, _) => { Refresh(); Changed?.Invoke(value); };
-            b.KeyDown += (_, e) =>
+            b.PreviewKeyDown += (_, e) =>
             {
                 if (e.Key is not (Windows.System.VirtualKey.Right or Windows.System.VirtualKey.Left)) return;
                 int i = row.Children.IndexOf(b) + (e.Key == Windows.System.VirtualKey.Right ? 1 : -1);
