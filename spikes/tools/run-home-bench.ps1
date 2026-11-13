@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 New-Item -ItemType Directory -Force $OutDir | Out-Null
-Get-Process NetPulseSpike* -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process NetPulseSpike* -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); [void]$_.WaitForExit(5000) }
 $logFile = Join-Path $env:LOCALAPPDATA 'NetPulseSpike\C-home\results.jsonl'
 $here = $PSScriptRoot
 $summary = [ordered]@{ gitHead = (git -C $here rev-parse --short HEAD); worktreeClean = [string]::IsNullOrWhiteSpace((git -C $here status --porcelain -- ':!docs/loop' | Out-String)) }
@@ -88,14 +88,14 @@ $quick = Read-Log
 $summary.quickToggle = [ordered]@{ alive = -not $p.HasExited; uia = (Snapshot)
     switchesDone = @($quick | Where-Object kind -eq 'switch').Count; switchesIgnored = @($quick | Where-Object kind -eq 'switchIgnored').Count
     auroraEvents = @($quick | Where-Object kind -eq 'aurora' | ForEach-Object { $_.on }) -join ',' }
-Stop-Process -Id $p.Id -Force
+$p.Kill(); [void]$p.WaitForExit(5000)   # 끝날 때까지 기다려야 로그 파일을 놓는다
 Copy-Item $logFile (Join-Path $OutDir 'home-quick.jsonl') -Force
 
 # ---- 오로라 + 효과 줄이기 ----
 foreach ($case in @(@{ n = 'aurora'; a = @('--aurora', 'on') }, @{ n = 'aurora_reduce'; a = @('--aurora', 'on', '--reduce-transparency') })) {
     if (Test-Path $logFile) { Remove-Item $logFile }
     $p = Start-Process $Exe -ArgumentList (@('--home', '--chrome', '0', '--run-seconds', '4') + $case.a) -PassThru
-    if (-not $p.WaitForExit(20000)) { Stop-Process -Id $p.Id -Force }
+    if (-not $p.WaitForExit(20000)) { $p.Kill(); [void]$p.WaitForExit(5000) }
     $summary["veil_$($case.n)"] = Read-Log | Where-Object kind -eq 'veil' | Select-Object requested, visible, opacity, lightsHidden, acrylic
 }
 
