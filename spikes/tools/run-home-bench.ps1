@@ -21,7 +21,7 @@ function Wait-Mark([string] $Label, [int] $Seconds) {
     do { Start-Sleep -Milliseconds 200; $hit = Read-Log | Where-Object { $_.kind -eq 'mark' -and $_.label -eq $Label } } while (-not $hit -and (Get-Date) -lt $deadline)
     if (-not $hit) { throw "표시 $Label 가 나오지 않았습니다." }
 }
-function Measure([int] $ProcessId, [string] $Name) {
+function Get-Resources([int] $ProcessId, [string] $Name) {
     $r = & "$here\measure-process.ps1" -ProcessId $ProcessId -Seconds 10
     $r.sampleData | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $OutDir "resources-$Name.json") -Encoding UTF8
     return $r | Select-Object * -ExcludeProperty sampleData
@@ -31,12 +31,12 @@ function Measure([int] $ProcessId, [string] $Name) {
 if (Test-Path $logFile) { Remove-Item $logFile }
 $p = Start-Process $Exe -ArgumentList '--home', '--bench', '--aurora', 'on', '--chrome', '0', '--run-seconds', '58' -PassThru
 Start-Sleep -Seconds 4
-$summary.resourcesBefore = Measure $p.Id 'before'
+$summary.resourcesBefore = Get-Resources $p.Id 'before'
 Wait-Mark 'before-switches' 20
-$summary.resourcesDuring = Measure $p.Id 'during-switches'
+$summary.resourcesDuring = Get-Resources $p.Id 'during-switches'
 Wait-Mark 'after-switches' 25
 Start-Sleep -Milliseconds 500
-$summary.resourcesAfter = Measure $p.Id 'after'
+$summary.resourcesAfter = Get-Resources $p.Id 'after'
 if (-not $p.WaitForExit(30000)) { Stop-Process -Id $p.Id -Force; throw '제한시간 초과' }
 if ($p.ExitCode -ne 0) { throw "비정상 종료 (코드 $($p.ExitCode))" }
 Copy-Item $logFile (Join-Path $OutDir 'home-bench.jsonl') -Force
