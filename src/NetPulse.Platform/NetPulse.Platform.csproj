@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 실제 Windows에 닿는 관측 공급자: ICMP, 이벤트 로그. 경로·인터페이스 조회는 M3·M4. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <RootNamespace>NetPulse.Platform</RootNamespace>
+    <SupportedOSPlatformVersion>10.0.22621.0</SupportedOSPlatformVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\NetPulse.Core\NetPulse.Core.csproj" />
+    <PackageReference Include="System.Diagnostics.EventLog" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- UI·Windows에 의존하지 않는 핵심: 시계, 측정 스케줄러와 엔진, 데모 시나리오. 대상 모델·통계·기록 형식은 M3. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>NetPulse.Core</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="NetPulse.Core.Tests" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "name": "steady",
+  "seed": 11,
+  "durationRounds": 3600,
+  "targets": [
+    { "id": "gateway", "role": "local", "address": "192.0.2.1" },
+    { "id": "ext-a", "role": "external", "address": "198.51.100.10" },
+    { "id": "ext-b", "role": "external", "address": "203.0.113.20" }
+  ],
+  "segments": [
+    { "from": 0, "to": 3600, "target": "gateway", "rtt": { "base": 2, "jitter": 1 } },
+    { "from": 0, "to": 3600, "target": "ext-a", "rtt": { "base": 18, "jitter": 6 } },
+    { "from": 0, "to": 3600, "target": "ext-b", "rtt": { "base": 24, "jitter": 8 } }
+  ]
+}
