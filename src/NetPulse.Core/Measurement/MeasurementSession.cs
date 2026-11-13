@@ -26,6 +26,8 @@ public sealed record SessionOptions
     public TimeSpan LinkLogSettle { get; init; } = TimeSpan.FromSeconds(3);
     /// <summary>로그 조회 제한 (기본 5초).</summary>
     public TimeSpan LinkLogTimeout { get; init; } = TimeSpan.FromSeconds(5);
+    /// <summary>직접 관측 표본 큐 크기 (기본 1024).</summary>
+    public int LinkQueueCapacity { get; init; } = MeasurementSession.LinkQueueCapacityDefault;
     public IPowerEvents? Power { get; init; }
     public string AppVersion { get; init; } = "0.0.0";
     /// <summary>회차 큐 크기 (기본 3600 = 1시간).</summary>
@@ -113,6 +115,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
         long limit = profile.Duration.Ticks / Profile.Interval.Ticks;
         engine = new MeasurementEngine(clock, new DispatchProbe(probes), targets.Select(t => t.ToProbeTarget()).ToArray(), Profile.Interval, limit,
             options.Links is { } links ? new RoutesWithLinks(options.Routes, links, () => directCapability == NetPulse.Core.Evidence.LinkCapability.Supported) : options.Routes, Enqueue);
+        CreateLinkQueue(options.LinkQueueCapacity);
         linkCutoffMs = header.PlannedMs;   // 계획 끝 뒤의 링크 표본은 처음부터 받지 않는다 (M4 G4 4라운드 2)
         powerSubscription = options.Power?.Subscribe(() => gaps.OnSuspend(clock.Elapsed, clock.Now), () => gaps.OnResume(clock.Elapsed, clock.Now));
     }

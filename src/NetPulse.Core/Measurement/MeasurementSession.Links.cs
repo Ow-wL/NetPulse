@@ -12,7 +12,7 @@ namespace NetPulse.Core.Measurement;
 /// </summary>
 public sealed partial class MeasurementSession
 {
-    public const int LinkQueueCapacity = 1024;
+    public const int LinkQueueCapacityDefault = 1024;
     private const int MaxUnobservedSpans = 50;
 
     private sealed class AdapterTrack
@@ -25,14 +25,21 @@ public sealed partial class MeasurementSession
         public readonly List<(long From, long To)> Unobserved = [];
         public int UnobservedOverflow;
         public long? UnknownFrom, UnknownLast;
+        public long OverflowSeq;   // 마지막으로 처리한 표본이 실은 넘침 순번
     }
 
-    private readonly record struct LinkItem(LinkSample Sample, long Ms, DateTimeOffset Wall);
+    /// <param name="OverflowSeq">이 표본을 큐에 넣을 때까지 등록된 넘침 수 (넣기와 넘침 등록은 같은 잠금 안에서 일어난다)</param>
+    private readonly record struct LinkItem(LinkSample Sample, long Ms, DateTimeOffset Wall, long OverflowSeq);
 
-    private readonly Channel<LinkItem> linkQueue = Channel.CreateBounded<LinkItem>(new BoundedChannelOptions(LinkQueueCapacity)
+    private Channel<LinkItem> linkQueue = null!;
+
+    private void CreateLinkQueue(int capacity) => linkQueue = Channel.CreateBounded<LinkItem>(new BoundedChannelOptions(Math.Max(1, capacity))
     {
         SingleReader = true, SingleWriter = false, FullMode = BoundedChannelFullMode.Wait,
     });
+
+    /// <summary>시험 전용: 큐 넣기에 실패한 직후(넘침 등록 전, 잠금 안)에 부른다.</summary>
+    internal Action? TestHookAfterLinkEnqueueFailed { get; set; }
     private readonly Dictionary<string, AdapterTrack> adapterTracks = [];   // Key → 추적 (처리 작업 또는 끝에서만, linkGate 안)
     private readonly Dictionary<string, long> overflowByKey = [];
     private readonly object linkGate = new();
@@ -73,14 +80,20 @@ public sealed partial class MeasurementSession
     }
 
     /// <summary>관측기 표본 (아무 스레드). 시각을 붙여 큐에 넣는다. 닫힌 뒤 온 것은 버린다.</summary>
+    /// <summary>
+    /// 관측기 표본 (아무 스레드). 시각 붙이기 → 큐 넣기 → (넘치면) 넘침 등록을 한 잠금 안에서 한다 (M4 G4 5라운드 1):
+    /// 큐 순서가 시각 순서와 같고, 넘친 표본보다 뒤 표본은 그 넘침이 등록된 뒤에야 큐에 들어간다.
+    /// 그래서 처리 작업은 표본에 실린 넘침 순번만 보고 "직전 표본과 이 표본 사이에 넘침이 있었는지"를 정확히 안다.
+    /// </summary>
     private void OnLinkSample(LinkSample sample)
     {
         if (linkClosed || directCapability != LinkCapability.Supported) return;
-        var item = new LinkItem(sample, (long)clock.Elapsed.TotalMilliseconds, clock.Now);
-        if (item.Ms > Volatile.Read(ref linkCutoffMs)) return;   // 고정한 측정 끝 뒤의 표본은 받지 않는다 (G4 3라운드 2)
-        if (linkQueue.Writer.TryWrite(item)) return;
         lock (linkGate)
         {
+            var item = new LinkItem(sample, (long)clock.Elapsed.TotalMilliseconds, clock.Now, linkOverflow);
+            if (item.Ms > Volatile.Read(ref linkCutoffMs)) return;   // 고정한 측정 끝 뒤의 표본은 받지 않는다 (G4 3라운드 2)
+            if (linkQueue.Writer.TryWrite(item)) return;
+            TestHookAfterLinkEnqueueFailed?.Invoke();
             linkOverflow++;
             AddOverflowSpan(overflowSpans, item.Ms);
             if (sample.FromPoll) overflowByKey[sample.Adapter.Key] = overflowByKey.GetValueOrDefault(sample.Adapter.Key) + 1;
@@ -135,7 +148,8 @@ public sealed partial class MeasurementSession
             }
             // 직전 표본과 이 표본 사이에 넘침이 있었으면 상태가 같아도 연속으로 보지 않는다:
             // 넘침 전 마지막 관측과 넘침 뒤 재관측을 따로 남긴다 (G4 3라운드 1)
-            bool afterOverflow = track.State is not null && overflowSpans.Any(o => o.To >= track.Last && o.From <= item.Ms);
+            bool afterOverflow = track.State is not null && item.OverflowSeq > track.OverflowSeq;
+            track.OverflowSeq = item.OverflowSeq;
             // 같은 상태가 이어지면 줄을 쓰지 않는다. 단 번호가 바뀌거나 넘침을 건넜으면 쓴다 (G4 1라운드 5)
             if (track.State == state && !reindexed && !afterOverflow) { track.Last = item.Ms; return; }
         }

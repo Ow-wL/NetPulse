@@ -212,6 +212,43 @@ public sealed class SessionLinkTests : IDisposable
     }
 
     [Fact]
+    public async Task LateOverflowRegistrationCannotMergeDownsAcrossTheLostSample()
+    {
+        // G4 5라운드 1: 넘친 표본의 넘침 등록이 늦어져도, 그 뒤 표본은 등록이 끝난 뒤에야 큐에 들어가므로
+        // 넘침 전 다운과 넘침 뒤 다운이 하나로 이어지지 않는다 (2.7초에 유실된 업이 확정 다운 안에 들면 안 된다)
+        var clock = new ManualClock(Start);
+        var links = new FakeLinks();
+        var s = MeasurementSession.Start(Options(clock, links, routes: false) with { LinkQueueCapacity = 1 });
+        var entered = new ManualResetEventSlim(false);
+        var release = new ManualResetEventSlim(false);
+        await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));
+        links.Notify(LinkState.Down);                                     // 1.0초 다운
+        await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));         // 회차 2: 처리 작업이 1.0초 다운을 처리
+        await Eventually(() => s.Status.Observed == 3, "회차 2 처리");
+        clock.Advance(TimeSpan.FromMilliseconds(500));
+        links.Notify(LinkState.Down);                                     // 2.5초 다운 → 큐가 가득 참
+        clock.Advance(TimeSpan.FromMilliseconds(200));
+        s.TestHookAfterLinkEnqueueFailed = () => { entered.Set(); release.Wait(TimeSpan.FromSeconds(10)); };
+        var lost = Task.Run(() => links.Notify(LinkState.Up), TestContext.Current.CancellationToken);            // 2.7초 업 → 넘침, 등록 전에 멈춤
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken), "넘침 지점 진입");
+        s.TestHookAfterLinkEnqueueFailed = null;
+        await AdvanceWhenWaiting(clock, TimeSpan.FromMilliseconds(300));  // 회차 3: 처리 작업이 큐를 비우려 함
+        var reobserved = Task.Run(() => links.Notify(LinkState.Down), TestContext.Current.CancellationToken);    // 다른 생산자의 다운 재관측
+        await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));         // 회차 4
+        await Task.Delay(200, TestContext.Current.CancellationToken);
+        release.Set();
+        await Task.WhenAll(lost, reobserved);
+        await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));         // 회차 5
+        links.Notify(LinkState.Up);
+        await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));         // 회차 6: 남은 표본 처리
+        await s.StopAsync();
+
+        var ev = LinkEvidenceBuilder.FromEvents(Reread().Events);
+        Assert.NotEmpty(ev.Downs);
+        Assert.DoesNotContain(ev.Downs, d => d.FromMs <= 2700 && d.ToMs >= 2700);
+    }
+
+    [Fact]
     public void OverflowSpansBeyondCapExtendTheLastSpan()
     {
         // G4 4라운드 1: 51번째부터의 넘침도 시각을 잃지 않는다 (마지막 범위를 늘려 보수적으로 덮음)
