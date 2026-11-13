@@ -157,21 +157,88 @@ public sealed class SessionLinkTests : IDisposable
         Assert.Equal(before, Links(Reread()).Length);
     }
 
-    [Fact]
-    public async Task SamplesAfterFixedEndAreIgnored()
+    /// <summary>회차 index에서 풀어 줄 때까지 응답하지 않는 공급자 (취소를 무시: 엔진 정지가 기다리게).</summary>
+    private sealed class BlockingProbe(long index, ManualResetEventSlim release) : IProbe
     {
-        // G4 3라운드 2: 끝 경계를 고정한 뒤(엔진 정지를 기다리는 동안) 온 표본은 판정에 들어가지 않는다
+        public readonly ManualResetEventSlim Entered = new(false);
+        public Task<ProbeResult> ProbeAsync(ProbeTarget target, long round, CancellationToken cancellationToken) =>
+            round == index ? Task.Run(() => { Entered.Set(); release.Wait(TimeSpan.FromSeconds(10)); return ProbeResult.Success(1); }) : Task.FromResult(ProbeResult.Success(1));
+    }
+
+    [Fact]
+    public async Task SamplesAfterFixedEndAreIgnoredWhileEngineIsStopping()
+    {
+        // G4 3·4라운드: 끝 경계를 고정한 뒤 엔진 정지를 기다리는 동안(링크가 아직 닫히지 않음) 온 표본은 판정에 들어가지 않는다
         var clock = new ManualClock(Start);
         var links = new FakeLinks();
-        var s = MeasurementSession.Start(Options(clock, links));
-        await Rounds(clock, s, 3);
-        var stopping = s.StopAsync();          // 끝 경계 = 3초
+        var release = new ManualResetEventSlim(false);
+        var probe = new BlockingProbe(3, release);
+        var s = MeasurementSession.Start(Options(clock, links) with { ProbeFor = _ => probe });
+        await Rounds(clock, s, 2);
+        await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));   // 회차 3: 공급자가 막힘 → 엔진 정지가 기다린다
+        Assert.True(probe.Entered.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken), "회차 3 공급자 진입");
+        var stopping = s.StopAsync();                                // 끝 경계 = 3초
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+        Assert.False(s.LinkClosed, "엔진 정지를 기다리는 동안 링크 수집은 아직 열려 있어야 한다 (시험 전제)");
         clock.Advance(TimeSpan.FromMilliseconds(600));
-        links.Notify(LinkState.Down);          // 3.6초 다운 (끝 뒤)
+        links.Notify(LinkState.Down);                                // 3.6초 다운 (끝 뒤)
+        release.Set();
         await stopping;
-        var ev = LinkEvidenceBuilder.FromEvents(Reread().Events);
-        Assert.Empty(ev.Downs);
+        Assert.Empty(LinkEvidenceBuilder.FromEvents(Reread().Events).Downs);
         Assert.DoesNotContain(Links(Reread()), e => (string?)e["collection"] == "down");
+    }
+
+    [Fact]
+    public async Task SamplesAfterPlannedEndAreIgnored()
+    {
+        // G4 4라운드 2: 계획 끝(60초)을 넘긴 표본은 종료 처리가 늦게 시작해도 받지 않는다.
+        // 마지막 회차(59) 공급자를 막아 계획 끝을 넘긴 시각에 표본을 넣는다 (종료 처리는 아직 시작 전)
+        var clock = new ManualClock(Start);
+        var links = new FakeLinks();
+        var release = new ManualResetEventSlim(false);
+        var probe = new BlockingProbe(59, release);
+        var s = MeasurementSession.Start(Options(clock, links) with { ProbeFor = _ => probe });
+        await Rounds(clock, s, 58);
+        await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));   // 회차 59 시작, 공급자 막힘
+        Assert.True(probe.Entered.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken), "회차 59 공급자 진입");
+        clock.Advance(TimeSpan.FromMilliseconds(1500));               // 60.5초
+        Assert.False(s.LinkClosed);
+        links.Notify(LinkState.Down);                                  // 계획 끝 뒤 표본
+        release.Set();
+        var result = await s.Completion.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        Assert.Equal(EndReason.Completed, result.EndReason);
+        Assert.Equal(60_000, result.Summary!.EndMs);                  // 끝 = min(종료 처리 시작 60.5초, 계획 끝 60초)
+        Assert.Empty(LinkEvidenceBuilder.FromEvents(Reread().Events).Downs);
+    }
+
+    [Fact]
+    public void OverflowSpansBeyondCapExtendTheLastSpan()
+    {
+        // G4 4라운드 1: 51번째부터의 넘침도 시각을 잃지 않는다 (마지막 범위를 늘려 보수적으로 덮음)
+        var spans = new List<(long From, long To)>();
+        for (int i = 0; i < 50; i++) MeasurementSession.AddOverflowSpan(spans, i * 2000L);
+        Assert.Equal(50, spans.Count);
+        MeasurementSession.AddOverflowSpan(spans, 102_000);
+        Assert.Equal(50, spans.Count);
+        Assert.Equal((98_000L, 102_000L), spans[^1]);
+        // 그 범위가 다운 재관측과 이어지는 것을 막는다 (빌더): 101초 다운 → 102초 유실 → 103초 다운 → 106초 업
+        var events = new List<JsonObject>
+        {
+            Direct("down", 101_000), Direct("down", 103_000, new JsonObject { ["prevState"] = "down", ["prevFirstMs"] = 101_000, ["prevLastMs"] = 101_000 }),
+            Direct("up", 106_000, new JsonObject { ["prevState"] = "down", ["prevFirstMs"] = 103_000, ["prevLastMs"] = 103_000 }),
+            new() { ["id"] = "x", ["type"] = "link", ["at"] = 0, ["wall"] = RecordSchema.Iso(Start), ["source"] = "direct", ["collection"] = "overflow", ["count"] = 51,
+                ["spans"] = new JsonArray(spans.Select(x => (JsonNode)new JsonArray(x.From, x.To)).ToArray()) },
+        };
+        var downs = LinkEvidenceBuilder.FromEvents(events).Downs.Select(d => (d.FromMs, d.ToMs)).ToArray();
+        Assert.Equal([(101_000L, 101_000L), (103_000L, 106_000L)], downs);
+    }
+
+    private static JsonObject Direct(string collection, long ms, JsonObject? extra = null)
+    {
+        var o = new JsonObject { ["id"] = "x", ["type"] = "link", ["at"] = ms, ["wall"] = RecordSchema.Iso(Start), ["source"] = "direct", ["adapter"] = "a1",
+            ["interfaceIndex"] = 7, ["kind"] = "wired", ["virtual"] = false, ["collection"] = collection, ["eventMs"] = ms };
+        if (extra is not null) foreach (var (k, v) in extra.ToArray()) { extra.Remove(k); o[k] = v; }
+        return o;
     }
 
     [Fact]

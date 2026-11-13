@@ -113,6 +113,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
         long limit = profile.Duration.Ticks / Profile.Interval.Ticks;
         engine = new MeasurementEngine(clock, new DispatchProbe(probes), targets.Select(t => t.ToProbeTarget()).ToArray(), Profile.Interval, limit,
             options.Links is { } links ? new RoutesWithLinks(options.Routes, links, () => directCapability == NetPulse.Core.Evidence.LinkCapability.Supported) : options.Routes, Enqueue);
+        linkCutoffMs = header.PlannedMs;   // 계획 끝 뒤의 링크 표본은 처음부터 받지 않는다 (M4 G4 4라운드 2)
         powerSubscription = options.Power?.Subscribe(() => gaps.OnSuspend(clock.Elapsed, clock.Now), () => gaps.OnResume(clock.Elapsed, clock.Now));
     }
 
@@ -496,7 +497,8 @@ public sealed partial class MeasurementSession : IAsyncDisposable
         // 측정 끝 경계는 정리(엔진 정지·배출·마감)를 기다리기 전에 고정한다 (M4 G4 2라운드 4)
         var stopElapsed = clock.Elapsed;
         var stopWall = clock.Now;
-        Volatile.Write(ref linkCutoffMs, (long)stopElapsed.TotalMilliseconds);
+        // 링크 표본 마감 = 최종 측정 끝과 같은 경계: min(중지 시각, 계획 끝) (M4 G4 4라운드 2)
+        Volatile.Write(ref linkCutoffMs, Math.Min((long)stopElapsed.TotalMilliseconds, header.PlannedMs));
         try
         {
             await engine.StopAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);

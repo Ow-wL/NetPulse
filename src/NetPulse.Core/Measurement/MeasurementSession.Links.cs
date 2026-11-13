@@ -82,11 +82,24 @@ public sealed partial class MeasurementSession
         lock (linkGate)
         {
             linkOverflow++;
-            if (overflowSpans.Count > 0 && item.Ms - overflowSpans[^1].To <= 1000) overflowSpans[^1] = (overflowSpans[^1].From, item.Ms);
-            else if (overflowSpans.Count < MaxUnobservedSpans) overflowSpans.Add((item.Ms, item.Ms));
+            AddOverflowSpan(overflowSpans, item.Ms);
             if (sample.FromPoll) overflowByKey[sample.Adapter.Key] = overflowByKey.GetValueOrDefault(sample.Adapter.Key) + 1;
         }
     }
+
+    /// <summary>
+    /// 넘침 시각을 범위로 더한다. 1초 안이면 앞 범위를 늘린다. 범위가 상한(50)에 닿으면 이후 넘침은 마지막 범위를 늘려
+    /// 보수적으로 덮는다: 시각을 잃지 않고, 그 사이 상태 연속성을 끊게 한다 (M4 G4 4라운드 1).
+    /// </summary>
+    internal static void AddOverflowSpan(List<(long From, long To)> spans, long ms)
+    {
+        if (spans.Count > 0 && (ms - spans[^1].To <= 1000 || spans.Count >= MaxUnobservedSpans))
+            spans[^1] = (spans[^1].From, Math.Max(spans[^1].To, ms));
+        else spans.Add((ms, ms));
+    }
+
+    /// <summary>시험 전용: 링크 수집이 닫혔는지.</summary>
+    internal bool LinkClosed => linkClosed;
 
     /// <summary>큐에 쌓인 링크 표본을 처리한다 (처리 작업, 또는 처리 작업이 멈춘 뒤 끝에서).</summary>
     private void DrainLinks()
@@ -95,7 +108,7 @@ public sealed partial class MeasurementSession
     }
 
     /// <summary>측정 끝 경계 (경과 ms). 끝낼 때 정리 전에 고정한다. 그 뒤 표본은 큐에 있어도 버린다.</summary>
-    private long linkCutoffMs = long.MaxValue;
+    private long linkCutoffMs = long.MaxValue;   // 생성자에서 계획 끝으로, 끝낼 때 min(중지, 계획 끝)으로 (4라운드 2)
 
     private void ProcessLink(LinkItem item)
     {
