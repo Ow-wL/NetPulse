@@ -6,13 +6,15 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 마일스톤 | M4 근거와 분석 엔진 |
-| 단계 | 마감 (G4 6라운드 APPROVE, 2026-11-14) |
-| 브랜치 | `loop/m4-analysis` (분기 `loop/m3-engine`, M0~M3은 `main`에 병합됨) |
-| 설계 검토 라운드 | 2 / 2 (Claude 판정으로 3판 확정) |
-| diff 리뷰 라운드 | 6 / 6 (사용자 예외. 6라운드 APPROVE, 차단 0) |
-| 누적 실패 | 4 / 8 |
-| PR | base `main` (마감 스크립트가 만든다) |
+| 마일스톤 | M5 홈과 측정 화면 |
+| 단계 | 설계 |
+| 브랜치 | `loop/m5-home-measure` (base `main` `744aef2`) |
+| 설계 검토 라운드 | 0 / 2 |
+| diff 리뷰 라운드 | 0 / 3 |
+| 누적 실패 | 0 / 8 |
+| PR | 없음 |
+
+**저장소 이전 (2026-11-14, `DECISIONS.md` "공개 저장소 이전")**: 공개 저장소 `Ow-wL/NetPulse`는 이력을 다시 쓴 새 저장소다. 아래 M0~M4 기록의 SHA·PR 번호는 옛 저장소(`Ow-wL/NetPulse-private`, 비공개) 기준이다.
 
 ## 지난 마일스톤의 게이트 (M4)
 
@@ -53,6 +55,9 @@
 | M2 디자인 시스템 | `loop/m2-design-system` | Ow-wL/NetPulse#3 (base M1) | 열림, 사용자 머지 대기. CI 실행 43415674372 성공 (PR head `085f382`) |
 | M3 측정 엔진 | `loop/m3-engine` | Ow-wL/NetPulse#4 (base M2) | 병합됨 (`loop/m2-design-system`) |
 | M0~M3 통합 | `loop/m2-design-system` | Ow-wL/NetPulse#7 (base `main`) | `main`에 병합됨 (병합 커밋 `2af5dfe`) |
+| M4 근거와 분석 엔진 | `loop/m4-analysis` | Ow-wL/NetPulse#8 (base `main`) | `main`에 병합됨. 이후 새 공개 저장소로 이전 (새 `main` `744aef2`) |
+
+(이 표의 PR·SHA는 옛 저장소 기준. M5부터 새 공개 저장소.)
 
 ## 미해결 지적 (M2 G4 3라운드, 차단 아님 → M5에서 처리. M3에는 화면이 없어 그대로 둔다)
 
@@ -71,8 +76,9 @@
 
 1. 중요: 링크 표본 마감 검사의 두 위치(받을 때, 큐에서 꺼낼 때)를 각각 고정해 시험한다 (`SessionLinkTests`).
 2. 중요: 넘침 경쟁 시험(`LateOverflowRegistrationCannotMergeDownsAcrossTheLostSample`)이 큐 배출·재관측 생산자 진입을 `Task.Delay(200)`에 기댄다. 신호로 확인하고, 분리된 두 다운 구간의 존재·경계를 단언한다.
+3. 중요 (새 공개 저장소 첫 CI에서 발견): `OverflowIsRecorded`가 CI에서 한 번 시간 초과로 실패했다 (회차마다 알림 3000개를 넣고 "관측" 조건을 기다림). 같은 코드가 옛 저장소 PR CI와 로컬 15회 반복에서는 통과했고, 재실행에서 통과. 느린 실행기에서 시간에 민감한 시험이다. 시험을 신호 기반으로 바꾸거나, 넘침 중 처리 지연이 제품 동작 문제인지 먼저 확인한다.
 
 ## 다음 할 일
 
-M4 G4 6라운드 승인. 이 기록 커밋 뒤 `close-milestone.ps1 -UiOptional` (base `main`)로 푸시·PR·CI를 마친다.
-- 다음: 사용자가 M4 PR을 `main`에 병합하면 M5. M5에서 위 미해결 지적(M2 3건, M4 2건)을 함께 처리한다.
+M5 설계안(`docs/loop/M5-design.md`)을 쓰고 Codex 설계 검토를 받는다. 위 미해결 지적(M2 3건, M4 3건)을 M5에서 함께 처리한다.
+- 브랜치는 새 `main`에서 딴다. 옛 이력 브랜치(`loop/m0`~`m4`, 원격 `old-private`)를 `origin`에 푸시하지 않는다.
