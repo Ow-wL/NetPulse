@@ -48,6 +48,8 @@ public sealed class M5SessionTests : IDisposable
         for (int i = 0; i < count; i++) await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));
         long target = (long)clock.Elapsed.TotalSeconds;
         await Eventually(() => s.Status.Observed >= target + 1, "관측");
+        // 관측 뒤 그 회차의 쓰기·재시도·게시가 이어진다: 게시까지 기다린다 (느린 CI에서 게시 전 전달을 읽어 실패했다)
+        await Eventually(() => s.Live.AnalysisInputs().Rounds.Count >= target + 1, "게시");
     }
 
     private MeasurementRecord Reread() => RecordReader.Read(RecordReader.FindSegments(Id, [primary.Path!, fallback.Path!]));
