@@ -161,7 +161,7 @@ public sealed class M6FlowTests
     {
         // 시작 때 클립보드에 글이 아닌 내용이 있으면 덮어쓰지 않고 미완료로 둔다 (구현 중 결정 "클립보드 되읽기·시험 복원")
         var saved = ClipboardText.Save();
-        if (saved.Blocked) Assert.Skip("미완료: 클립보드에 글이 아닌 내용이 있어 덮어쓰지 않았습니다.");
+        if (saved.Blocked) Assert.Skip("미완료: 클립보드에 그대로 되돌릴 수 없는 형식이 있어 덮어쓰지 않았습니다.");
         var userData = AppDriver.NewUserData();
         try
         {
@@ -423,12 +423,13 @@ public sealed class M6FlowTests
 }
 
 /// <summary>
-/// 시험이 쓰는 실제 클립보드 (STA 스레드). 시작 때 글을 보관하고 끝나면 되돌린다. 글이 아닌 내용이 있으면 막힘(덮어쓰지 않음).
+/// 시험이 쓰는 실제 클립보드 (STA 스레드). 시작 때 모든 형식을 값째 보관하고 끝나면 되돌린다. 그대로 되돌릴 수 없는 형식이 있으면 막힘(덮어쓰지 않음).
 /// 클립보드 내용은 기록에 남기지 않는다.
 /// </summary>
 internal static class ClipboardText
 {
-    public sealed record Saved(bool Blocked, string? Text);
+    /// <summary>보관한 형식과 그 값 (글은 string, 그 밖은 바이트). 막힘이면 보관하지 않았다.</summary>
+    public sealed record Saved(bool Blocked, IReadOnlyList<KeyValuePair<string, object>> Items);
 
     private static T Sta<T>(Func<T> body)
     {
@@ -442,14 +443,28 @@ internal static class ClipboardText
         return result;
     }
 
-    /// <summary>글 형식(유니코드·ANSI·OEM 글, 로캘)만 있으면 보관, 그 밖의 형식이 하나라도 있으면 막힘 (HTML·RTF·그림이 섞인 경우 포함, G4 1라운드 b3).</summary>
+    /// <summary>
+    /// 지금 클립보드의 모든 형식을 값째 보관한다. 하나라도 글(string)이나 바이트 흐름(MemoryStream)으로 읽히지 않으면
+    /// 그대로 되돌릴 수 없으므로 막힘 (그림·핸들 형식 등, 덮어쓰지 않는다, G4 1라운드 b3). 클립보드 관리 도구가 붙이는
+    /// 표시 형식처럼 바이트로 읽히는 형식은 보관했다가 그대로 되돌린다.
+    /// </summary>
     public static Saved Save() => Sta(() =>
     {
         var data = System.Windows.Forms.Clipboard.GetDataObject();
-        var formats = data?.GetFormats(autoConvert: false) ?? [];
-        string[] textOnly = ["UnicodeText", "Text", "OEMText", "Locale", "System.String"];
-        if (formats.Any(f => !textOnly.Contains(f))) return new Saved(true, null);
-        return new Saved(false, System.Windows.Forms.Clipboard.ContainsText() ? System.Windows.Forms.Clipboard.GetText() : null);
+        var items = new List<KeyValuePair<string, object>>();
+        foreach (var f in data?.GetFormats(autoConvert: false) ?? [])
+        {
+            object? v;
+            try { v = data!.GetData(f, autoConvert: false); }
+            catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException or OutOfMemoryException or InvalidOperationException) { return new Saved(true, []); }
+            switch (v)
+            {
+                case string text: items.Add(new(f, text)); break;
+                case MemoryStream ms: items.Add(new(f, ms.ToArray())); break;
+                default: return new Saved(true, []);
+            }
+        }
+        return new Saved(false, items);
     });
 
     public static string Read() => Sta(() => System.Windows.Forms.Clipboard.GetText());
@@ -459,8 +474,10 @@ internal static class ClipboardText
         if (saved.Blocked) return;
         Sta(() =>
         {
-            if (saved.Text is { Length: > 0 } text) System.Windows.Forms.Clipboard.SetText(text);
-            else System.Windows.Forms.Clipboard.Clear();
+            if (saved.Items.Count == 0) { System.Windows.Forms.Clipboard.Clear(); return true; }
+            var o = new System.Windows.Forms.DataObject();
+            foreach (var (f, v) in saved.Items) o.SetData(f, false, v is byte[] bytes ? new MemoryStream(bytes) : v);
+            System.Windows.Forms.Clipboard.SetDataObject(o, copy: true);
             return true;
         });
     }
