@@ -97,7 +97,8 @@ public sealed class DiagnosisHost
             if (operation != DiagnosisOperation.None) return DiagnosisRequest.Busy;
             operation = DiagnosisOperation.Diagnosing;
             partial = [];
-            current = Task.Run(() => DiagnoseAsync(flush: null));
+            string? measurementId = runningMeasurementId();   // 시작 버튼을 받은 그 순간의 측정 (설계 3.4 [1-7])
+            current = Task.Run(() => DiagnoseAsync(measurementId));
         }
         Publish();
         return DiagnosisRequest.Started;
@@ -146,9 +147,9 @@ public sealed class DiagnosisHost
 
     // ---------------- 작업 ----------------
 
-    private async Task DiagnoseAsync(SystemActionResult? flush)
+    private async Task DiagnoseAsync(string? measurementId)
     {
-        var run = await RunOnceAsync(flush).ConfigureAwait(false);
+        var run = await RunOnceAsync(null, measurementId).ConfigureAwait(false);
         lock (gate)
         {
             if (closed) return;
@@ -170,9 +171,10 @@ public sealed class DiagnosisHost
         catch (OperationCanceledException) { return; }
         catch (Exception ex) { flush = new SystemActionResult(false, ex.GetType().Name); }
         if (closed) return;
-        lock (gate) { flushStage = FlushStage.Rechecking; partial = []; }
+        string? measurementId;
+        lock (gate) { flushStage = FlushStage.Rechecking; partial = []; measurementId = runningMeasurementId(); }   // 다시 진단을 시작하는 순간
         Publish();
-        var run = await RunOnceAsync(flush).ConfigureAwait(false);
+        var run = await RunOnceAsync(flush, measurementId).ConfigureAwait(false);
         lock (gate)
         {
             if (closed) return;
@@ -184,9 +186,8 @@ public sealed class DiagnosisHost
     }
 
     /// <summary>진단 한 번: 시작 순간 측정 Id, 진행 알림, 비교, 저장. 종료로 억제되면 null.</summary>
-    private async Task<DiagnosisRun?> RunOnceAsync(SystemActionResult? flush)
+    private async Task<DiagnosisRun?> RunOnceAsync(SystemActionResult? flush, string? measurementId)
     {
-        string? measurementId = runningMeasurementId();
         DiagnosisResult result;
         try
         {

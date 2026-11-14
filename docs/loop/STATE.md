@@ -7,7 +7,7 @@
 | 항목 | 값 |
 | --- | --- |
 | 마일스톤 | M6 진단 화면 |
-| 단계 | 구현 A 진행 중 (재부팅으로 멈춤, 아래 "재개 지점") |
+| 단계 | 구현 A 완료 → B (진단 화면·홈 카드) |
 | 브랜치 | `loop/m6-diagnose` (base `main` `91d366c`) |
 | 설계 검토 라운드 | 2 / 2 (1라운드 REVISE 14건 → 2판, 2라운드 APPROVE + 구현 중 결정 7건) |
 | diff 리뷰 라운드 | 0 / 3 |
@@ -95,20 +95,6 @@
 2. 사소: 측정 화면 bench의 nav(첫 홈 이동) 최대가 실행마다 34~48 ms로 기준 50 ms에 여유가 작다. 반복 측정과 첫 표시 비용 분석.
 3. 사소: 관측 종류가 바뀌는 순간 상태 알약이 한 번 이전 종류로 그려지고, 외부 응답 없음 → 링크 끊김으로 바로 바뀌면 새 종류의 알림이 나오지 않는다 (`AppShell.Render`). 지금 장면에서 계산한 값으로 그리고 종류별 전환을 따로 추적한다.
 4. 중요(시험): `RoundItemsArriveWithTheirRouteEventsInRecordOrder`가 시작 직후 사본 커서를 잡아 0회차가 빠질 수 있다 → 커서를 0부터. `SessionLinkTests`의 `Rounds()`도 관측만 기다리므로 게시까지 기다리게 맞춘다 (G4 4라운드).
-
-## 재개 지점 (2026-11-14, 사용자 재부팅으로 멈춤)
-
-구현 A단계 진행 중 커밋에 저장했다 (빌드 통과, 시험은 아직 없음). 다 된 것:
-- `QuickDiagnosis.RunAsync`의 진행 알림 (`IProgress<CheckResult>`)
-- 시나리오 선택 블록 `diagnosis` (모델·검증, `Scenario.IsDocumentationDomain`)
-- `DemoDiagnosticProbes` (데모 설정·응답 우선순위), `DemoWorld.Resolve`
-- `ISystemActions`·`DiagnosisWorld`·`FolderPolicy`·`DemoSystemActions` (Core), 실제 `SystemActions` (Platform, 고정 명령), `IAppWorld.Diagnostics`(데모·실측)
-- `DiagnosisStore` (임시 파일 → 덮어쓰지 않는 이동, 최근순), `DiagnosisHost` (작업 칸, 비우기 흐름, 시작 때 측정 Id, 종료 억제)
-
-남은 A단계 (이 순서로):
-1. `DiagnosisTexts` (결론 머리말 12종, 관측 범위 줄, 사유 코드 표: Core 판정 코드 + Platform 검사기 코드 `dns-*`·`socket-*`·`http-*`·`tls`·`dns`·`log-*`·`no-route`·ICMP·TCP 상태·예외 형식 이름, 모르는 코드는 "기타 사유")와 `DiagnosisView` (설계 3.6)
-2. G2 시험: 데모 검사기·진행 알림·`DiagnosisHost`(작업 칸 표·비우기 흐름·측정 Id·종료)·`DiagnosisStore`(같은 초 3회, 손상 기록, 임시 파일)·`FolderPolicy`(경계)·복사 텍스트 주소 없음·코드 표 덮음 (설계 7.1)
-3. A단계 커밋 → B(진단 화면·홈 카드) → C(G3·G5·M5 이월 4건)
 
 ## 다음 할 일
 
