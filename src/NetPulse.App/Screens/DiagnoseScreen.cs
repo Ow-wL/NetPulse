@@ -39,6 +39,8 @@ public sealed class DiagnoseScreen : Screen
     private string? lastAction;
     private string? folderTarget;
     private int columns;
+    private ScrollViewer scroll = null!;
+    private bool siteWasRunning;
 
     public DiagnoseScreen(ScreenContext context) : base(context, "diagnose")
     {
@@ -70,8 +72,15 @@ public sealed class DiagnoseScreen : Screen
         // 사이트 점검
         siteInput = new GlassTextBox(Ui, "diagnose.site.input", "도메인", "", "예: example.com", Size.FieldL, multiline: false);
         siteInput.Box.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.Enter) { e.Handled = true; CheckSite(); } };
-        siteInput.Box.TextChanged += (_, _) => siteInput.SetError(null);
-        siteRun = new GlassButton(Ui, ButtonKind.Secondary, "diagnose.site.run", "점검", Icons.Globe) { VerticalAlignment = VerticalAlignment.Bottom };
+        // TextChanged는 비동기로 늦게 올 수 있다: 오류를 낸 그 입력 그대로면 지우지 않는다
+        siteInput.Box.TextChanged += (_, _) => { if (siteInput.Text != erroredInput) siteInput.SetError(null); };
+        siteRun = new GlassButton(Ui, ButtonKind.Secondary, "diagnose.site.run", "점검", Icons.Globe) { VerticalAlignment = VerticalAlignment.Top };
+        // 단추를 입력 칸과 같은 높이에 둔다 (아래 정렬이면 오류 줄이 생길 때 단추가 오류 옆으로 내려갔다)
+        siteInput.SizeChanged += (_, _) =>
+        {
+            double top = siteInput.Box.TransformToVisual(siteInput).TransformPoint(default).Y;
+            if (Math.Abs(siteRun.Margin.Top - top) > Size.Hairline) siteRun.Margin = new Thickness(0, top, 0, 0);
+        };
         siteRun.Click += (_, _) => CheckSite();
         var siteRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
         siteRow.Children.Add(siteInput);
@@ -114,7 +123,7 @@ public sealed class DiagnoseScreen : Screen
         ArrangeLower(true);
         content.Children.Add(lower);
 
-        var scroll = new ScrollViewer { Content = content, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, Space.S3, Space.S5) };
+        scroll = new ScrollViewer { Content = content, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, Space.S3, Space.S5) };
         AutomationProperties.SetAutomationId(scroll, "diagnose.scroll");
         Grid.SetRow(scroll, 1);
         Children.Add(scroll);
@@ -127,15 +136,55 @@ public sealed class DiagnoseScreen : Screen
     /// <summary>시작 (버튼, 홈 카드의 "진단 시작").</summary>
     public void Start()
     {
+        bool had = start.FocusState != FocusState.Unfocused;
         Context.Diagnosis.StartDiagnosis();
         Render(Context.Host.Snapshot);
+        NoteDisplacedFocus(start, had, e => startDisplaced = e, top: true);
     }
+
+    /// <summary>
+    /// 초점을 가진 단추가 꺼지면 WinUI가 초점을 다음 요소로 옮기고 그 요소가 보이게 화면을 내린다.
+    /// 누를 때 초점이 단추에 있었으면 적어 두었다가, 작업이 끝나면 단추로 돌려놓는다 (그 사이 글 상자에 입력 중이면 두기).
+    /// </summary>
+    private void NoteDisplacedFocus(Control button, bool hadFocus, Action<bool> note, bool top = false)
+    {
+        bool displaced = hadFocus && !button.IsEnabled;
+        note(displaced);
+        if (displaced && top)
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => scroll.ChangeView(null, 0, null, true));   // 진행 중에도 결론 자리가 보이게
+    }
+
+    private DependencyObject? Focused() =>
+        XamlRoot is null ? null : Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(XamlRoot) as DependencyObject;
+
+    private void RestoreFocus(Control button, bool displaced)
+    {
+        if (!displaced || !button.IsEnabled) return;
+        if (Focused() is TextBox) return;
+        button.Focus(FocusState.Programmatic);
+    }
+
+    private bool startDisplaced, siteDisplaced;
+    private string? erroredInput;
 
     private void CheckSite()
     {
+        bool had = siteRun.FocusState != FocusState.Unfocused;
         var r = Context.Diagnosis.CheckSite(siteInput.Text);
-        if (r == DiagnosisRequest.Invalid && Context.Diagnosis.Snapshot.Site.InputError is { } code) siteInput.SetError(DiagnosisTexts.InputError(code));
+        if (r == DiagnosisRequest.Invalid && Context.Diagnosis.Snapshot.Site.InputError is { } code)
+        {
+            erroredInput = siteInput.Text;
+            siteInput.SetError(DiagnosisTexts.InputError(code));
+            // 오류 줄이 입력 칸 아래에 붙으므로 보이게 한다
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                if (Context.IsClosing()) return;
+                siteInput.UpdateLayout();
+                siteInput.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false });
+            });
+        }
         Render(Context.Host.Snapshot);
+        NoteDisplacedFocus(siteRun, had, e => siteDisplaced = e);
     }
 
     private void ConfirmFlush(Control opener)
@@ -246,13 +295,48 @@ public sealed class DiagnoseScreen : Screen
         if (finished && d.Last is { } done)
         {
             var (head, _) = DiagnosisTexts.Head(done.Result.Main.Number);
-            Context.Toasts.Show(done.Result.Main.Number is 1 or 5 or 6 ? ToastKind.Warning : ToastKind.Info, "진단을 마쳤습니다: " + head, done.Result.Main.Found);
+            // 제목은 머리말만 (알림 폭에서 잘리지 않게), 끝났다는 말은 본문에
+            Context.Toasts.Show(done.Result.Main.Number is 1 or 5 or 6 ? ToastKind.Warning : ToastKind.Info, head, "빠른 진단을 마쳤습니다. " + done.Result.Main.Found);
+            ShowConclusion();
         }
         lastRun = d.Last;
         Context.QueueDiag();
     }
 
     private DiagnosisRun? lastRun;
+
+    /// <summary>
+    /// 진단이 끝나면 결론이 보이게 맨 위로 올린다. 실행 중 시작 단추가 꺼지면서 초점이 아래 단추로 옮겨 가
+    /// 화면이 내려가 있을 수 있으므로, 초점이 이 화면 안에서 길을 잃었으면 시작 단추로 돌려놓는다.
+    /// </summary>
+    private void ShowConclusion()
+    {
+        var displaced = startDisplaced;
+        startDisplaced = false;
+        // 배치가 끝난 뒤에 (초점 이동이 만든 스크롤보다 나중에)
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (Context.IsClosing()) return;
+            RestoreFocus(start, displaced);
+            scroll.ChangeView(null, 0, null, true);
+        });
+    }
+
+    /// <summary>초점을 가진 요소에서 가장 가까운 자동화 Id (진단 출력용).</summary>
+    private string? FocusedId()
+    {
+        if (XamlRoot is null) return null;
+        for (var p = Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(XamlRoot) as DependencyObject; p is not null; p = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(p))
+            if (AutomationProperties.GetAutomationId(p) is { Length: > 0 } id) return id;
+        return null;
+    }
+
+    private static bool IsInside(DependencyObject child, DependencyObject parent)
+    {
+        for (var p = child; p is not null; p = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(p))
+            if (p == parent) return true;
+        return false;
+    }
 
     private static string FlushStageText(FlushStage? s) => s switch
     {
@@ -371,6 +455,21 @@ public sealed class DiagnoseScreen : Screen
     private void RenderSite(DiagnosisSnapshot d)
     {
         siteRun.IsEnabled = !d.Site.Running;
+        bool siteFinished = siteWasRunning && !d.Site.Running;
+        siteWasRunning = d.Site.Running;
+        // 결과 줄이 카드 아래에 붙으므로, 점검이 끝나면 결과가 보이게 한다
+        if (siteFinished)
+        {
+            var displaced = siteDisplaced;
+            siteDisplaced = false;
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                if (Context.IsClosing()) return;
+                RestoreFocus(siteRun, displaced);
+                siteResult.UpdateLayout();
+                siteResult.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false });
+            });
+        }
         siteResult.Children.Clear();
         if (d.Site.Running)
         {
@@ -455,6 +554,8 @@ public sealed class DiagnoseScreen : Screen
             lastAction,
             actions = (Context.Diagnosis.World.Actions as DemoSystemActions)?.Calls.Select(c => c.StartsWith("folder:", StringComparison.Ordinal) ? "folder:" + FolderKind(c[7..]) : c).ToArray(),
             folderEnabled = folder.IsEnabled,
+            scrollY = (int)scroll.VerticalOffset,
+            focus = FocusedId(),
         };
     }
 }

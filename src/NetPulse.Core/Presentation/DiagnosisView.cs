@@ -29,7 +29,7 @@ public static class DiagnosisView
         var also = r.AlsoMatched.Select(n => DiagnosisTexts.Head(n).Head).ToArray();
         var notes = new List<string>();
         foreach (var c in r.Checks.Where(c => c.Judgment == CheckJudgment.Unmeasured && c.Id is CheckId.Portal or CheckId.Link))
-            notes.Add($"{QuickDiagnosis.CheckName(c.Id)}을(를) 확인하지 못했습니다: {DiagnosisTexts.Reason(c.Code ?? StateCode(c.State))}");
+            notes.Add($"확인하지 못한 검사: {QuickDiagnosis.CheckName(c.Id)} ({DiagnosisTexts.Reason(c.Code ?? StateCode(c.State))})");   // 조사 "을(를)" 없이
         return new ConclusionView(r.Main.Number, head, weight, r.Main.Found, r.Main.Steps, also, notes, DiagnosisTexts.Scope(r.Checks));
     }
 

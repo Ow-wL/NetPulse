@@ -69,7 +69,16 @@ public sealed class CheckCard : GroupPanel
         top.Children.Add(head);
         top.Children.Add(explain);
         toggle = new RowButton(ui, AutomationProperties.GetAutomationId(this) + ".toggle", QuickDiagnosis.CheckName(id), top) { HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
-        toggle.Click += (_, _) => SetExpanded(!Expanded);
+        toggle.Click += (_, _) =>
+        {
+            SetExpanded(!Expanded);
+            // 펼친 내용이 화면 아래로 숨지 않게 (배치가 끝난 뒤)
+            if (Expanded) DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                UpdateLayout();
+                StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false });
+            });
+        };
         AutomationProperties.SetAutomationId(details, AutomationProperties.GetAutomationId(this) + ".details");
         var stack = new StackPanel { Spacing = Space.S2 };
         stack.Children.Add(toggle);

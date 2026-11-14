@@ -287,9 +287,10 @@ public static class QuickDiagnosis
                 "인터넷은 되지만 예외가 관측됐습니다 (공유기 무응답 또는 로그인 확인 응답).", [])),
             (10, new[] { CheckId.Tcp, CheckId.Dns, CheckId.Https }.Any(id => Is(id, CheckJudgment.Check))
                 && !new[] { CheckId.Tcp, CheckId.Dns, CheckId.Https }.Any(id => Is(id, CheckJudgment.Fail)), () => new(10,
-                "일부만 성공했습니다: " + string.Join(", ", new[] { CheckId.Tcp, CheckId.Dns, CheckId.Https }.Where(id => Is(id, CheckJudgment.Check))
-                    .Select(id => CheckName(id) + " " + string.Join("·", C(id).Targets.Where(t => t.Outcome != TargetOutcome.Ok).Select(t => t.Slot))))
-                + "이(가) 안 됐습니다.", ["그 대상만의 문제일 수 있습니다. 다시 검사해 보세요."])),
+                // 슬롯 이름(t1) 대신 "대상 n", 조사 "이(가)" 없이 (M6 화면 검토)
+                "일부만 성공했습니다. 안 된 대상: " + string.Join(", ", new[] { CheckId.Tcp, CheckId.Dns, CheckId.Https }.Where(id => Is(id, CheckJudgment.Check))
+                    .Select(id => CheckName(id) + " " + string.Join("·", C(id).Targets.Where(t => t.Outcome != TargetOutcome.Ok).Select(t => SlotLabel(t.Slot)))))
+                + ".", ["그 대상만의 문제일 수 있습니다. 다시 검사해 보세요."])),
             (11, Is(CheckId.Adapter, CheckJudgment.Normal) && Is(CheckId.Tcp, CheckJudgment.Normal) && Is(CheckId.Dns, CheckJudgment.Normal)
                 && Is(CheckId.Https, CheckJudgment.Normal), () => new(11, "기본 연결은 정상입니다.", ["간헐적으로 끊긴다면 실시간 측정으로 기록하세요."])),
         };
@@ -308,6 +309,10 @@ public static class QuickDiagnosis
         foreach (var c in checks.Where(c => c.PartlyUnconfirmed)) notes.Add("partly-unconfirmed:" + c.Id.ToString().ToLowerInvariant());
         return (main, also, notes);
     }
+
+    /// <summary>대상 슬롯("t1")의 사람이 읽는 이름("대상 1").</summary>
+    public static string SlotLabel(string slot) =>
+        slot.Length > 1 && slot[0] == 't' && int.TryParse(slot.AsSpan(1), out int n) ? "대상 " + n : slot;
 
     public static string CheckName(CheckId id) => id switch
     {
@@ -337,7 +342,7 @@ public static class QuickDiagnosis
         {
             sb.Append("- ").Append(CheckName(c.Id)).Append(": ").Append(JudgmentName(c.Judgment));
             if (c.PartlyUnconfirmed) sb.Append(" (일부 미확인)");
-            if (c.Targets.Count > 1) sb.Append(" [").Append(string.Join(", ", c.Targets.Select(t => t.Slot + " " + OutcomeName(t.Outcome)))).Append(']');
+            if (c.Targets.Count > 1) sb.Append(" [").Append(string.Join(", ", c.Targets.Select(t => SlotLabel(t.Slot) + " " + OutcomeName(t.Outcome)))).Append(']');
             sb.AppendLine();
         }
         sb.Append("결론: ").AppendLine(r.Main.Found);

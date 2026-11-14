@@ -168,6 +168,13 @@ public sealed class AppDriver : IDisposable
     public void Invoke(string automationId) =>
         ((InvokePattern)Find(automationId).GetCurrentPattern(InvokePattern.Pattern)).Invoke();
 
+    /// <summary>스크롤 영역을 세로 <paramref name="percent"/>%로 옮긴다 (스크롤할 것이 없으면 아무것도 하지 않음).</summary>
+    public void ScrollTo(string automationId, double percent)
+    {
+        var pattern = (ScrollPattern)Find(automationId).GetCurrentPattern(ScrollPattern.Pattern);
+        if (pattern.Current.VerticallyScrollable) pattern.SetScrollPercent(ScrollPattern.NoScroll, percent);
+    }
+
     /// <summary>글 상자에 값을 넣는다 (값 패턴, 키 입력 없음).</summary>
     public void SetText(string automationId, string text) =>
         ((ValuePattern)Find(automationId).GetCurrentPattern(ValuePattern.Pattern)).SetValue(text);

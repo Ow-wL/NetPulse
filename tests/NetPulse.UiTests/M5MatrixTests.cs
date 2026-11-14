@@ -66,6 +66,10 @@ public sealed class M5MatrixTests
                 app.SetText(arg[..eq], arg[(eq + 1)..]);
                 break;
             case "wait": Wait(app, arg); break;
+            case "scroll":   // 스크롤 영역을 세로 n%로 (150%에서 아래로 밀린 카드). 스크롤할 것이 없으면 그대로
+                var at = arg.IndexOf('=');
+                app.ScrollTo(arg[..at], double.Parse(arg[(at + 1)..], System.Globalization.CultureInfo.InvariantCulture));
+                break;
             default: throw new ArgumentException("알 수 없는 동작: " + action);
         }
     }

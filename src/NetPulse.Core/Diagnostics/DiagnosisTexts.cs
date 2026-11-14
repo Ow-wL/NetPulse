@@ -155,5 +155,5 @@ public static class DiagnosisTexts
     public static string FlushMessage(bool ok, string? code) => ok
         ? "DNS 캐시를 비웠습니다. 다시 검사한 결과입니다."
         : code == "timeout" ? "DNS 캐시 비우기가 10초 안에 끝나지 않았습니다. 다시 검사한 결과입니다."
-        : $"DNS 캐시를 비우지 못했습니다 ({Reason(code)}). 다시 검사한 결과입니다.";
+        : $"DNS 캐시를 비우지 못했습니다: {Reason(code)}. 다시 검사한 결과입니다.";   // 사유에 괄호가 있어 겹 괄호를 피함
 }
