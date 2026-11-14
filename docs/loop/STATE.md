@@ -6,13 +6,13 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 마일스톤 | M5 홈과 측정 화면 |
-| 단계 | G4 승인 → 마감 (푸시·PR·CI, `close-milestone.ps1 -Screens`). 승인 코드 X `67f071b` (3라운드 승인 `12bbb6b` 뒤 CI 시험 흔들림을 고쳐 사용자 승인 4라운드) |
-| 브랜치 | `loop/m5-home-measure` (base `main` `744aef2`) |
-| 설계 검토 라운드 | 2 / 2 (2라운드 REVISE 8건 → Claude 판정으로 모두 수용, 3판 확정. G4에서 재검토) |
-| diff 리뷰 라운드 | 4 (사용자 예외) / 3 (1라운드 나눠 받음 REVISE 16건 / 2라운드 REVISE 4건 / 3라운드 APPROVE / 4라운드 시험 수정만 APPROVE) |
+| 마일스톤 | M6 진단 화면 |
+| 단계 | 설계 1판 → 설계 검토 |
+| 브랜치 | `loop/m6-diagnose` (base `main` `91d366c`) |
+| 설계 검토 라운드 | 0 / 2 |
+| diff 리뷰 라운드 | 0 / 3 |
 | 누적 실패 | 0 / 8 |
-| PR | Ow-wL/NetPulse#1 (base `main`) |
+| PR | 없음 |
 
 **저장소 이전 (2026-11-14, `DECISIONS.md` "공개 저장소 이전")**: 공개 저장소 `Ow-wL/NetPulse`는 이력을 다시 쓴 새 저장소다. 아래 M0~M4 기록의 SHA·PR 번호는 옛 저장소(`Ow-wL/NetPulse-private`, 비공개) 기준이다.
 
@@ -89,15 +89,15 @@
 2. 중요: 넘침 경쟁 시험(`LateOverflowRegistrationCannotMergeDownsAcrossTheLostSample`)이 큐 배출·재관측 생산자 진입을 `Task.Delay(200)`에 기댄다. 신호로 확인하고, 분리된 두 다운 구간의 존재·경계를 단언한다.
 3. 중요 (새 공개 저장소 첫 CI에서 발견): `OverflowIsRecorded`가 CI에서 한 번 시간 초과로 실패했다 (회차마다 알림 3000개를 넣고 "관측" 조건을 기다림). 같은 코드가 옛 저장소 PR CI와 로컬 15회 반복에서는 통과했고, 재실행에서 통과. 느린 실행기에서 시간에 민감한 시험이다. 시험을 신호 기반으로 바꾸거나, 넘침 중 처리 지연이 제품 동작 문제인지 먼저 확인한다.
 
-## 미해결 지적 (M5 G4 3라운드, 차단 아님 → M6에서 처리)
+## 미해결 지적 (M5 G4 3·4라운드, 차단 아님 → M6 C단계에서 처리, M6 설계 6절)
 
 1. 중요: 창을 닫을 때 드물게 WinUI 내부 예외(0xC000027B, CoreMessagingXP.dll)로 끝난 일이 게이트에서 한 번 있었다. 원인 미확정, 닫은 뒤 큐 작업·알림 타이머를 끊는 완화만 했다. 다시 나면 UI 시험이 남기는 `crash-*.jsonl`(처리되지 않은 예외의 HRESULT·스택)과 네이티브 덤프로 원인을 찾는다.
 2. 사소: 측정 화면 bench의 nav(첫 홈 이동) 최대가 실행마다 34~48 ms로 기준 50 ms에 여유가 작다. 반복 측정과 첫 표시 비용 분석.
-4. 중요(시험): `RoundItemsArriveWithTheirRouteEventsInRecordOrder`가 시작 직후 사본 커서를 잡아 0회차가 빠질 수 있다 → 커서를 0부터. `SessionLinkTests`의 `Rounds()`도 관측만 기다리므로 게시까지 기다리게 맞춘다 (G4 4라운드).
 3. 사소: 관측 종류가 바뀌는 순간 상태 알약이 한 번 이전 종류로 그려지고, 외부 응답 없음 → 링크 끊김으로 바로 바뀌면 새 종류의 알림이 나오지 않는다 (`AppShell.Render`). 지금 장면에서 계산한 값으로 그리고 종류별 전환을 따로 추적한다.
+4. 중요(시험): `RoundItemsArriveWithTheirRouteEventsInRecordOrder`가 시작 직후 사본 커서를 잡아 0회차가 빠질 수 있다 → 커서를 0부터. `SessionLinkTests`의 `Rounds()`도 관측만 기다리므로 게시까지 기다리게 맞춘다 (G4 4라운드).
 
 ## 다음 할 일
 
-M5 마감: `close-milestone.ps1 -Approved 67f071b… -Base main -Screens`로 푸시·PR·CI. 사용자 병합 뒤 M6.
-- 브랜치는 `main`에서 딴다. 옛 이력 브랜치(`loop/m0`~`m4`, 원격 `old-private`)를 `origin`에 푸시하지 않는다.
-- 위 M5 이월 4건을 M6에서 함께 처리한다.
+M6 설계 1판(`docs/loop/M6-design.md`) → Codex 설계 검토(최대 2라운드) → 구현 A(엔진 쪽: 진행 알림, 데모 진단 검사기, 시스템 동작, 진단 수명, 화면 모델) → B(진단 화면, 홈 카드) → C(G3·G5·M5 이월 4건) → 게이트 → G4.
+- DNS 캐시 비우기: 사용자 확인 받음 (2026-11-14, 확인 대화상자 뒤 `ipconfig /flushdns` 고정 명령).
+- 옛 이력 브랜치(`loop/m0`~`m4`, 원격 `old-private`)를 `origin`에 푸시하지 않는다.
