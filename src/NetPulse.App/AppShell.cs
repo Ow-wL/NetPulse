@@ -141,7 +141,7 @@ public sealed partial class AppShell : Window
             _ = recent.RefreshAsync(host.RunningId);
             _ = Task.Run(diagnosis.LoadRecent);
             StartScreen();
-            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => { if (!closing) foreach (var id in new[] { "home", "measure" }) screens.Prepare(id); });
+            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => { if (!closing) foreach (var id in new[] { "home", "measure", "diagnose" }) screens.Prepare(id); });   // 진단도 미리 (M6 bench diag-enter 40 ms대)
             RenderStatus(host.Snapshot);
             QueueDiag();
             if (options.SelfTest is not null) selfTestTimer.Start();
@@ -266,6 +266,7 @@ public sealed partial class AppShell : Window
     private void Render(HostSnapshot s)
     {
         screens.Render(s);
+        if (screens.Current is not HomeScreen && screens.Prepared("home") is HomeScreen home) home.Warm(s);
         // 상태 반응: 외부 응답 없음이나 링크 끊김이 관측되고 있으면 배경 빛이 붉게 (끝나면 원래대로).
         // 띠·링크 다운은 관측이지 판정이 아니다: 알림도 관측한 그것만 말한다 (끊김 여부·원인은 잠정 분석이 말한다, G4 M5 1라운드 B4·2라운드 3)
         // 종류는 이 장면에서 먼저 정하고 알약을 그린다 (M5 이월 3: 이전 종류로 한 번 그려지던 것), 종류마다 전환 알림

@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using NetPulse.App.Design.Showcase;
 using NetPulse.Core.Demo;
 using NetPulse.Core.Live;
@@ -35,6 +35,9 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        // 화면 앱: 전체(2세대) 수집이 프레임을 막지 않게 (M5 이월 2, M6 bench: 긴 측정의 잠정 분석이 2세대 수집을 일으켜
+        // 화면 이동 프레임이 예산 가까이 튀었다). 메모리가 모자라면 런타임이 그래도 막는 수집을 한다
+        System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.SustainedLowLatency;
         try { Launch(); }
         catch (Exception ex)
         {

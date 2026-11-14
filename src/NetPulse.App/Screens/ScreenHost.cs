@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using NetPulse.App.Design;
 using NetPulse.App.Design.Controls;
@@ -78,6 +78,9 @@ public sealed class ScreenHost : Grid
     public string? CurrentId => Current?.Id;
 
     public void Register(string id, Func<Screen> create) => factories[id] = create;
+
+    /// <summary>이미 만든 화면 (없으면 null, 만들지 않는다).</summary>
+    public Screen? Prepared(string id) => screens.GetValueOrDefault(id);
 
     public Screen Get(string id)
     {
