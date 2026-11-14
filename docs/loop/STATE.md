@@ -7,12 +7,12 @@
 | 항목 | 값 |
 | --- | --- |
 | 마일스톤 | M5 홈과 측정 화면 |
-| 단계 | G4 승인 → 마감 (푸시·PR·CI, `close-milestone.ps1 -Screens`). 승인 코드 X `12bbb6b` |
+| 단계 | G4 승인 → 마감 (푸시·PR·CI, `close-milestone.ps1 -Screens`). 승인 코드 X `67f071b` (3라운드 승인 `12bbb6b` 뒤 CI 시험 흔들림을 고쳐 사용자 승인 4라운드) |
 | 브랜치 | `loop/m5-home-measure` (base `main` `744aef2`) |
 | 설계 검토 라운드 | 2 / 2 (2라운드 REVISE 8건 → Claude 판정으로 모두 수용, 3판 확정. G4에서 재검토) |
-| diff 리뷰 라운드 | 3 / 3 (1라운드는 범위가 커서 시간 초과 → 셋으로 나눠 받음, REVISE 16건 / 2라운드 REVISE 4건 / 3라운드 APPROVE) |
+| diff 리뷰 라운드 | 4 (사용자 예외) / 3 (1라운드 나눠 받음 REVISE 16건 / 2라운드 REVISE 4건 / 3라운드 APPROVE / 4라운드 시험 수정만 APPROVE) |
 | 누적 실패 | 0 / 8 |
-| PR | 없음 |
+| PR | Ow-wL/NetPulse#1 (base `main`) |
 
 **저장소 이전 (2026-11-14, `DECISIONS.md` "공개 저장소 이전")**: 공개 저장소 `Ow-wL/NetPulse`는 이력을 다시 쓴 새 저장소다. 아래 M0~M4 기록의 SHA·PR 번호는 옛 저장소(`Ow-wL/NetPulse-private`, 비공개) 기준이다.
 
@@ -20,12 +20,12 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 승인받은 코드 커밋 X | `12bbb6ba2d8a321739885f95f0f6e9eb36706c1f` |
+| 승인받은 코드 커밋 X | `67f071b239be5f7d2bcd9ddd1386d63b1b62e550` (3라운드 승인 `12bbb6b` + 시험 수정) |
 | G1·G2 | `build/build.ps1 -Gate`: Core 302/302, Design 109/109, Platform 29/29, 미실행 0 |
-| G3·G5 | `build/ui-test.ps1`: 배포본 UI 시험 전부 통과 (실측 시나리오 클래스만 제외). G5 묶음 통과, 필수 누락 0, M5 매트릭스 134, M2 매트릭스 44. 측정 화면 bench (12시간 42,600회차): idle-live 95백분위 6.3 ms, 전환 최대 26.1·21.6·48.0 ms (zoom-full·pan·nav) |
+| G3·G5 | `build/ui-test.ps1`: 배포본 UI 시험 244/244 (실측 시나리오 클래스만 제외). G5 묶음 통과, 필수 누락 0, M5 매트릭스 134, M2 매트릭스 44. 측정 화면 bench (12시간 42,600회차): idle-live 95백분위 6.2 ms, 전환 최대 17.6·23.9·34.3 ms (zoom-full·pan·nav). 이전 실행에서는 nav 최대 48.0 ms도 나왔다 |
 | 실측 시나리오 (설계 7.3) | 이 PC에서 통과 (`.loop/shots/m5-live`, 공개 안 함) |
-| G4 | `.loop/reviews/m5-g4-r3-answer.md`: `판정: APPROVE` (차단 0) |
-| manifest.json SHA-256 | `D44D639007510AEA8BD266FC8B01448E0E48EAF95B82F184103879F64740EDC4` |
+| G4 | `.loop/reviews/m5-g4-r3-answer.md` APPROVE, 시험 수정은 `m5-g4-r4-answer.md` APPROVE (차단 0) |
+| manifest.json SHA-256 | `11357843C4D0B1B4607E375062A40D5EAEF9C4C0A83E49EC4C1B4AC6B8AE55E7` |
 
 ## 지난 마일스톤의 게이트 (M4)
 
@@ -93,10 +93,11 @@
 
 1. 중요: 창을 닫을 때 드물게 WinUI 내부 예외(0xC000027B, CoreMessagingXP.dll)로 끝난 일이 게이트에서 한 번 있었다. 원인 미확정, 닫은 뒤 큐 작업·알림 타이머를 끊는 완화만 했다. 다시 나면 UI 시험이 남기는 `crash-*.jsonl`(처리되지 않은 예외의 HRESULT·스택)과 네이티브 덤프로 원인을 찾는다.
 2. 사소: 측정 화면 bench의 nav(첫 홈 이동) 최대가 실행마다 34~48 ms로 기준 50 ms에 여유가 작다. 반복 측정과 첫 표시 비용 분석.
+4. 중요(시험): `RoundItemsArriveWithTheirRouteEventsInRecordOrder`가 시작 직후 사본 커서를 잡아 0회차가 빠질 수 있다 → 커서를 0부터. `SessionLinkTests`의 `Rounds()`도 관측만 기다리므로 게시까지 기다리게 맞춘다 (G4 4라운드).
 3. 사소: 관측 종류가 바뀌는 순간 상태 알약이 한 번 이전 종류로 그려지고, 외부 응답 없음 → 링크 끊김으로 바로 바뀌면 새 종류의 알림이 나오지 않는다 (`AppShell.Render`). 지금 장면에서 계산한 값으로 그리고 종류별 전환을 따로 추적한다.
 
 ## 다음 할 일
 
-M5 마감: `close-milestone.ps1 -Approved 12bbb6b… -Base main -Screens`로 푸시·PR·CI. 사용자 병합 뒤 M6.
+M5 마감: `close-milestone.ps1 -Approved 67f071b… -Base main -Screens`로 푸시·PR·CI. 사용자 병합 뒤 M6.
 - 브랜치는 `main`에서 딴다. 옛 이력 브랜치(`loop/m0`~`m4`, 원격 `old-private`)를 `origin`에 푸시하지 않는다.
-- 위 M5 이월 3건을 M6에서 함께 처리한다.
+- 위 M5 이월 4건을 M6에서 함께 처리한다.
