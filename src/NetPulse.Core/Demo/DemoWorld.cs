@@ -257,6 +257,9 @@ public sealed class DemoWorld
     public Scenario Scenario { get; }
     public DemoTimeBase TimeBase { get; }
 
+    /// <summary>그 대상의 그 회차 결과 (측정 검사기와 진단 검사기가 같은 답을 쓰도록).</summary>
+    public ProbeResult Resolve(string targetId, long round) => probe.Resolve(targetId, round);
+
     /// <summary>탐지 (선택: 늦음, 실패). 실측 탐지와 같은 계획 함수를 거쳐 같은 안내 문장이 나온다.</summary>
     public async Task<DetectionResult> DetectAsync(CancellationToken cancellationToken)
     {

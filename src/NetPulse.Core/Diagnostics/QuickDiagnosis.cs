@@ -88,37 +88,51 @@ public sealed record DiagnosisResult(
 /// <summary>빠른 진단 (F1, M4 설계 C). 검사 조율과 판정·결론은 여기, 실제 검사는 검사기.</summary>
 public static class QuickDiagnosis
 {
-    public static async Task<DiagnosisResult> RunAsync(IDiagnosticProbes probes, DiagnosisSettings settings, Func<DateTimeOffset> now, CancellationToken ct = default)
+    /// <param name="progress">검사 하나가 끝날 때마다(제한시간·오류 포함) 그 결과를 알린다 (M6 설계 3.1). 판정·결론·반환값은 그대로</param>
+    public static async Task<DiagnosisResult> RunAsync(IDiagnosticProbes probes, DiagnosisSettings settings, Func<DateTimeOffset> now, CancellationToken ct = default,
+        IProgress<CheckResult>? progress = null)
     {
         var started = now();
+        async Task<CheckResult> Report(Task<CheckResult> check)
+        {
+            var r = await check.ConfigureAwait(false);
+            progress?.Report(r);
+            return r;
+        }
         var adapterTask = Single(CheckId.Adapter, settings.AdapterTimeout, c => probes.AdapterAsync(c), ct);
-        var tcp = Pair(CheckId.Tcp, settings.TcpTimeout, settings.TcpTargets.Take(2).Select(a => (Func<CancellationToken, Task<ProbeOutcomeResult>>)(c => probes.TcpAsync(a, settings.TcpPort, c))).ToArray(), ct);
-        var dns = Pair(CheckId.Dns, settings.DnsTimeout, settings.Domains.Take(2).Select(d => (Func<CancellationToken, Task<ProbeOutcomeResult>>)(c => probes.DnsAsync(d, c))).ToArray(), ct);
-        var https = Pair(CheckId.Https, settings.HttpsTimeout, settings.Domains.Take(2).Select(d => (Func<CancellationToken, Task<ProbeOutcomeResult>>)(c => probes.HttpsAsync(d, c))).ToArray(), ct);
+        var tcp = Report(Pair(CheckId.Tcp, settings.TcpTimeout, settings.TcpTargets.Take(2).Select(a => (Func<CancellationToken, Task<ProbeOutcomeResult>>)(c => probes.TcpAsync(a, settings.TcpPort, c))).ToArray(), ct));
+        var dns = Report(Pair(CheckId.Dns, settings.DnsTimeout, settings.Domains.Take(2).Select(d => (Func<CancellationToken, Task<ProbeOutcomeResult>>)(c => probes.DnsAsync(d, c))).ToArray(), ct));
+        var https = Report(Pair(CheckId.Https, settings.HttpsTimeout, settings.Domains.Take(2).Select(d => (Func<CancellationToken, Task<ProbeOutcomeResult>>)(c => probes.HttpsAsync(d, c))).ToArray(), ct));
         var portalTask = Single(CheckId.Portal, settings.PortalTimeout, c => probes.PortalAsync(settings.PortalUri, settings.PortalExpected, c), ct);
         var linkTask = Single(CheckId.Link, settings.LinkTimeout, c => probes.LinkAsync(c), ct);
+        var portal = Report(Judged(portalTask, r => JudgePortal(r.Value, r.State, r.Elapsed, r.Code)));
+        var link = Report(Judged(linkTask, r => JudgeLink(r.Value, r.State, r.Elapsed, r.Code)));
 
-        var (adapterFacts, adapterState, adapterElapsed, adapterCode) = await adapterTask.ConfigureAwait(false);
-        var adapter = JudgeAdapter(adapterFacts, adapterState, adapterElapsed, adapterCode);
+        var adapterRaw = await adapterTask.ConfigureAwait(false);
+        var adapter = JudgeAdapter(adapterRaw.Value, adapterRaw.State, adapterRaw.Elapsed, adapterRaw.Code);
+        progress?.Report(adapter);
         CheckResult gateway;
-        if (adapterFacts?.Gateway is { } gw)
+        if (adapterRaw.Value?.Gateway is { } gw)
         {
             var (ping, state, elapsed, code) = await Single(CheckId.Gateway, settings.GatewayTimeout, c => probes.PingAsync(gw, c), ct).ConfigureAwait(false);
             gateway = JudgeGateway(ping, state, elapsed, code);
         }
         else gateway = new CheckResult(CheckId.Gateway, CheckJudgment.Unmeasured, false, RunState.NotRun,
-            adapterFacts is null ? "adapter-unmeasured" : "no-gateway", [], TimeSpan.Zero, new Dictionary<string, string>());
+            adapterRaw.Value is null ? "adapter-unmeasured" : "no-gateway", [], TimeSpan.Zero, new Dictionary<string, string>());
+        progress?.Report(gateway);
 
-        var (portal, portalState, portalElapsed, portalCode) = await portalTask.ConfigureAwait(false);
-        var (link, linkState, linkElapsed, linkCode) = await linkTask.ConfigureAwait(false);
         var checks = new List<CheckResult>
         {
             adapter, gateway, await tcp.ConfigureAwait(false), await dns.ConfigureAwait(false), await https.ConfigureAwait(false),
-            JudgePortal(portal, portalState, portalElapsed, portalCode), JudgeLink(link, linkState, linkElapsed, linkCode),
+            await portal.ConfigureAwait(false), await link.ConfigureAwait(false),
         };
         var (main, also, notes) = Conclude(checks);
         return new DiagnosisResult(started, now(), checks, main, also, notes);
     }
+
+    private static async Task<CheckResult> Judged<T>(Task<(T? Value, RunState State, TimeSpan Elapsed, string? Code)> raw,
+        Func<(T? Value, RunState State, TimeSpan Elapsed, string? Code), CheckResult> judge) where T : class =>
+        judge(await raw.ConfigureAwait(false));
 
     // ---------------- 제한시간 걸기 ----------------
 
