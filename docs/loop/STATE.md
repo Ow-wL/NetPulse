@@ -24,6 +24,7 @@
 | G1·G2 | `build/build.ps1 -Gate`: Core 330/330, Design 109/109, Platform 29/29, 미실행 0 |
 | G3·G5 | `build/ui-test.ps1`: 배포본 UI 시험 389/389 (`Kind=Live` 제외). G5 묶음 통과, 필수 누락 0, 매트릭스 293 (M2 44). bench: 측정 화면 nav 최대 36.7 ms (33 ms 초과 1회), diag-enter·run·reenter 최대 17.5·27.4·19.6 ms, 전용 메모리 212 MB, 실행 중 최고 218 MB |
 | G4 | `.loop/reviews/m6-g4-r4-answer.md` APPROVE (차단 0). 1라운드 13건, 2라운드 5건, 3라운드 4건 반영 |
+| 실측 시나리오 (설계 7.3) | 이 PC에서 통과 (`.loop/shots/m6-live`, 공개 안 함). 시험 단언 하나를 임시로 고쳐 실행 (미해결 지적 5) |
 | manifest.json SHA-256 | `02ED20A9CE68BE6616F26A53ED435C72CBDE00E4CE1BA26EDD47FF236AA20E5F` |
 
 ## 지난 마일스톤의 게이트 (M5)
@@ -129,6 +130,7 @@
 2. 중요(시험): `AppDriver.PressEnter`는 전경 확인 뒤 두 `keybd_event` 사이에 창이 바뀌면 다른 프로그램으로 키가 갈 수 있다. `SendInput`으로 누름·뗌을 한 번에 보내고 전송 개수와 앱의 Enter 수신을 확인한다. 새 시험의 `inputs > baseline`은 앞의 `SetText`만으로도 참이라 Enter 수신 증거가 아니다.
 3. 중요(시험): `Process.Kill()`은 이미 끝난 프로세스에 예외 없이 돌아올 수 있어 `killed=true`가 실제 강제 종료를 뜻하지 않는다. 시험 전용 종료 코드나 네이티브 종료 결과로 자발적 -1과 구분하고 회귀 시험을 둔다.
 4. 사소: 홈 진단 카드도 진단 버전만 비교해 자정 뒤 "오늘"이 남을 수 있다. 홈 카드 캐시에 표시 날짜를 넣는다.
+5. 중요(시험): `M6LiveRunTests`의 "실제 동작을 누르지 않았다" 단언이 실측에서 null인 데모 동작 기록을 배열로 읽어 실패한다. null 허용 + `lastAction` 없음으로 고친다 (임시 수정으로 실측 통과 확인, DECISIONS "M6 실측 시나리오").
 
 ## 다음 할 일
 
