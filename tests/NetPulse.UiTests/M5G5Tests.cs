@@ -54,7 +54,7 @@ public sealed class M5G5Tests
         }
         double analysisP95 = b.GetProperty("analysis").GetProperty("p95Ms").GetDouble();
         if (analysisP95 > 500) problems.Add($"잠정 분석 95백분위 {analysisP95:0} ms > 500");
-        long mb = b.GetProperty("privateMb").GetInt64();
+        long mb = Math.Max(b.GetProperty("privateMb").GetInt64(), b.TryGetProperty("peakPrivateMb", out var peak) ? peak.GetInt64() : 0);   // 실행 중 최고치까지
         if (mb > 400) problems.Add($"전용 메모리 {mb} MB > 400");
         Assert.True(problems.Count == 0, string.Join("\n", problems));
     }

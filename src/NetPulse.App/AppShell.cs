@@ -144,7 +144,7 @@ public sealed partial class AppShell : Window
             _ = recent.RefreshAsync(host.RunningId);
             _ = Task.Run(diagnosis.LoadRecent);
             StartScreen();
-            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => { if (!closing) foreach (var id in new[] { "home", "measure" }) screens.Prepare(id); });
+            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => { if (!closing) foreach (var id in new[] { "home", "measure", "diagnose" }) screens.Prepare(id); });   // 진단도 미리 (M6 bench diag-enter 40 ms대)
             RenderStatus(host.Snapshot);
             QueueDiag();
             if (options.SelfTest is not null) selfTestTimer.Start();
@@ -286,6 +286,7 @@ public sealed partial class AppShell : Window
     private void Render(HostSnapshot s)
     {
         screens.Render(s);
+        if (screens.Current is not HomeScreen && screens.Prepared("home") is HomeScreen home) home.Warm(s);
         // 상태 반응: 외부 응답 없음이나 링크 끊김이 관측되고 있으면 배경 빛이 붉게 (끝나면 원래대로).
         // 띠·링크 다운은 관측이지 판정이 아니다: 알림도 관측한 그것만 말한다 (끊김 여부·원인은 잠정 분석이 말한다, G4 M5 1라운드 B4·2라운드 3)
         // 종류는 이 장면에서 먼저 정하고 알약을 그린다 (M5 이월 3: 이전 종류로 한 번 그려지던 것), 종류마다 전환 알림
@@ -347,12 +348,14 @@ public sealed partial class AppShell : Window
         if (closing) return;
         closing = true;
         runTimer?.Stop();
+        // 진단 억제는 첫 await 전에 (테마 정리를 기다리는 동안 결과를 저장·게시하지 않게, G4 1라운드 b4). 끝나기는 아래에서 기다린다
+        var diagnosisStop = diagnosis.ShutdownAsync();
         await ui.Theme.ShutdownAsync(Waits.ThemeCleanup);
         log.Write("closeCleanup", new { snapshotLayers = ui.Theme.SnapshotLayersInTree, inTransition = ui.Theme.InTransition, rendering = ui.Theme.RenderingSubscribed });
         AppWindow.Hide();
         try
         {
-            await diagnosis.ShutdownAsync();   // 진단을 먼저 멈춘다: 억제 → 취소 → 최대 3초 (M6 설계 3.4)
+            await diagnosisStop;   // 진단을 먼저 멈춘다: 억제 → 취소 → 최대 3초 (M6 설계 3.4)
             var shutdown = host.ShutdownAsync();
             if (await Task.WhenAny(shutdown, Task.Delay(Waits.CloseWrites + Waits.CloseWrites + Waits.CloseWrites)) != shutdown)
                 log.Write("closeTimeout", new { state = host.Snapshot.State.ToString() });

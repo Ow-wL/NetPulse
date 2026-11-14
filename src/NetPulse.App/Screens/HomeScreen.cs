@@ -19,6 +19,15 @@ namespace NetPulse.App.Screens;
 public sealed class HomeScreen : Screen
 {
     private readonly RepresentativeCache reps = new();
+
+    /// <summary>
+    /// 숨어 있는 동안에도 대표값 캐시를 회차마다 이어 둔다 (M5 이월 2): 숨은 화면은 그리지 않아, 긴 측정 뒤 첫 홈 이동에서
+    /// 4만여 회차를 한 번에 계산하느라 한 프레임이 예산(50 ms)을 넘었다. 이어 붙이기만이라 회차마다 비용은 작다.
+    /// </summary>
+    public void Warm(HostSnapshot s)
+    {
+        if (s.Header is { } h && s.Rounds.Count > 0) reps.Update(s.Rounds, h.Targets);
+    }
     private readonly PageHeader header;
     private readonly StackPanel chips = new() { Orientation = Orientation.Horizontal, Spacing = Space.S2 };
     private readonly GradeRing ring;

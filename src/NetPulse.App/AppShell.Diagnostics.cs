@@ -98,6 +98,12 @@ public sealed partial class AppShell
     /// </summary>
     private async void RunBench()
     {
+        // 실행 중 최고 전용 메모리 (강제 수집 뒤 값만으로는 최고치를 모른다, G4 1라운드 b 마무리 말)
+        long peakMb = 0;
+        var sampler = DispatcherQueue.CreateTimer();
+        sampler.Interval = BenchTokens.MemorySample;
+        sampler.Tick += (_, _) => peakMb = Math.Max(peakMb, PrivateMb());
+        sampler.Start();
         try
         {
             if (screens.CurrentId != "measure") Navigate("measure", null);
@@ -180,10 +186,11 @@ public sealed partial class AppShell
             {
                 kind = "measure", segments, profile, navSteps, rounds = host.Snapshot.Rounds.Count,
                 analysis = new { samples = durations.Length, p95Ms = P95(durations), maxMs = durations.LastOrDefault() },
-                baselineMs = ui.Pacer.Baseline, privateMb,
+                baselineMs = ui.Pacer.Baseline, privateMb, peakPrivateMb = Math.Max(peakMb, privateMb),
             });
         }
         catch (Exception ex) { log.Write("bench", new { kind = "measure", error = ex.GetType().Name, message = ex.Message }); }
+        sampler.Stop();
         BeginClose();
     }
 

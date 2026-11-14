@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 using NetPulse.Core.Analysis;
 using NetPulse.Core.Diagnostics;
@@ -137,8 +137,9 @@ public sealed class M7FlowTests
     public void EpisodeDetailCopiesExactlyAndMovesTheTimeline()
     {
         var saved = ClipboardText.Save();
-        if (saved.Blocked) Assert.Skip("미완료: 클립보드에 글이 아닌 내용이 있어 덮어쓰지 않았습니다.");
+        if (saved.Blocked) Assert.Skip("미완료: 클립보드에 그대로 되돌릴 수 없는 형식이 있어 덮어쓰지 않았습니다.");
         var userData = AppDriver.NewUserData();
+        string? ours = null;   // 시험(앱)이 쓴 글. null이면 쓰지 않았다 → 되돌리지 않는다 (M6 G4 3라운드 2)
         try
         {
             using var app = Open(userData, "rec-mixed", "--demo steady --screen records");
@@ -158,15 +159,18 @@ public sealed class M7FlowTests
             Assert.True(parts[0] <= start && start <= parts[1], $"보기 창 {window}에 구간 시작 {start}가 없다");
             Assert.Equal(0, Detail(app.Diag()).GetProperty("expanded").GetInt32());
 
+            var expected = RecordView.Copy(record.Header!, EpisodeDetail.For(record, analysis, episode));
+            // 보관한 뒤 다른 곳에서 클립보드를 바꿨으면 덮어쓰지 않고 미완료
+            if (ClipboardText.Sequence() != saved.Sequence) Assert.Skip("미완료: 시험 중 클립보드가 바뀌어 덮어쓰지 않았습니다.");
+            ours = expected;
             app.Invoke("records.episode.0.copy");
             app.WaitDiag(x => M5Fixtures.Str(Sd(x), "copyState"), s => s.Length > 0, "복사");
-            var expected = RecordView.Copy(record.Header!, EpisodeDetail.For(record, analysis, episode));
             Assert.Equal(expected, ClipboardText.Read());
             Assert.Equal(0, app.Close());
         }
         finally
         {
-            ClipboardText.Restore(saved);
+            ClipboardText.Restore(saved, ours);
             AppDriver.DeleteUserData(userData);
         }
     }

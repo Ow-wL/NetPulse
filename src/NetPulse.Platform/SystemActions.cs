@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using NetPulse.Core.Live;
 
 namespace NetPulse.Platform;
@@ -32,6 +32,7 @@ public sealed class SystemActions : ISystemActions
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
         };
         info.ArgumentList.Add("/flushdns");
+        if (ct.IsCancellationRequested) return new(false, "cancelled");   // 종료가 먼저 들어왔으면 시작하지 않는다 (G4 1라운드 a1)
         Process? p;
         try { p = Process.Start(info); }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { return new(false, "start-failed"); }

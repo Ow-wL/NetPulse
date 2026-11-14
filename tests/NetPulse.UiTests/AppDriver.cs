@@ -186,6 +186,21 @@ public sealed class AppDriver : IDisposable
         ((ValuePattern)Find(automationId).GetCurrentPattern(ValuePattern.Pattern)).SetValue(text);
 
     /// <summary>요소가 지금 있는지 (기다리지 않음).</summary>
+    /// <summary>
+    /// 요소에 초점을 주고 실제 Enter 키를 보낸다. 키는 앞 창으로 가므로, 앞 창이 이 앱 창일 때만 보내고 아니면 실패한다
+    /// (다른 프로그램에 키를 보내지 않는다).
+    /// </summary>
+    public void PressEnter(string automationId)
+    {
+        Find(automationId).SetFocus();
+        var hwnd = new IntPtr(Window.Current.NativeWindowHandle);
+        WaitFor(() => Native.GetForegroundWindow() == hwnd, f => f, "앱 창이 앞에 옴");
+        const byte VkReturn = 0x0D;
+        const uint KeyUp = 0x0002;
+        Native.keybd_event(VkReturn, 0, 0, UIntPtr.Zero);
+        Native.keybd_event(VkReturn, 0, KeyUp, UIntPtr.Zero);
+    }
+
     public bool Exists(string automationId) =>
         Window.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, automationId)) is not null;
 
@@ -280,14 +295,33 @@ public sealed class AppDriver : IDisposable
 
     public void Dispose()
     {
-        // 시험이 닫지 않았는데 이미 끝나 있으면 (조작 중에 죽음) 증거를 남기고 알린다.
+        // 시험이 닫지 않았으면: 살아 있으면 끝내고(강제 종료 시도), 실제로 회수됐는지 확인한다 (G4 2·3라운드).
+        // 강제 종료가 받아들여졌으면 -1(Kill)과 0만 정상, 그렇지 않으면(스스로 끝남) 0 밖은 모두 비정상(-1 포함).
+        // 회수되지 않으면 증거를 남기고 실패시킨다 (살아 있는 앱을 둔 채 성공처럼 끝내지 않는다).
         // 시험 본문이 이미 실패해 이 예외가 그것을 덮을 수 있지만, 그때도 원인은 대개 이 종료라 증거 경로를 앞에 둔다.
         string? crashed = null;
-        if (!closed && process.HasExited && process.ExitCode != 0)
-            crashed = $"앱이 시험 도중 비정상 종료했습니다 (종료 코드 0x{process.ExitCode:X8}). 증거: {CrashEvidence.Collect(process, UserData, "during-test", startedUtc)}";
-        else if (!closed && !process.HasExited) { process.Kill(); process.WaitForExit(10000); }
+        bool alive = false;
+        if (!closed)
+        {
+            // killed: 강제 종료 요청이 예외 없이 받아들여졌을 때만 참. 관찰 뒤 Kill 전에 스스로 끝나 Kill이 예외를 낸 경우는
+            // 시험이 끝낸 것이 아니므로 -1도 정상으로 면제하지 않는다 (G4 3라운드 3)
+            bool killed = false;
+            string? killError = null;
+            if (!process.HasExited)
+            {
+                try { process.Kill(); killed = true; }
+                catch (InvalidOperationException) { }                                   // 그 사이 스스로 끝남: 아래 회수에서 확인
+                catch (System.ComponentModel.Win32Exception e) { killError = e.NativeErrorCode.ToString("X", System.Globalization.CultureInfo.InvariantCulture); }
+            }
+            bool reaped = process.WaitForExit(10000);
+            alive = !reaped;
+            if (!reaped)
+                crashed = $"앱을 끝내지 못했습니다 (강제 종료 {(killError is null ? "요청함" : "실패 0x" + killError)}, 10초 안에 회수 안 됨). 증거: {CrashEvidence.Collect(process, UserData, "not-reaped", startedUtc)}";
+            else if (killed ? process.ExitCode is not (0 or -1) : process.ExitCode != 0)
+                crashed = $"앱이 시험 도중 비정상 종료했습니다 (종료 코드 0x{process.ExitCode:X8}{(killed ? "" : ", 스스로 끝남")}). 증거: {CrashEvidence.Collect(process, UserData, "during-test", startedUtc)}";
+        }
         process.Dispose();
-        if (ownsUserData) DeleteUserData(UserData);
+        if (ownsUserData && !alive) DeleteUserData(UserData);   // 살아 있는 앱의 폴더는 지우지 않는다 (증거·사용 중)
         if (crashed is not null) throw new AppCrashedException(crashed);
     }
 
@@ -304,5 +338,7 @@ public sealed class AppDriver : IDisposable
         [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
         [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
         [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
+        [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
     }
 }

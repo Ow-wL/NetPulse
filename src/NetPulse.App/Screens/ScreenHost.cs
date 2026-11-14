@@ -87,6 +87,9 @@ public sealed class ScreenHost : Grid
 
     public void Register(string id, Func<Screen> create) => factories[id] = create;
 
+    /// <summary>이미 만든 화면 (없으면 null, 만들지 않는다).</summary>
+    public Screen? Prepared(string id) => screens.GetValueOrDefault(id);
+
     public Screen Get(string id)
     {
         if (!screens.TryGetValue(id, out var s)) screens[id] = s = factories[id]();
