@@ -114,10 +114,11 @@ public sealed class M6FlowTests
                 var d = WaitRun(app);
                 Assert.True(Sd(d).GetProperty("conclusion").GetInt32() == conclusion, $"{scenario}: 결론 {Sd(d).GetProperty("conclusion").GetInt32()} (기대 {conclusion})");
                 AssertJudgments(d, judgments, scenario);
-                AssertRecordMatches(userData, d);
-                // 관측 범위 줄: 일부 성공·확인 못 한 검사가 있으면 그 줄이 있다
-                bool needsScope = judgments.Any(j => j is C or U);
-                Assert.Equal(needsScope, app.Exists("diagnose.conclusion.scope"));
+                // 관측 범위 줄: 저장된 검사 판정으로 Core가 만드는 범위 줄이 있을 때만 (일부 성공·게이트웨이 무응답 단서)
+                var stored = AssertRecordMatches(userData, d);
+                var scope = DiagnosisTexts.Scope(stored.Checks.Select(c => new CheckResult(c.Id, c.Judgment, c.PartlyUnconfirmed, c.State, c.Code, c.Targets,
+                    TimeSpan.FromMilliseconds(c.ElapsedMs), new Dictionary<string, string>())).ToArray());
+                Assert.True(scope.Count > 0 == app.Exists("diagnose.conclusion.scope"), $"{scenario}: 관측 범위 줄 {scope.Count}개, 화면 {app.Exists("diagnose.conclusion.scope")}");
                 // 그 자리 도구: 결론 3 → 비우기, 결론 1·5 → 네트워크 설정
                 Assert.Equal(conclusion == 3, app.Exists("diagnose.conclusion.flush"));
                 Assert.Equal(conclusion is 1 or 5, app.Exists("diagnose.conclusion.settings"));
@@ -205,8 +206,8 @@ public sealed class M6FlowTests
             {
                 app.SetText("diagnose.site.input", domain);
                 app.Invoke("diagnose.site.run");
-                var d = app.WaitDiag(x => x, x => !Sd(x).GetProperty("site").GetProperty("Running").GetBoolean() && S(x, "site", "dns").Length > 0
-                    && app.Exists("diagnose.site.domain") && app.Text("diagnose.site.domain") == domain, "사이트 점검 " + domain);
+                // 같은 진단 값 안에서 그 도메인의 결과인지 본다 (화면 글을 따로 읽으면 앞 결과의 값과 섞인다)
+                var d = app.WaitDiag(x => x, x => !Sd(x).GetProperty("site").GetProperty("Running").GetBoolean() && S(x, "site", "domain") == domain, "사이트 점검 " + domain);
                 Assert.Equal("Normal", S(d, "site", "dns"));
                 Assert.Equal(https, S(d, "site", "https"));
                 Assert.Equal(state, S(d, "site", "httpsState"));

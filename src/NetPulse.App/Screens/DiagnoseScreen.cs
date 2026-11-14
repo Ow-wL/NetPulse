@@ -139,32 +139,41 @@ public sealed class DiagnoseScreen : Screen
         bool had = start.FocusState != FocusState.Unfocused;
         Context.Diagnosis.StartDiagnosis();
         Render(Context.Host.Snapshot);
-        NoteDisplacedFocus(start, had, e => startDisplaced = e, top: true);
+        NoteDisplacedFocus(start, had, e => startDisplaced = e, to => startDisplacedTo = to, top: true);
     }
 
     /// <summary>
     /// 초점을 가진 단추가 꺼지면 WinUI가 초점을 다음 요소로 옮기고 그 요소가 보이게 화면을 내린다.
     /// 누를 때 초점이 단추에 있었으면 적어 두었다가, 작업이 끝나면 단추로 돌려놓는다 (그 사이 글 상자에 입력 중이면 두기).
     /// </summary>
-    private void NoteDisplacedFocus(Control button, bool hadFocus, Action<bool> note, bool top = false)
+    private void NoteDisplacedFocus(Control button, bool hadFocus, Action<bool> note, Action<DependencyObject?> noteTarget, bool top = false)
     {
         bool displaced = hadFocus && !button.IsEnabled;
         note(displaced);
-        if (displaced && top)
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => scroll.ChangeView(null, 0, null, true));   // 진행 중에도 결론 자리가 보이게
+        noteTarget(null);
+        if (!displaced) return;
+        // 초점이 옮겨 간 요소를 적어 둔다: 끝났을 때 초점이 아직 거기(글 상자여도)면 사용자가 옮긴 것이 아니다
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            noteTarget(Focused());
+            if (top) scroll.ChangeView(null, 0, null, true);   // 진행 중에도 결론 자리가 보이게
+        });
     }
 
     private DependencyObject? Focused() =>
         XamlRoot is null ? null : Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(XamlRoot) as DependencyObject;
 
-    private void RestoreFocus(Control button, bool displaced)
+    /// <param name="displacedTo">단추가 꺼질 때 초점이 옮겨 간 요소. 지금 초점이 그 밖의 글 상자면 사용자가 입력 중이라 두기</param>
+    private void RestoreFocus(Control button, bool displaced, DependencyObject? displacedTo)
     {
         if (!displaced || !button.IsEnabled) return;
-        if (Focused() is TextBox) return;
+        var now = Focused();
+        if (now is TextBox && !ReferenceEquals(now, displacedTo)) return;
         button.Focus(FocusState.Programmatic);
     }
 
     private bool startDisplaced, siteDisplaced;
+    private DependencyObject? startDisplacedTo, siteDisplacedTo;
     private string? erroredInput;
 
     private void CheckSite()
@@ -184,7 +193,7 @@ public sealed class DiagnoseScreen : Screen
             });
         }
         Render(Context.Host.Snapshot);
-        NoteDisplacedFocus(siteRun, had, e => siteDisplaced = e);
+        NoteDisplacedFocus(siteRun, had, e => siteDisplaced = e, to => siteDisplacedTo = to);
     }
 
     private void ConfirmFlush(Control opener)
@@ -313,11 +322,12 @@ public sealed class DiagnoseScreen : Screen
     {
         var displaced = startDisplaced;
         startDisplaced = false;
-        // 배치가 끝난 뒤에 (초점 이동이 만든 스크롤보다 나중에)
+        // 배치가 끝난 뒤에 (초점 이동이 만든 스크롤보다 나중에). 옮겨 간 요소는 그때 읽는다:
+        // 진단이 아주 빨리 끝나면 옮겨 간 요소를 적는 작업(같은 낮은 우선순위, 먼저 넣음)이 아직 돌지 않았다
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             if (Context.IsClosing()) return;
-            RestoreFocus(start, displaced);
+            RestoreFocus(start, displaced, startDisplacedTo);
             scroll.ChangeView(null, 0, null, true);
         });
     }
@@ -467,7 +477,7 @@ public sealed class DiagnoseScreen : Screen
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
                 if (Context.IsClosing()) return;
-                RestoreFocus(siteRun, displaced);
+                RestoreFocus(siteRun, displaced, siteDisplacedTo);
                 siteResult.UpdateLayout();
                 siteResult.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false });
             });
@@ -550,7 +560,7 @@ public sealed class DiagnoseScreen : Screen
             compare = d.Last is { } run && DiagnosisView.Compare(run, d.SkippedRecords) is { } c ? c.Title : null,
             changes = d.Last?.Changes?.Select(x => x.Id.ToString()).ToArray(),
             recent = d.Recent?.Conclusion,
-            site = new { d.Site.InputError, d.Site.Running, dns = d.Site.Result?.Dns.Judgment.ToString(), https = d.Site.Result?.Https.Judgment.ToString(), httpsState = d.Site.Result?.Https.State.ToString() },
+            site = new { d.Site.InputError, d.Site.Running, domain = d.Site.Result?.Domain, dns = d.Site.Result?.Dns.Judgment.ToString(), https = d.Site.Result?.Https.Judgment.ToString(), httpsState = d.Site.Result?.Https.State.ToString() },
             expanded = checkCards.Values.Where(c => c.Expanded).Select(c => c.Id.ToString()).ToArray(),
             copyState,
             // 결과 복사가 쓰는 글 그대로 (주소·도메인 없음, G2가 검사). 흐름 시험이 실제 클립보드와 비교한다 (설계 7.2-4)
