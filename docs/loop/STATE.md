@@ -7,7 +7,7 @@
 | 항목 | 값 |
 | --- | --- |
 | 마일스톤 | M7 기록 화면 (M6은 PR Ow-wL/NetPulse#2, 사용자 병합 대기) |
-| 단계 | UI 시험 1차 고침 끝 (비정상 종료·자동화 노출·bench 예산·M6 이월 5건, DECISIONS "M7 UI 시험 1차"). 다음: 게이트 → G4 (M6 병합 뒤) |
+| 단계 | 게이트 통과 (`579833a`, 아래 "M7 게이트"). 다음: M6 PR 병합(사용자) → `main` 병합 → G4 → 마감 |
 | 브랜치 | `loop/m7-records` (`loop/m6-diagnose` 위, M6 마감 `441e656`까지 병합. M6이 `main`에 병합되면 `main`을 병합해 가져옴) |
 | 설계 검토 라운드 | 2 / 2 (1라운드 REVISE 13건 → 2판, 2라운드 APPROVE + 구현 중 결정 7건) |
 | diff 리뷰 라운드 | 0 / 3 |
@@ -16,6 +16,17 @@
 | M6 | 마감 끝: 승인 코드 X `426642e`, PR Ow-wL/NetPulse#2 CI 통과, 사용자 병합 대기 |
 
 **저장소 이전 (2026-11-14, `DECISIONS.md` "공개 저장소 이전")**: 공개 저장소 `Ow-wL/NetPulse`는 이력을 다시 쓴 새 저장소다. 아래 M0~M4 기록의 SHA·PR 번호는 옛 저장소(`Ow-wL/NetPulse-private`, 비공개) 기준이다.
+
+## M7 게이트 (G4 전, 2026-11-15)
+
+| 항목 | 값 |
+| --- | --- |
+| 게이트 커밋 | `579833ab9323cc482e2ad78ba32f6abff25db2bc` (G4 승인 전이라 X 아님) |
+| G1·G2 | `build/build.ps1 -Gate` 통과: Core 377, Design 109, Platform 29 |
+| G3·G5 | `build/ui-test.ps1`: 배포본 UI 시험 528/528 (`Kind=Live` 제외). G5 통과, 필수 누락 0, 매트릭스 416 (M2 44) |
+| 기록 bench | enter·open·timeline·switch·compare 최대 31.5·36.7·21.2·21.4·27.7 ms (33 ms 초과 최대 2회, open), 최고 전용 메모리 254 MB |
+| 측정 bench | nav 최대 36.9 ms (33 ms 초과 1회), 그 밖 구간 26 ms 이하 |
+| manifest.json SHA-256 | `134B1D95DA896125B79B3949E209A3817E0EEB38CC62D33D960CE2CBC6F677F6` |
 
 ## 지난 마일스톤의 게이트 (M6)
 
