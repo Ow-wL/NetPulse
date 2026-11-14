@@ -33,9 +33,10 @@ public static class DiagnosisView
         return new ConclusionView(r.Main.Number, head, weight, r.Main.Found, r.Main.Steps, also, notes, DiagnosisTexts.Scope(r.Checks));
     }
 
-    public static CheckView Check(CheckResult c, DiagnosisSettings settings)
+    /// <param name="settings">주소·도메인을 펼친 상세에 보일 때의 설정. null이면 보이지 않는다 (저장된 지난 진단: 그때 검사한 주소가 아닐 수 있음, M7 설계 3.6)</param>
+    public static CheckView Check(CheckResult c, DiagnosisSettings? settings)
     {
-        var targets = c.Targets.Select((t, i) => new TargetLine(t.Slot, "대상 " + (i + 1), Shown(c.Id, i, settings),
+        var targets = c.Targets.Select((t, i) => new TargetLine(t.Slot, "대상 " + (i + 1), settings is null ? null : Shown(c.Id, i, settings),
             QuickDiagnosis.OutcomeName(t.Outcome), (long)t.Elapsed.TotalMilliseconds, t.Outcome == TargetOutcome.Ok ? null : DiagnosisTexts.Reason(t.Code ?? StateCode(RunState.Error)))).ToArray();
         string? state = c.State switch
         {

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using NetPulse.Core.Diagnostics;
 
@@ -65,22 +65,31 @@ public sealed class DiagnosisStore(string folder)
     /// </summary>
     public (StoredDiagnosis? Latest, int Skipped) Latest()
     {
-        if (!Directory.Exists(folder)) return (null, 0);
-        var found = new List<(StoredDiagnosis Stored, int Suffix)>();
+        var (items, skipped) = List();
+        return (items.Count == 0 ? null : items[0].Stored, skipped);
+    }
+
+    /// <summary>
+    /// 읽을 수 있는 진단 기록 전부, 최근순 (M7 설계 3.6). 손상·읽기 실패는 건너뛴 수로만 센다.
+    /// </summary>
+    public (IReadOnlyList<(StoredDiagnosis Stored, string File)> Items, int Skipped) List()
+    {
+        if (!Directory.Exists(folder)) return ([], 0);
+        var found = new List<(StoredDiagnosis Stored, string File, int Suffix)>();
         int skipped = 0;
         IEnumerable<string> files;
         try { files = Directory.EnumerateFiles(folder, "diagnosis-*.json").ToArray(); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return (null, 0); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return ([], 0); }
         foreach (var f in files)
         {
             StoredDiagnosis d;
             try { d = DiagnosisRecord.Parse(File.ReadAllText(f, Encoding.UTF8)); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { skipped++; continue; }
             if (d.Status != DiagnosisReadStatus.Ok) { skipped++; continue; }
-            found.Add((d, Suffix(f)));
+            found.Add((d, f, Suffix(f)));
         }
-        var best = found.OrderByDescending(x => x.Stored.StartedAt).ThenByDescending(x => x.Suffix).Select(x => x.Stored).FirstOrDefault();
-        return (best, skipped);
+        var list = found.OrderByDescending(x => x.Stored.StartedAt).ThenByDescending(x => x.Suffix).Select(x => (x.Stored, x.File)).ToArray();
+        return (list, skipped);
     }
 
     private static int Suffix(string file)
