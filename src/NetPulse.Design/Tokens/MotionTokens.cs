@@ -82,4 +82,11 @@ public static class BenchTokens
     public static readonly TimeSpan DiagRunLimit = TimeSpan.FromSeconds(15);
     public static readonly TimeSpan DiagSettle = TimeSpan.FromSeconds(2);
     public const int DiagReenterCount = 6;
+
+    // 기록 화면 구간 (M7 설계 5절): 첫 진입 뒤 머무름, 상세·비교 열기 제한, 열린 뒤 머무름, 재진입 횟수, 메모리 표본 간격
+    public static readonly TimeSpan RecordsEnter = TimeSpan.FromSeconds(4);
+    public static readonly TimeSpan RecordsOpenLimit = TimeSpan.FromSeconds(60);
+    public static readonly TimeSpan RecordsSettle = TimeSpan.FromSeconds(2);
+    public static readonly TimeSpan MemorySample = TimeSpan.FromMilliseconds(500);
+    public const int RecordsReenterCount = 6;
 }

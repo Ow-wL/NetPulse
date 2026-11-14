@@ -231,6 +231,39 @@ public sealed class KeyboardTests
         finally { AppDriver.DeleteUserData(userData); }
     }
 
+    [Fact]
+    public void KeyboardAloneOpensARecordGoesBackAndCompares()
+    {
+        // M7 설계 4.4·7.2-10: 줄 Enter로 열기 → 초점은 [목록으로] → Esc로 목록, 연 줄로 초점 복귀 → [비교] → 줄 둘 Space → 비교
+        var userData = AppDriver.NewUserData();
+        M5Fixtures.Prepare(userData, "rec-compare");
+        try
+        {
+            using var app = LaunchAny(userData, [.. M5Fixtures.Args("--demo steady --screen records"), "--freeze-motion"]);
+            app.WaitDiag(d => Sd(d).ValueKind == System.Text.Json.JsonValueKind.Object && Sd(d).TryGetProperty("listed", out var l) && l.GetBoolean()
+                && Sd(d).GetProperty("analyzing").GetInt32() == 0, b => b, "기록 목록");
+            TabTo(app, "records.row.0");
+            Press(app, Enter);
+            app.WaitDiag(d => Sd(d).TryGetProperty("detail", out var x) && x.ValueKind == System.Text.Json.JsonValueKind.Object, b => b, "상세 (Enter)");
+            app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == "records.back", "초점은 목록으로 단추");
+            Press(app, Escape);
+            app.WaitDiag(d => Sd(d).GetProperty("mode").GetString(), m => m == "List", "Esc → 목록");
+            app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == "records.row.0", "연 줄로 초점 복귀");
+
+            TabTo(app, "records.compare");
+            Press(app, Enter);
+            app.WaitDiag(d => Sd(d).GetProperty("picking").GetBoolean(), b => b, "비교 고르기");
+            TabTo(app, "records.row.0");
+            Press(app, Space);
+            app.WaitDiag(d => Sd(d).GetProperty("picked").GetInt32(), n => n == 1, "하나 고름 (Space)");
+            TabTo(app, "records.row.1");
+            Press(app, Space);
+            app.WaitDiag(d => Sd(d).TryGetProperty("comparison", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.Object, b => b, "둘 고르면 비교");
+            Assert.Equal(0, app.Close());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
     private static class Native
     {
         [StructLayout(LayoutKind.Sequential)]

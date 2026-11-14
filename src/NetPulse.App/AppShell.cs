@@ -31,6 +31,7 @@ public sealed partial class AppShell : Window
     private readonly MeasurementHost host;
     private readonly DiagnosisHost diagnosis;
     private readonly RecentRecords recent;
+    private readonly RecordMemos memos;
     private readonly Func<Task> beforeClose;
     private readonly GroupPanel root;
     private readonly Grid appGrid = new() { ColumnSpacing = Space.S5 };
@@ -58,6 +59,7 @@ public sealed partial class AppShell : Window
         this.diagnosis = diagnosis;
         this.recent = recent;
         this.beforeClose = beforeClose;
+        this.memos = memos;
         Title = "NetPulse";
         AppWindow.ResizeClient(new SizeInt32(Size.WindowWidth, Size.WindowHeight));
         ui = new Ui(this, options, log, settings);
@@ -147,6 +149,7 @@ public sealed partial class AppShell : Window
             QueueDiag();
             if (options.SelfTest is not null) selfTestTimer.Start();
             if (options.Bench) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, RunBench);
+            if (options.BenchRecords) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, RunRecordsBench);
             if (options.OpenRecord is { } folder) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => OpenExternal(folder));
         };
         if (options.RunSeconds > 0)

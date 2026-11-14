@@ -101,6 +101,8 @@ internal static class M7Fixtures
                 return true;
             }
             case "profile-short": M5Fixtures.SaveProfile(userData, "steady", TimeSpan.FromMinutes(1)); return true;
+            case "profile-outage": M5Fixtures.SaveProfile(userData, "outage-long", TimeSpan.FromMinutes(3)); return true;
+            case "rec-notrecord": Ok(userData); Directory.CreateDirectory(Path.Combine(userData, "photos")); return true;
             default: return false;
         }
     }
@@ -173,7 +175,7 @@ internal static class M7Fixtures
     /// 합성 기록 (20분, 1초). mixed: 외부 둘 함께 손실 3회차 → 이어서 하나만 손실 2회차 (판정이 바뀌는 끊김) + 그 안의 증상 표시.
     /// deadTarget: 외부 B가 한 번도 응답하지 않음 (지연 추세 "값이 적어 추세 없음").
     /// </summary>
-    private static void Synthetic(string userData, DateTimeOffset start, bool mixed, bool deadTarget = false)
+    public static string Synthetic(string userData, DateTimeOffset start, bool mixed, bool deadTarget = false, int rounds = 1200)
     {
         M5Fixtures.SaveProfile(userData, "steady");
         var id = RecordLocation.NewId(start);
@@ -185,16 +187,18 @@ internal static class M7Fixtures
             new("ext-a", "외부 A", IPAddress.Parse("198.51.100.10"), TargetRole.External, "예시 통신사 A", ProbeMethod.Icmp),
             new("ext-b", "외부 B", IPAddress.Parse("203.0.113.20"), TargetRole.External, "예시 통신사 B", ProbeMethod.Icmp),
         ];
-        int n = 1200;
+        int n = rounds;
         var header = new RecordHeader(id, 0, "test", start, 540, targets, 1000, 800, (long)n * 1000, "primary", ExpectedConnection.Wired);
         File.WriteAllText(Path.Combine(folder, "measurement.json"), RecordSchema.HeaderJson(header));
         var rng = new Random(7);
         var lines = new List<string>();
         for (int r = 0; r < n; r++)
         {
-            bool bothDown = mixed && r is >= 400 and < 403;
-            bool aDown = mixed && r is >= 403 and < 405;
-            double drift = 18 + r / 120.0;   // 서서히 오르는 지연 (추세가 보이게)
+            // 긴 기록은 2시간마다 같은 모양의 끊김 (12시간 = 6번)
+            int at400 = rounds > 7200 ? r % 7200 : r;
+            bool bothDown = mixed && at400 is >= 400 and < 403;
+            bool aDown = mixed && at400 is >= 403 and < 405;
+            double drift = 18 + (r % 7200) / 120.0;   // 서서히 오르는 지연 (추세가 보이게)
             TargetResult Ext(string tid, bool down, bool dead) => down || dead ? new(tid, ProbeOutcome.Lost, null, null) : new(tid, ProbeOutcome.Success, drift + rng.NextDouble() * 4, null);
             var results = new[]
             {
@@ -214,5 +218,17 @@ internal static class M7Fixtures
         File.WriteAllLines(Path.Combine(folder, "events.jsonl"), events);
         File.WriteAllText(Path.Combine(folder, "summary.json"), RecordSchema.SummaryJson(
             new RecordSummary(id, EndReason.Completed, start.AddSeconds(n), n, n, 0, 0, 0, n - 1, false, null, 0, (long)n * 1000)));
+        return id;
+    }
+
+    /// <summary>기록 화면 bench 준비 (설계 5절): 짧은 기록 38개(가장 최근 것에 증상 표시) + 합성 12시간 기록 2개.</summary>
+    public static void BenchRecords(string userData)
+    {
+        M5Fixtures.SaveProfile(userData, "steady");
+        Synthetic(userData, Kst.AddDays(-3), mixed: true, rounds: 12 * 3600);
+        Synthetic(userData, Kst.AddDays(-2), mixed: true, rounds: 12 * 3600);
+        string? newest = null;
+        for (int i = 0; i < 38; i++) newest = M5Fixtures.MakeRecord(userData, i % 4 == 0 ? "outage-long" : "steady", Kst.AddDays(-1).AddMinutes(i * 20), 1);
+        AddMark(userData, newest!, 20_000, null);
     }
 }

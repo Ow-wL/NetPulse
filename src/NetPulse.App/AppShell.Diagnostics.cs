@@ -186,4 +186,123 @@ public sealed partial class AppShell
         catch (Exception ex) { log.Write("bench", new { kind = "measure", error = ex.GetType().Name, message = ex.Message }); }
         BeginClose();
     }
+
+    /// <summary>
+    /// 기록 화면 bench (M7 설계 5절, 구현 중 결정 3·6): 시험이 미리 만든 기록 40개(12시간 2개 포함)로
+    /// records-enter → records-open(12시간, 캐시 없음) → records-timeline → records-switch(다른 12시간 → 짧은 기록)
+    /// → records-compare(12시간 둘) → records-nav-during-analysis → records-reenter → records-after-memo.
+    /// 구간마다 프레임과 끝 시점 전용 메모리, 실행 전체의 최고 전용 메모리(0.5초 표본)를 남긴다. 분석 시간은 따로.
+    /// </summary>
+    private async void RunRecordsBench()
+    {
+        long peakMb = 0;
+        var sampler = DispatcherQueue.CreateTimer();
+        sampler.Interval = BenchTokens.MemorySample;
+        sampler.Tick += (_, _) => peakMb = Math.Max(peakMb, PrivateMb());
+        try
+        {
+            sampler.Start();
+            await Task.Delay(BenchTokens.Warmup);
+            var library = recent.Library;
+            var segments = new List<object>();
+            var memory = new List<object>();
+            var timings = new List<object>();
+            async Task Segment(string name, Func<Task> body)
+            {
+                ui.Pacer.BeginSegment();
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                await body();
+                segments.Add(ui.Pacer.EndSegment(name));
+                timings.Add(new { segment = name, ms = watch.ElapsedMilliseconds });
+                memory.Add(new { segment = name, privateMb = PrivateMb(), held = library.HeldCount });
+            }
+            async Task Until(Func<bool> done)
+            {
+                var limit = DateTime.UtcNow + BenchTokens.RecordsOpenLimit;
+                while (DateTime.UtcNow < limit && !done()) await Task.Delay(MotionTokens.Fast);
+            }
+            RecordsScreen Screen() => (RecordsScreen)screens.Get("records");
+
+            await Segment("records-enter", async () => { Navigate("records", null); await Task.Delay(BenchTokens.RecordsEnter); });
+            await library.AnalyzedAsync(library.Items.Select(i => i.Key).ToArray());
+            var longs = library.Items.Where(i => i.Entry.PlannedMs >= 12 * 3_600_000L).Select(i => i.Key).ToArray();
+            var shorts = library.Items.Where(i => i.Entry.PlannedMs < 12 * 3_600_000L && i.Summary.Error is null).Select(i => i.Key).ToArray();
+            if (longs.Length < 2 || shorts.Length < 2) throw new InvalidOperationException($"bench 준비가 모자랍니다 (12시간 {longs.Length}, 짧은 기록 {shorts.Length})");
+
+            // 목록 분석이 끝난 뒤 보유분을 비워 "캐시 없는 열기"로 시작한다
+            library.SetPinned([]);
+            await Segment("records-open", async () =>
+            {
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                Screen().Show(longs[0]);
+                await Until(() => Screen().DetailReady);
+                timings.Add(new { segment = "records-open-analysis", ms = watch.ElapsedMilliseconds });
+                await Task.Delay(BenchTokens.RecordsSettle);
+            });
+            await Segment("records-timeline", async () =>
+            {
+                Screen().Timeline(Design.Controls.TimelineCommand.ShowAll);
+                await Task.Delay(BenchTokens.PanStep);
+                Screen().Timeline(Design.Controls.TimelineCommand.ZoomIn);
+                for (int i = 0; i < BenchTokens.PanCount; i++) { Screen().Timeline(Design.Controls.TimelineCommand.PanLeft); await Task.Delay(BenchTokens.PanStep); }
+            });
+            await Segment("records-switch", async () =>
+            {
+                Screen().Show(null);
+                await Task.Delay(BenchTokens.NavStep);
+                Screen().Show(longs[1]);
+                await Until(() => Screen().DetailReady);
+                Screen().Show(shorts[0]);
+                await Until(() => Screen().DetailReady);
+                await Task.Delay(BenchTokens.RecordsSettle);
+            });
+            await Segment("records-compare", async () =>
+            {
+                _ = Screen().Compare(longs[0], longs[1]);
+                await Until(() => Screen().CompareReady);
+                await Task.Delay(BenchTokens.RecordsSettle);
+            });
+            await Segment("records-nav-during-analysis", async () =>
+            {
+                Screen().Show(shorts[1]);
+                for (int i = 0; i < BenchTokens.RecordsReenterCount; i++)
+                {
+                    Navigate(i % 2 == 0 ? "home" : "records", null);
+                    await Task.Delay(BenchTokens.NavStep);
+                }
+            });
+            await Segment("records-reenter", async () =>
+            {
+                for (int i = 0; i < BenchTokens.RecordsReenterCount; i++)
+                {
+                    Navigate(i % 2 == 0 ? "home" : "records", null);
+                    await Task.Delay(BenchTokens.NavStep);
+                }
+            });
+            await Segment("records-after-memo", async () =>
+            {
+                var item = library.Items.First(i => i.Key == shorts[0]);
+                var opened = await library.OpenAsync(item.Key);
+                var mark = opened is null ? null : Core.Records.SymptomMarks.FromEvents(opened.Record.Events, opened.Record.NoteLines).Marks.FirstOrDefault();
+                if (opened is not null && mark is not null)
+                {
+                    await memos.SaveAsync(item.Key, item.Entry.Segments, opened.Record.Header!.Id, mark.Mark, mark.AtMs, "bench 메모");
+                    await library.RefreshAsync(host.RunningId);
+                    Screen().Show(item.Key);
+                    await Until(() => Screen().DetailReady);
+                }
+                await Task.Delay(BenchTokens.RecordsSettle);
+            });
+            sampler.Stop();
+            log.Write("bench", new { kind = "records", segments, timings, memory, peakPrivateMb = Math.Max(peakMb, PrivateMb()), records = library.Items.Count, baselineMs = ui.Pacer.Baseline });
+        }
+        catch (Exception ex)
+        {
+            sampler.Stop();
+            log.Write("bench", new { kind = "records", error = ex.GetType().Name, message = ex.Message });
+        }
+        BeginClose();
+    }
+
+    private static long PrivateMb() => System.Diagnostics.Process.GetCurrentProcess().PrivateMemorySize64 / (1024 * 1024);
 }

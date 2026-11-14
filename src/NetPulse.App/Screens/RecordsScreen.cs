@@ -49,6 +49,18 @@ public sealed class RecordsScreen : Screen
     private bool diagnosesLoaded;
     private StoredDiagnosis? openDiagnosis;
     private string renderedKey = "";
+    private Mode? renderedMode;
+
+    // ---------------- bench·시험 고리 ----------------
+
+    /// <summary>상세가 열려 그려짐.</summary>
+    public bool DetailReady => mode == Mode.Detail && detail is not null;
+    /// <summary>비교 표가 그려짐.</summary>
+    public bool CompareReady => mode == Mode.Compare && comparison is not null;
+    /// <summary>상세 타임라인 조작 (bench).</summary>
+    public void Timeline(TimelineCommand c) => OnTimeline(c);
+    /// <summary>두 항목 비교 (bench: 고르기 화면 없이).</summary>
+    public Task Compare(string a, string b) { LeaveDetail(); return CompareAsync(a, b); }
 
     public RecordsScreen(ScreenContext context) : base(context, "records")
     {
@@ -284,6 +296,8 @@ public sealed class RecordsScreen : Screen
         compareButton.IsEnabled = mode is Mode.List or Mode.Compare or Mode.Detail;
         AutomationProperties.SetItemStatus(compareButton, picking ? "picking" : "off");
         content.Children.Clear();
+        bool modeChanged = renderedMode is { } rm && rm != mode;
+        renderedMode = mode;
         switch (mode)
         {
             case Mode.List: RenderList(items); break;
@@ -292,6 +306,8 @@ public sealed class RecordsScreen : Screen
             case Mode.Diagnoses: RenderDiagnoses(); break;
             case Mode.Diagnosis: RenderDiagnosis(); break;
         }
+        // 목록 ↔ 상세·비교·진단 기록: 화면 전환과 같은 교차 페이드 (줄이기면 짧은 페이드, 진행도 멈춤은 시험)
+        if (modeChanged) Ui.Motion.CrossFade(null, content.Children.ToArray());
         Context.QueueDiag();
     }
 

@@ -50,7 +50,7 @@ try {
     # M5: 캡처 매트릭스(약 8분)와 측정 화면 bench(약 7분)가 더해져 10분으로는 모자란다.
     # 실측 시나리오(M5·M6 LiveRunTests)는 이 PC 네트워크를 쓰고 결과를 공개하지 않으므로 게이트에서 빼고 따로 돌린다.
     # 클래스 이름 대신 특성으로 뺀다 (M6 설계 7.5): 새 실측 시험이 클래스 목록에서 빠지는 일이 없게
-    $commands += Invoke-Step 'ui-test' 3600 'dotnet' @('test', '--project', 'tests/NetPulse.UiTests', '-c', 'Release', '--no-build', '--report-xunit-trx', '--results-directory', $trxDir, '--filter-not-trait', 'Kind=Live') $uiDir
+    $commands += Invoke-Step 'ui-test' 5400 'dotnet' @('test', '--project', 'tests/NetPulse.UiTests', '-c', 'Release', '--no-build', '--report-xunit-trx', '--results-directory', $trxDir, '--filter-not-trait', 'Kind=Live') $uiDir
 } catch { $failed = $_.Exception.Message }
 $trx = Get-ChildItem $trxDir -Filter *.trx -ErrorAction SilentlyContinue | Select-Object -First 1
 $summary = if ($trx) { $neutral = Join-Path $uiDir 'ui-tests.trx'; Move-Item $trx.FullName $neutral; Read-TrxSummary $neutral } else { $null }
@@ -92,9 +92,13 @@ if (Test-Path $g5Dir) {
     $required += @('hc-aquatic', 'hc-desert') | ForEach-Object { "matrix-m6-diagnose-dns-$_"; "matrix-m6-diagnose-outside-$_" }
     $required += @('matrix-m6-diagnose-dns-dark-reduced', 'matrix-m6-diagnose-dns-light-reduced', 'matrix-m6-diagnose-running-dark-reducedmotion', 'matrix-m6-diagnose-running-light-reducedmotion')
     foreach ($p in '0', '0.5', '1') { $required += "matrix-m6-transition-crossfade-$p" }
-    # M7 (설계 7.4·7.5): 기록 장면 × 테마 × 배율 (흐름·bench·고대비·전환·대비는 C단계에서 더한다)
+    # M7 (설계 7.4·7.5): 기록 장면 × 테마 × 배율, 흐름, bench, 고대비·효과·움직임 줄이기, 목록 → 상세 전환, 결론 카드 대비
     $m7Ids = @(Get-Content (Join-Path $root 'tests\NetPulse.UiTests\m7-scenes.txt') -Encoding UTF8 | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | ForEach-Object { ($_ -split '\|')[0] })
     foreach ($id in $m7Ids) { foreach ($t in 'dark', 'light') { foreach ($s in '100', '150') { $required += "matrix-m7-$id-$t-$s" } } }
+    $required += @('flow-records', 'bench-records', 'contrast-records-dark', 'contrast-records-light')
+    $required += @('list', 'detail') | ForEach-Object { $v = $_; @('hc-aquatic', 'hc-desert') | ForEach-Object { "matrix-m7-records-$v-$_" } }
+    $required += @('matrix-m7-records-detail-dark-reduced', 'matrix-m7-records-detail-light-reduced', 'matrix-m7-records-detail-dark-reducedmotion', 'matrix-m7-records-detail-light-reducedmotion')
+    foreach ($p in '0', '0.5', '1') { $required += "matrix-m7-transition-crossfade-$p" }
     $missing = @($required | Where-Object { -not (Test-Path (Join-Path $g5Dir "$_.json")) })
     $matrix = @(Get-ChildItem $g5Dir -Filter 'matrix-*.json' | Sort-Object Name)
     # M2 회귀 매트릭스는 따로 센다: M5 결과가 합쳐져 M2 캡처 누락을 가리지 않게 (G4 M5 1라운드 C3)
@@ -115,6 +119,8 @@ if (Test-Path $g5Dir) {
         m5Scenes       = $sceneIds.Count
         m6Scenes       = $m6Ids.Count
         m7Scenes       = $m7Ids.Count
+        benchRecords   = & $read 'bench-records'
+        flowRecords    = & $read 'flow-records'
         benchDiagnose  = & $read 'bench-diagnose'
         flowDiagnose   = & $read 'flow-diagnose'
         contrastDiagnose = [ordered]@{ dark = & $read 'contrast-diagnose-dark'; light = & $read 'contrast-diagnose-light' }
