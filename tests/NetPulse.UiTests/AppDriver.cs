@@ -20,11 +20,13 @@ public sealed class AppDriver : IDisposable
     private static readonly TimeSpan StepTimeout = TimeSpan.FromSeconds(60);   // 기획서 4.9 단계당 60초
     private readonly Process process;
     private readonly bool ownsUserData;
+    private readonly DateTime startedUtc;
     private bool closed;
 
-    private AppDriver(Process process, AutomationElement window, string userData, bool ownsUserData)
+    private AppDriver(Process process, AutomationElement window, string userData, bool ownsUserData, DateTime startedUtc)
     {
         this.process = process;
+        this.startedUtc = startedUtc;
         Window = window;
         UserData = userData;
         this.ownsUserData = ownsUserData;
@@ -60,6 +62,7 @@ public sealed class AppDriver : IDisposable
         foreach (var a in args) info.ArgumentList.Add(a);
         info.ArgumentList.Add("--user-data");
         info.ArgumentList.Add(userData);
+        var startedUtc = DateTime.UtcNow;
         var process = Process.Start(info) ?? throw new InvalidOperationException("실행하지 못했습니다.");
         var condition = new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty, process.Id), new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window));
         AutomationElement? window = null;
@@ -71,10 +74,13 @@ public sealed class AppDriver : IDisposable
         }
         if (window is null)
         {
-            if (!process.HasExited) { process.Kill(); process.WaitForExit(10000); }
-            throw new TimeoutException($"창이 나타나지 않았습니다 (종료 여부 {process.HasExited}).");
+            bool exited = process.HasExited;
+            string? evidence = null;
+            if (exited) evidence = CrashEvidence.Collect(process, userData, "start", startedUtc);
+            else { process.Kill(); process.WaitForExit(10000); }
+            throw new TimeoutException($"창이 나타나지 않았습니다 (스스로 끝남 {exited}" + (exited ? $", 종료 코드 0x{process.ExitCode:X8}, 증거 {evidence}" : "") + ").");
         }
-        return new AppDriver(process, window, userData, owns);
+        return new AppDriver(process, window, userData, owns, startedUtc);
     }
 
     public static string NewUserData() => Path.Combine(Path.GetTempPath(), "netpulse-ui-" + Guid.NewGuid().ToString("N")[..8]);
@@ -231,29 +237,36 @@ public sealed class AppDriver : IDisposable
     {
         if (!process.WaitForExit((int)timeout.TotalMilliseconds)) throw new TimeoutException("앱이 스스로 끝나지 않았습니다.");
         closed = true;
+        FailIfAbnormal("waitexit");
         return process.ExitCode;
     }
 
     /// <summary>창 닫기 버튼과 같은 경로로 닫고, 끝날 때까지 기다려 종료 코드를 돌려준다.</summary>
     public int Close()
     {
-        ((WindowPattern)Window.GetCurrentPattern(WindowPattern.Pattern)).Close();
-        if (!process.WaitForExit(15000)) { process.Kill(); process.WaitForExit(10000); KeepLog("timeout"); throw new TimeoutException("창을 닫았지만 15초 안에 끝나지 않았습니다."); }
+        try { ((WindowPattern)Window.GetCurrentPattern(WindowPattern.Pattern)).Close(); }
+        catch (ElementNotAvailableException) when (process.HasExited) { }   // 닫기 전에 이미 끝남 → 아래에서 종료 코드로 판정
+        if (!process.WaitForExit(15000))
+        {
+            process.Kill(); process.WaitForExit(10000);
+            closed = true;
+            string evidence = CrashEvidence.Collect(process, UserData, "close-timeout", startedUtc);
+            throw new TimeoutException($"창을 닫았지만 15초 안에 끝나지 않았습니다 (증거 {evidence}).");
+        }
         closed = true;
-        if (process.ExitCode != 0) KeepLog("exit-" + process.ExitCode.ToString("X8", System.Globalization.CultureInfo.InvariantCulture));
+        FailIfAbnormal("close");
         return process.ExitCode;
     }
 
-    /// <summary>비정상 종료면 앱 기록을 출력 폴더에 남긴다 (사용자 폴더는 시험이 지운다).</summary>
-    private void KeepLog(string why)
+    /// <summary>
+    /// 비정상 종료(종료 코드 0이 아님)면 증거를 남기고 시험을 실패시킨다 (M6 설계 6.1: 모든 종료 경로).
+    /// 결과를 돌려주는 경로(Close·WaitExit)가 0이 아닌 값을 조용히 돌려주지 않게 한다.
+    /// </summary>
+    private void FailIfAbnormal(string where)
     {
-        try
-        {
-            var path = Path.Combine(UserData, "app-log.jsonl");
-            if (File.Exists(path)) File.Copy(path, Path.Combine(OutputDirectory, $"crash-{DateTime.Now:HHmmss}-{why}.jsonl"), overwrite: true);
-        }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        if (process.ExitCode == 0) return;
+        string evidence = CrashEvidence.Collect(process, UserData, where, startedUtc);
+        throw new AppCrashedException($"앱이 비정상 종료했습니다 ({where}, 종료 코드 0x{process.ExitCode:X8}). 증거: {evidence}");
     }
 
     public IReadOnlyList<JsonElement> ReadLog()
@@ -267,9 +280,15 @@ public sealed class AppDriver : IDisposable
 
     public void Dispose()
     {
-        if (!closed && !process.HasExited) { process.Kill(); process.WaitForExit(10000); }
+        // 시험이 닫지 않았는데 이미 끝나 있으면 (조작 중에 죽음) 증거를 남기고 알린다.
+        // 시험 본문이 이미 실패해 이 예외가 그것을 덮을 수 있지만, 그때도 원인은 대개 이 종료라 증거 경로를 앞에 둔다.
+        string? crashed = null;
+        if (!closed && process.HasExited && process.ExitCode != 0)
+            crashed = $"앱이 시험 도중 비정상 종료했습니다 (종료 코드 0x{process.ExitCode:X8}). 증거: {CrashEvidence.Collect(process, UserData, "during-test", startedUtc)}";
+        else if (!closed && !process.HasExited) { process.Kill(); process.WaitForExit(10000); }
         process.Dispose();
         if (ownsUserData) DeleteUserData(UserData);
+        if (crashed is not null) throw new AppCrashedException(crashed);
     }
 
     public static void DeleteUserData(string folder)

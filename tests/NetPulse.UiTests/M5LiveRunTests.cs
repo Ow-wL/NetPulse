@@ -8,8 +8,10 @@ namespace NetPulse.UiTests;
 /// 실측 시나리오 (M5 설계 7.3, 로컬, 공개하지 않음): 데모 옵션 없이 빈 사용자 폴더로 첫 실행(실제 탐지) → 측정 시작 → 20초 뒤 증상 표시
 /// → 중지 → 기록 저장 확인 → 다시 실행해 최근 측정에 있음. 응답 성공 여부는 통과 조건이 아니다.
 /// 이 PC의 주소가 화면과 로그에 나오므로 게이트(<c>build/ui-test.ps1</c>)에서 빼고, 출력 폴더를 <c>.loop/</c> 아래로 두고 직접 돌린다:
-/// <c>NETPULSE_UITEST_OUT=.loop/shots/m5-live dotnet run --project tests/NetPulse.UiTests -- -class NetPulse.UiTests.M5LiveRunTests</c>
+/// <c>NETPULSE_UITEST_OUT=.loop/shots/m5-live dotnet test --project tests/NetPulse.UiTests -- --filter-trait Kind=Live</c>
+/// 게이트는 특성 <c>Kind=Live</c>로 뺀다 (M6 설계 7.5).
 /// </summary>
+[Trait("Kind", "Live")]
 public sealed class M5LiveRunTests
 {
     private static string Screen(JsonElement d) => M5Fixtures.Str(d, "screen");

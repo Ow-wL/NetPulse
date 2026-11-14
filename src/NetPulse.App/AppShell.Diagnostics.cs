@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Input;
@@ -51,7 +51,8 @@ public sealed partial class AppShell
             loadStatus = host.LoadStatus.ToString(),
             recent = new { listed = recent.Listed, items = recent.Items.Select(i => new { i.Entry.Id, i.Analyzing, grade = i.Grade?.ToString(), i.Outages, i.Error, life = i.Entry.Lifecycle.ToString() }) },
             screenDiag = screens.Current?.Diag(),
-            outage = lastOutage,
+            outage = observation.Current != NetPulse.Core.Presentation.ObservationKind.None,
+            observation = observation.Current.ToString(),
             theme = mode.Theme.ToString().ToLowerInvariant(),
             material = mode.Material.ToString().ToLowerInvariant(),
             glassAcrylic = ui.Glass.IsAcrylic,
@@ -146,6 +147,27 @@ public sealed partial class AppShell
                     Navigate(to, null);
                     await Task.Delay(BenchTokens.NavStep);
                     navSteps.Add(new { to, maxMs = ui.Pacer.SegmentMaxFrom(at) });
+                }
+            });
+            // 진단 구간 (M6 설계 5절): 첫 진입 → 진단 한 번(진행 → 결과) → 홈 ↔ 진단 6번
+            await Segment("diag-enter", async () => { Navigate("diagnose", null); await Task.Delay(BenchTokens.DiagEnter); });
+            await Segment("diag-run", async () =>
+            {
+                (screens.Get("diagnose") as DiagnoseScreen)?.Start();
+                var limit = DateTime.UtcNow + BenchTokens.DiagRunLimit;
+                while (DateTime.UtcNow < limit && !(diagnosis.Snapshot is { Operation: Core.Live.DiagnosisOperation.None, Last: not null }))
+                    await Task.Delay(MotionTokens.Fast);
+                await Task.Delay(BenchTokens.DiagSettle);
+            });
+            await Segment("diag-reenter", async () =>
+            {
+                for (int i = 0; i < BenchTokens.DiagReenterCount; i++)
+                {
+                    int at = ui.Pacer.SegmentSamples;
+                    string to = i % 2 == 0 ? "home" : "diagnose";
+                    Navigate(to, null);
+                    await Task.Delay(BenchTokens.NavStep);
+                    navSteps.Add(new { to, maxMs = ui.Pacer.SegmentMaxFrom(at), segment = "diag-reenter" });
                 }
             });
             host.Changed -= Sample;

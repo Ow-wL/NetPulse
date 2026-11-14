@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text.Json.Nodes;
 using NetPulse.Core.Measurement;
 using NetPulse.Core.Records;
@@ -280,7 +280,8 @@ public sealed class M5SessionTests : IDisposable
         var s = MeasurementSession.Start(Options(clock));
         var first = s.Live.Read(null);
         Assert.True(first.Resync);                                    // 처음은 사본으로 시작
-        var at = s.Live.AnalysisInputs().At;
+        // 커서는 버퍼의 맨 앞(첫 일련번호)부터: 시작 직후의 사본 커서를 잡으면 그 사이 게시된 0회차가 빠질 수 있다 (M5 이월 4)
+        var at = first.Next;
         await Rounds(clock, s, 4);
         var delta = s.Live.Read(at);
         Assert.False(delta.Resync);

@@ -1,4 +1,4 @@
-using NetPulse.Core.Diagnostics;
+﻿using NetPulse.Core.Diagnostics;
 using NetPulse.Core.Live;
 
 namespace NetPulse.Core.Presentation;
@@ -60,11 +60,11 @@ public static class DiagnosisView
     public static CompareView? Compare(DiagnosisRun run, int skippedRecords)
     {
         if (run.Previous is not { } prev || run.Changes is not { } changes) return null;
-        string from = prev.FromRecord ? "지난 진단 기록" : "지난 검사";
+        string from = prev.FromRecord ? "지난 진단 기록과" : "지난 검사와";   // 받침에 따라 조사가 다르다 ("기록와"였음)
         string? skipped = skippedRecords > 0 ? $"읽지 못한 진단 기록 {skippedRecords}개는 건너뛰었습니다." : null;
-        if (changes.Count == 0) return new CompareView($"{from}와 같습니다.", [], skipped);
+        if (changes.Count == 0) return new CompareView($"{from} 같습니다.", [], skipped);
         var lines = changes.Select(c => $"{QuickDiagnosis.CheckName(c.Id)}: {QuickDiagnosis.JudgmentName(c.Before)} → {QuickDiagnosis.JudgmentName(c.After)}").ToArray();
-        return new CompareView($"{from}와 달라진 검사 {changes.Count}개", lines, skipped);
+        return new CompareView($"{from} 달라진 검사 {changes.Count}개", lines, skipped);
     }
 
     /// <summary>홈 카드 한 줄: 머리말과 무게 (최근 결과 또는 기록).</summary>

@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text.Json.Nodes;
 using NetPulse.Core.Evidence;
 using NetPulse.Core.Measurement;
@@ -79,6 +79,8 @@ public sealed class SessionLinkTests : IDisposable
         long target = (long)clock.Elapsed.TotalSeconds;
         await Eventually(() => s.Engine.State.Latest?.Tick.Index >= target, $"엔진 회차 {target}");
         await Eventually(() => s.Status.Observed >= target + 1, "관측");
+        // 관측 뒤 그 회차의 쓰기·게시가 이어진다: 게시까지 기다린다 (M5 이월 4, M5SessionTests와 같은 조건)
+        await Eventually(() => s.Live.AnalysisInputs().Rounds.Count >= target + 1, "게시");
     }
 
     private MeasurementRecord Reread() => RecordReader.Read(RecordReader.FindSegments(Id, [primary.Path!, fallback.Path!]));

@@ -1,4 +1,4 @@
-using Microsoft.UI.Dispatching;
+﻿using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -45,9 +45,9 @@ public sealed partial class AppShell : Window
     private readonly Microsoft.UI.Xaml.Shapes.Ellipse statusDot;
     private readonly DispatcherQueueTimer? runTimer;
     private readonly DispatcherQueueTimer selfTestTimer;
-    private bool renderQueued, diagQueued, closing, closeAllowed, navigating, lastLinkDown;
-    private HostState lastState;
-    private bool lastOutage, lastStorageFailing;
+    private bool renderQueued, diagQueued, closing, closeAllowed, navigating;
+    private readonly ObservationWatch observation = new();
+    private bool lastStorageFailing;
     private UIElement liveContent = null!;
 
     public AppShell(StartupOptions options, AppLog log, AppSettings settings, MeasurementHost host, RecentRecords recent, DiagnosisHost diagnosis, Func<Task> beforeClose)
@@ -266,33 +266,22 @@ public sealed partial class AppShell : Window
     private void Render(HostSnapshot s)
     {
         screens.Render(s);
-        RenderProfile.Time("shell.status", () => RenderStatus(s));
         // 상태 반응: 외부 응답 없음이나 링크 끊김이 관측되고 있으면 배경 빛이 붉게 (끝나면 원래대로).
         // 띠·링크 다운은 관측이지 판정이 아니다: 알림도 관측한 그것만 말한다 (끊김 여부·원인은 잠정 분석이 말한다, G4 M5 1라운드 B4·2라운드 3)
-        bool externalNone = s.Measuring && s.Bands.LastOrDefault(b => b.Kind == BandKind.ExternalNone) is { OpenEnd: true };
-        bool linkDown = s.Measuring && s.LinkDowns.Any(d => d.Ongoing);
-        bool outage = externalNone || linkDown;
-        if (outage != lastOutage)
+        // 종류는 이 장면에서 먼저 정하고 알약을 그린다 (M5 이월 3: 이전 종류로 한 번 그려지던 것), 종류마다 전환 알림
+        bool wasOutage = observation.Current != ObservationKind.None;
+        var change = observation.Update(s);
+        bool outage = observation.Current != ObservationKind.None;
+        RenderProfile.Time("shell.status", () => RenderStatus(s));
+        if (outage != wasOutage) ui.Lights.SetState(outage);
+        if (change is not null)
         {
-            ui.Lights.SetState(outage);
-            if (outage)
-                toasts.Show(ToastKind.Warning, linkDown ? "링크 끊김 관측" : "외부 응답 없음 관측",
-                    (linkDown ? "이 PC의 네트워크 연결이 끊긴 상태가 관측되고 있습니다." : "모든 외부 대상이 응답하지 않는 회차가 이어지고 있습니다.")
-                    + " 끊김을 느꼈다면 증상을 표시하세요 (Ctrl+M).");
-            else if (s.Measuring)
-                toasts.Show(ToastKind.Info, "관측이 끝났습니다", lastLinkDown ? "링크 끊김 관측이 끝났습니다." : "외부 응답 없음 관측이 끝났습니다.");
-            lastOutage = outage;
+            var (title, body, warning) = ObservationWatch.Message(change);
+            toasts.Show(warning ? ToastKind.Warning : ToastKind.Info, title, body);
         }
-        lastLinkDown = linkDown;
         bool storage = s.Status?.StorageFailing == true;
         if (storage && !lastStorageFailing) toasts.Show(ToastKind.Error, "기록을 저장하지 못하고 있습니다", "측정은 계속하며 다시 시도합니다.", autoClose: false);
         lastStorageFailing = storage;
-        if (lastState is HostState.Measuring or HostState.Stopping && s.State == HostState.Idle && lastOutage)
-        {
-            ui.Lights.SetState(false);
-            lastOutage = false;
-        }
-        lastState = s.State;
         QueueDiag();
     }
 
@@ -300,8 +289,8 @@ public sealed partial class AppShell : Window
     {
         (string top, string bottom, Brush dot) = s.State switch
         {
-            HostState.Measuring when lastOutage && lastLinkDown => ("링크 끊김 관측", "연결이 끊긴 상태가 이어지는 중", ui.Brushes.Bad),
-            HostState.Measuring when lastOutage => ("응답 없음 관측", "외부 응답 없음이 이어지는 중", ui.Brushes.Bad),
+            HostState.Measuring when observation.Current == ObservationKind.LinkDown => ("링크 끊김 관측", "연결이 끊긴 상태가 이어지는 중", ui.Brushes.Bad),
+            HostState.Measuring when observation.Current == ObservationKind.ExternalNone => ("응답 없음 관측", "외부 응답 없음이 이어지는 중", ui.Brushes.Bad),
             HostState.Measuring => ("측정 중", TimelineModel.Seconds(s.ElapsedMs) + " 경과", ui.Brushes.Ok),
             HostState.Stopping => ("측정 중", "멈추는 중", ui.Brushes.Warn),
             HostState.Starting => ("측정", "시작하는 중", ui.Brushes.Warn),

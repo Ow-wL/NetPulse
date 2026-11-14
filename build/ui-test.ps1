@@ -48,8 +48,9 @@ $trxDir = Join-Path $uiDir 'trx'
 $failed = $null
 try {
     # M5: 캡처 매트릭스(약 8분)와 측정 화면 bench(약 7분)가 더해져 10분으로는 모자란다.
-    # 실측 시나리오(M5LiveRunTests, 설계 7.3)는 이 PC 네트워크를 쓰고 결과를 공개하지 않으므로 게이트에서 빼고 따로 돌린다.
-    $commands += Invoke-Step 'ui-test' 3000 'dotnet' @('test', '--project', 'tests/NetPulse.UiTests', '-c', 'Release', '--no-build', '--report-xunit-trx', '--results-directory', $trxDir, '--filter-not-class', 'NetPulse.UiTests.M5LiveRunTests') $uiDir
+    # 실측 시나리오(M5·M6 LiveRunTests)는 이 PC 네트워크를 쓰고 결과를 공개하지 않으므로 게이트에서 빼고 따로 돌린다.
+    # 클래스 이름 대신 특성으로 뺀다 (M6 설계 7.5): 새 실측 시험이 클래스 목록에서 빠지는 일이 없게
+    $commands += Invoke-Step 'ui-test' 3600 'dotnet' @('test', '--project', 'tests/NetPulse.UiTests', '-c', 'Release', '--no-build', '--report-xunit-trx', '--results-directory', $trxDir, '--filter-not-trait', 'Kind=Live') $uiDir
 } catch { $failed = $_.Exception.Message }
 $trx = Get-ChildItem $trxDir -Filter *.trx -ErrorAction SilentlyContinue | Select-Object -First 1
 $summary = if ($trx) { $neutral = Join-Path $uiDir 'ui-tests.trx'; Move-Item $trx.FullName $neutral; Read-TrxSummary $neutral } else { $null }
@@ -84,10 +85,18 @@ if (Test-Path $g5Dir) {
     $required += @('hc-aquatic', 'hc-desert') | ForEach-Object { "matrix-m5-home-outage-$_"; "matrix-m5-measure-outage-$_" }
     $required += @('matrix-m5-home-outage-dark-reduced', 'matrix-m5-home-outage-light-reduced', 'matrix-m5-measure-live-dark-reducedmotion', 'matrix-m5-measure-live-light-reducedmotion')
     foreach ($k in 'crossfade', 'sharedmove') { foreach ($p in '0', '0.5', '1') { $required += "matrix-m5-transition-$k-$p" } }
+    # M6 (설계 7.4·7.5): 진단 장면 × 테마 × 배율, 흐름, bench 진단 구간, 고대비·효과·움직임 줄이기, 전환, 결론 카드 대비
+    $m6Ids = @(Get-Content (Join-Path $root 'tests\NetPulse.UiTests\m6-scenes.txt') -Encoding UTF8 | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | ForEach-Object { ($_ -split '\|')[0] })
+    foreach ($id in $m6Ids) { foreach ($t in 'dark', 'light') { foreach ($s in '100', '150') { $required += "matrix-m6-$id-$t-$s" } } }
+    $required += @('flow-diagnose', 'bench-diagnose', 'contrast-diagnose-dark', 'contrast-diagnose-light')
+    $required += @('hc-aquatic', 'hc-desert') | ForEach-Object { "matrix-m6-diagnose-dns-$_"; "matrix-m6-diagnose-outside-$_" }
+    $required += @('matrix-m6-diagnose-dns-dark-reduced', 'matrix-m6-diagnose-dns-light-reduced', 'matrix-m6-diagnose-running-dark-reducedmotion', 'matrix-m6-diagnose-running-light-reducedmotion')
+    foreach ($p in '0', '0.5', '1') { $required += "matrix-m6-transition-crossfade-$p" }
     $missing = @($required | Where-Object { -not (Test-Path (Join-Path $g5Dir "$_.json")) })
     $matrix = @(Get-ChildItem $g5Dir -Filter 'matrix-*.json' | Sort-Object Name)
     # M2 회귀 매트릭스는 따로 센다: M5 결과가 합쳐져 M2 캡처 누락을 가리지 않게 (G4 M5 1라운드 C3)
-    $m2Matrix = @($matrix | Where-Object { -not $_.Name.StartsWith('matrix-m5-') })
+    # M6 결과도 M2 수에 섞이지 않게 뺀다
+    $m2Matrix = @($matrix | Where-Object { -not $_.Name.StartsWith('matrix-m5-') -and -not $_.Name.StartsWith('matrix-m6-') })
     $captures = @(Get-ChildItem $env:NETPULSE_UITEST_OUT -Filter *.png | Sort-Object Name | ForEach-Object { [ordered]@{ file = "ui/captures/$($_.Name)"; sha256 = Get-Sha256Text $_.FullName } })
     $bench = & $read 'bench'
     $g5 = [ordered]@{
@@ -101,6 +110,10 @@ if (Test-Path $g5Dir) {
         bench          = $bench
         benchMeasure   = & $read 'bench-measure'
         m5Scenes       = $sceneIds.Count
+        m6Scenes       = $m6Ids.Count
+        benchDiagnose  = & $read 'bench-diagnose'
+        flowDiagnose   = & $read 'flow-diagnose'
+        contrastDiagnose = [ordered]@{ dark = & $read 'contrast-diagnose-dark'; light = & $read 'contrast-diagnose-light' }
         flow           = & $read 'flow-firstrun-to-stop'
         contrast       = [ordered]@{ dark = & $read 'contrast-dark'; light = & $read 'contrast-light'; homeDark = & $read 'contrast-home-dark'; homeLight = & $read 'contrast-home-light' }
         reducedSurface = & $read 'reduced-surface'

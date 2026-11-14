@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Windows.ApplicationModel.DataTransfer;
@@ -382,13 +382,15 @@ public sealed class DiagnoseScreen : Screen
 
         var v = DiagnosisView.Conclusion(run.Result);
         var (icon, brush) = DiagnosisLook.Weight(Ui, v.Weight);
+        // 실측 대비 시험 (M6 설계 7.4): 잴 글자(머리말·문장·해볼 것)만 투명하게 그려 그 뒤 배경을 찍는다 (공유 브러시는 바꾸지 않는다)
+        var ink = Context.Options.HideMeasuredText ? Ui.Brushes.Transparent : Ui.Brushes.Ink;
         var headRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
         headRow.Children.Add(Icons.Make(icon, brush, Size.IconL));
-        var headText = Text("diagnose.conclusion.head", v.Head, Typography.Headline, Ui.Brushes.Ink);
+        var headText = Text("diagnose.conclusion.head", v.Head, Typography.Headline, ink);
         headText.VerticalAlignment = VerticalAlignment.Center;
         headRow.Children.Add(headText);
         conclusion.Children.Add(headRow);
-        conclusion.Children.Add(Text("diagnose.conclusion.found", v.Found, Typography.Body, Ui.Brushes.Ink));
+        conclusion.Children.Add(Text("diagnose.conclusion.found", v.Found, Typography.Body, ink));
         if (v.Scope.Count > 0)
         {
             var scope = new StackPanel { Spacing = Space.S1 };
@@ -403,7 +405,7 @@ public sealed class DiagnoseScreen : Screen
             AutomationProperties.SetAutomationId(steps, "diagnose.conclusion.steps");
             AutomationProperties.SetName(steps, string.Join(" ", v.Steps.Select((s, i) => $"{i + 1}. {s}")));
             steps.Children.Add(Fonts.Text("해볼 것", Typography.Label, Ui.Brushes.Ink));
-            for (int i = 0; i < v.Steps.Count; i++) steps.Children.Add(Fonts.Wrapped($"{i + 1}. {v.Steps[i]}", Typography.Body, Ui.Brushes.Ink));
+            for (int i = 0; i < v.Steps.Count; i++) steps.Children.Add(Fonts.Wrapped($"{i + 1}. {v.Steps[i]}", Typography.Body, ink));
             conclusion.Children.Add(steps);
         }
         // 그 자리 도구 (안내형: 해볼 것을 그 자리에서)
@@ -551,6 +553,8 @@ public sealed class DiagnoseScreen : Screen
             site = new { d.Site.InputError, d.Site.Running, dns = d.Site.Result?.Dns.Judgment.ToString(), https = d.Site.Result?.Https.Judgment.ToString(), httpsState = d.Site.Result?.Https.State.ToString() },
             expanded = checkCards.Values.Where(c => c.Expanded).Select(c => c.Id.ToString()).ToArray(),
             copyState,
+            // 결과 복사가 쓰는 글 그대로 (주소·도메인 없음, G2가 검사). 흐름 시험이 실제 클립보드와 비교한다 (설계 7.2-4)
+            copyText = d.Last is { } cr ? QuickDiagnosis.CopyText(cr.Result) : null,
             lastAction,
             actions = (Context.Diagnosis.World.Actions as DemoSystemActions)?.Calls.Select(c => c.StartsWith("folder:", StringComparison.Ordinal) ? "folder:" + FolderKind(c[7..]) : c).ToArray(),
             folderEnabled = folder.IsEnabled,
