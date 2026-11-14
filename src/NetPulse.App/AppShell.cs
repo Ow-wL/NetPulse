@@ -29,6 +29,7 @@ public sealed partial class AppShell : Window
     private readonly StartupOptions options;
     private readonly AppLog log;
     private readonly MeasurementHost host;
+    private readonly DiagnosisHost diagnosis;
     private readonly RecentRecords recent;
     private readonly Func<Task> beforeClose;
     private readonly GroupPanel root;
@@ -49,11 +50,12 @@ public sealed partial class AppShell : Window
     private bool lastOutage, lastStorageFailing;
     private UIElement liveContent = null!;
 
-    public AppShell(StartupOptions options, AppLog log, AppSettings settings, MeasurementHost host, RecentRecords recent, Func<Task> beforeClose)
+    public AppShell(StartupOptions options, AppLog log, AppSettings settings, MeasurementHost host, RecentRecords recent, DiagnosisHost diagnosis, Func<Task> beforeClose)
     {
         this.options = options;
         this.log = log;
         this.host = host;
+        this.diagnosis = diagnosis;
         this.recent = recent;
         this.beforeClose = beforeClose;
         Title = "NetPulse";
@@ -97,14 +99,14 @@ public sealed partial class AppShell : Window
         var context = new ScreenContext
         {
             Ui = ui, Host = host, Recent = recent, Toasts = toasts, Dialog = dialog, Options = options, Log = log,
-            Navigate = Navigate, QueueDiag = QueueDiag, SetRevealOrigin = SetRevealOrigin, IsClosing = () => closing,
+            Diagnosis = diagnosis, Navigate = Navigate, QueueDiag = QueueDiag, SetRevealOrigin = SetRevealOrigin, IsClosing = () => closing,
         };
         screens.Register("home", () => new HomeScreen(context));
         screens.Register("measure", () => new MeasureScreen(context));
         screens.Register("firstrun", () => new FirstRunScreen(context));
         screens.Register("profile", () => new ProfileEditor(context));
         screens.Register("settings", () => new SettingsScreen(context));
-        screens.Register("diagnose", () => new PendingScreen(context, "diagnose", "진단", "빠른 진단, 안내형 결과, 사이트 점검을 이 화면에서 하게 됩니다."));
+        screens.Register("diagnose", () => new DiagnoseScreen(context));
         screens.Register("records", () => new PendingScreen(context, "records", "기록", "측정 목록, 끊김 목록과 통계, 분석, 비교를 이 화면에서 보게 됩니다."));
         screens.Register("report", () => new PendingScreen(context, "report", "리포트", "통신사에 전달할 리포트를 이 화면에서 만들게 됩니다."));
 
@@ -118,6 +120,7 @@ public sealed partial class AppShell : Window
 
         rail.Selected += id => { if (!navigating) Navigate(id, null); };
         host.Changed += QueueRender;
+        diagnosis.Changed += QueueRender;
         host.Finished += f => DispatcherQueue.TryEnqueue(() => { if (!closeAllowed) OnFinished(f); });
         recent.Changed += QueueDiag;
         ui.Effects.Changed += (_, _) => QueueDiag();
@@ -136,6 +139,7 @@ public sealed partial class AppShell : Window
         {
             log.Write("loaded", null);
             _ = recent.RefreshAsync(host.RunningId);
+            _ = Task.Run(diagnosis.LoadRecent);
             StartScreen();
             DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => { if (!closing) foreach (var id in new[] { "home", "measure" }) screens.Prepare(id); });
             RenderStatus(host.Snapshot);
@@ -332,6 +336,7 @@ public sealed partial class AppShell : Window
         AppWindow.Hide();
         try
         {
+            await diagnosis.ShutdownAsync();   // 진단을 먼저 멈춘다: 억제 → 취소 → 최대 3초 (M6 설계 3.4)
             var shutdown = host.ShutdownAsync();
             if (await Task.WhenAny(shutdown, Task.Delay(Waits.CloseWrites + Waits.CloseWrites + Waits.CloseWrites)) != shutdown)
                 log.Write("closeTimeout", new { state = host.Snapshot.State.ToString() });

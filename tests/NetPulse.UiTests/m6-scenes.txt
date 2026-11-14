@@ -1,0 +1,29 @@
+# M6 캡처 장면 목록 (설계 7.4). 시험(M6MatrixTests)과 build/ui-test.ps1이 같은 파일을 읽는다. 형식은 m5-scenes.txt와 같다.
+# 준비 추가: diagrecord (지난 진단 기록 하나, 결론 6), diagblock (진단 기록 폴더 자리에 파일 → 저장 실패)
+# 기다림 추가: diagdone, diagpartial=N, diag=작업, flushstage=단계, flushdone, diagrecent, site, siterunning, siteerror, exists=ID
+diagnose-empty|profile|--demo steady --screen diagnose|wait:screen=diagnose
+diagnose-running|profile|--demo tests:diag-running --screen diagnose|wait:screen=diagnose;invoke:diagnose.start;wait:diagpartial=4
+diagnose-ok|profile|--demo tests:diag-ok --screen diagnose|wait:screen=diagnose;invoke:diagnose.start;wait:diagdone
+diagnose-dns|profile|--demo tests:diag-dns --screen diagnose|wait:screen=diagnose;invoke:diagnose.start;wait:diagdone
+diagnose-outside|profile|--demo tests:diag-outside --screen diagnose|wait:screen=diagnose;invoke:diagnose.start;wait:diagdone
+diagnose-link|profile|--demo tests:diag-link --screen diagnose|wait:screen=diagnose;invoke:diagnose.start;wait:diagdone
+diagnose-portal|profile|--demo tests:diag-portal --screen diagnose|wait:screen=diagnose;invoke:diagnose.start;wait:diagdone
+diagnose-partial|profile|--demo tests:diag-partial --screen diagnose|wait:screen=diagnose;invoke:diagnose.start;wait:diagdone
+diagnose-insufficient|profile|--demo tests:diag-insufficient --screen diagnose|wait:screen=diagnose;invoke:diagnose.start;wait:diagdone
+diagnose-ipv4|profile|--demo tests:diag-ipv4 --screen diagnose|wait:screen=diagnose;invoke:diagnose.start;wait:diagdone
+diagnose-probe-error|profile|--demo tests:diag-probe-error --screen diagnose|wait:screen=diagnose;invoke:diagnose.start;wait:diagdone;invoke:diagnose.check.tcp.toggle;invoke:diagnose.check.https.toggle
+diagnose-compare|diagrecord|--demo tests:diag-ok --screen diagnose|wait:screen=diagnose;wait:diagrecent;invoke:diagnose.start;wait:diagdone
+diagnose-expanded|profile|--demo tests:diag-partial --screen diagnose|wait:screen=diagnose;invoke:diagnose.start;wait:diagdone;invoke:diagnose.check.tcp.toggle
+diagnose-site-running|profile|--demo tests:diag-site-slow --screen diagnose|wait:screen=diagnose;text:diagnose.site.input=shop.example;invoke:diagnose.site.run;wait:siterunning
+diagnose-site-ok|profile|--demo tests:diag-ok --screen diagnose|wait:screen=diagnose;text:diagnose.site.input=shop.example;invoke:diagnose.site.run;wait:site
+diagnose-site-fail|profile|--demo tests:diag-ok --screen diagnose|wait:screen=diagnose;text:diagnose.site.input=down.example;invoke:diagnose.site.run;wait:site
+diagnose-site-timeout|profile|--demo tests:diag-ok --screen diagnose|wait:screen=diagnose;text:diagnose.site.input=slow.example;invoke:diagnose.site.run;wait:site
+diagnose-site-invalid|profile|--demo tests:diag-ok --screen diagnose|wait:screen=diagnose;text:diagnose.site.input=https://shop.example/path;invoke:diagnose.site.run;wait:siteerror
+diagnose-flush-confirm|profile|--demo tests:diag-dns --screen diagnose|wait:screen=diagnose;invoke:diagnose.start;wait:diagdone;invoke:diagnose.conclusion.flush;wait:dialog
+diagnose-flush-queued|profile|--demo tests:diag-queued --screen diagnose|wait:screen=diagnose;invoke:diagnose.start;invoke:diagnose.flush;wait:dialog;invoke:dialog.confirm;wait:flushstage=Waiting
+diagnose-flush-running|profile|--demo tests:diag-flush-slow --screen diagnose|wait:screen=diagnose;invoke:diagnose.start;wait:diagdone;invoke:diagnose.flush;wait:dialog;invoke:dialog.confirm;wait:flushstage=Flushing
+diagnose-flush-done|profile|--demo tests:diag-dns --screen diagnose|wait:screen=diagnose;invoke:diagnose.start;wait:diagdone;invoke:diagnose.flush;wait:dialog;invoke:dialog.confirm;wait:flushdone
+diagnose-flush-failed|profile|--demo tests:diag-flush-fail --screen diagnose|wait:screen=diagnose;invoke:diagnose.start;wait:diagdone;invoke:diagnose.flush;wait:dialog;invoke:dialog.confirm;wait:flushdone
+diagnose-saveerror|diagblock|--demo tests:diag-ok --screen diagnose|wait:screen=diagnose;invoke:diagnose.start;wait:diagdone
+home-diagnosis-card|diagrecord|--demo steady --screen home|wait:screen=home;wait:exists=home.diagnosis.last
+home-diagnosis-empty|profile|--demo steady --screen home|wait:screen=home;wait:exists=home.diagnosis.empty

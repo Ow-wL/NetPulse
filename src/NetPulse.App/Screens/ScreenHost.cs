@@ -12,6 +12,8 @@ public sealed class ScreenContext
 {
     public required Ui Ui { get; init; }
     public required MeasurementHost Host { get; init; }
+    /// <summary>진단 수명 (M6).</summary>
+    public required DiagnosisHost Diagnosis { get; init; }
     public required RecentRecords Recent { get; init; }
     public required ToastHost Toasts { get; init; }
     public required DialogHost Dialog { get; init; }

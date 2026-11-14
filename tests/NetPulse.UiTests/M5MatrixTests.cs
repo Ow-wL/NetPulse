@@ -12,7 +12,7 @@ public sealed class M5MatrixTests
 {
     public sealed record Scene(string Id, string Prep, string Args, string[] Actions);
 
-    public static IReadOnlyList<Scene> Scenes() => File.ReadAllLines(Path.Combine(AppContext.BaseDirectory, "m5-scenes.txt"))
+    public static IReadOnlyList<Scene> Scenes(string file = "m5-scenes.txt") => File.ReadAllLines(Path.Combine(AppContext.BaseDirectory, file))
         .Where(l => l.Trim().Length > 0 && !l.StartsWith('#'))
         .Select(l => l.Split('|'))
         .Select(p => new Scene(p[0], p[1], p[2], p[3].Split(';', StringSplitOptions.RemoveEmptyEntries)))
@@ -101,9 +101,27 @@ public sealed class M5MatrixTests
             case "marksaved":
                 app.WaitDiag(d => d.GetProperty("marks").EnumerateArray().Any(m => M5Fixtures.Str(m, "Memo").Length > 0 && M5Fixtures.Str(m, "state") == "Saved"), s => s, "메모 저장");
                 break;
+            // M6 진단 화면 (screenDiag = DiagnoseScreen.Diag)
+            case "diagdone":
+                app.WaitDiag(d => Sd(d) is { } s && s.GetProperty("operation").GetString() == "None" && s.GetProperty("conclusion").ValueKind == JsonValueKind.Number, b => b, "진단 끝");
+                break;
+            case "diagpartial": app.WaitDiag(d => Sd(d) is { } s ? s.GetProperty("partial").GetInt32() : 0, n => n >= int.Parse(value), "끝난 검사 " + value); break;
+            case "diag": app.WaitDiag(d => Sd(d) is { } s ? s.GetProperty("operation").GetString() : "", o => o == value, "진단 작업 " + value); break;
+            case "flushstage": app.WaitDiag(d => Sd(d) is { } s ? M5Fixtures.Str(s, "flush") : "", f => f == value, "비우기 단계 " + value); break;
+            case "flushdone":
+                app.WaitDiag(d => Sd(d) is { } s && s.GetProperty("operation").GetString() == "None" && s.GetProperty("flushResult").ValueKind == JsonValueKind.String, b => b, "비우기 흐름 끝");
+                break;
+            case "diagrecent": app.WaitDiag(d => Sd(d) is { } s && s.GetProperty("recent").ValueKind == JsonValueKind.Number, b => b, "지난 진단 기록"); break;
+            case "site": app.WaitDiag(d => Sd(d) is { } s && s.GetProperty("site").GetProperty("dns").ValueKind == JsonValueKind.String, b => b, "사이트 점검 결과"); break;
+            case "siterunning": app.WaitDiag(d => Sd(d) is { } s && s.GetProperty("site").GetProperty("Running").GetBoolean(), b => b, "사이트 점검 중"); break;
+            case "siteerror": app.WaitDiag(d => Sd(d) is { } s && s.GetProperty("site").GetProperty("InputError").ValueKind == JsonValueKind.String, b => b, "입력 오류"); break;
+            case "exists": AppDriver.WaitFor(() => app.Exists(value), e => e, "요소 " + value); break;
             default: throw new ArgumentException("알 수 없는 기다림: " + what);
         }
     }
+
+    /// <summary>현재 화면의 진단 값 (없으면 null).</summary>
+    private static JsonElement? Sd(JsonElement d) => d.TryGetProperty("screenDiag", out var s) && s.ValueKind == JsonValueKind.Object ? s : null;
 
     /// <summary>배치 검사 판정 (M2 설계 5.8과 같음): 스크롤 밖 잘림 0, 스크롤 안은 보이는 요소의 가로가 보기 안, 글자 잘림 0, 같은 층 상호작용 요소 겹침 0.</summary>
     internal static List<string> LayoutProblems(JsonElement data)

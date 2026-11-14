@@ -87,7 +87,9 @@ public partial class App : Application
             mode = world.Kind, speed = options.DemoSpeed, version, resources, profiles = host.LoadStatus.ToString(),
             replay = new { options.Screen, options.Start, options.DemoHold, speedAfter = options.DemoSpeedAfter?.ToString(), options.HoldAnalysis, options.HoldStart },
         });
-        window = new AppShell(options, log, settings, host, recent, ShutdownAsync);
+        var mh = host;
+        var diagnosis = new DiagnosisHost(world.Diagnostics, new DiagnosisStore(Path.Combine(options.UserData, "diagnoses")), () => mh.RunningId, () => world.Now, version);
+        window = new AppShell(options, log, settings, host, recent, diagnosis, ShutdownAsync);
         window.Activate();
     }
 
