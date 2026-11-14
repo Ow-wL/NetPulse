@@ -78,7 +78,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
     private readonly List<RoundData> observed = [];
     private readonly List<(long From, long To)> unprocessedRanges = [];
     private readonly LinkedList<(long Round, string Line)> pending = new();
-    private readonly List<string> pendingEvents = [];
+    private readonly List<PendingEvent> pendingEvents = [];
     private readonly Dictionary<string, RouteSample> lastRoutes = [];
     private readonly IDisposable? powerSubscription;
     private RecordHeader header;
@@ -184,15 +184,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
         workerStop.Dispose();
     }
 
-    public SessionStatus Status
-    {
-        get
-        {
-            lock (sync)
-                return new SessionStatus(Id, Volatile.Read(ref ending) == 0, lastRound, observed.Count, committed, pending.Count, dropped, unprocessed,
-                    storageFailing, root.Kind, gaps.Suspended);
-        }
-    }
+    public SessionStatus Status { get { lock (sync) return StatusUnlocked(); } }
 
     /// <summary>관측 기준 통계 (지금까지).</summary>
     public MeasurementStats ComputeStats()
@@ -247,10 +239,32 @@ public sealed partial class MeasurementSession : IAsyncDisposable
     private async Task WorkAsync()
     {
         var token = workerStop.Token;
+        var never = new TaskCompletionSource<bool>().Task;
         try
         {
-            while (await queue.Reader.WaitToReadAsync(token).ConfigureAwait(false))
+            // 회차와 사용자 이벤트(증상·메모, M5 설계 3.1)를 같은 작업이 쓴다: 디스크 쓰기는 이 작업 한 곳에서만 일어난다
+            Task<bool>? roundWait = null, userWait = null;
+            while (true)
             {
+                roundWait ??= queue.Reader.WaitToReadAsync(token).AsTask();
+                userWait ??= userEvents.Reader.WaitToReadAsync(token).AsTask();
+                await Task.WhenAny(roundWait, userWait).ConfigureAwait(false);
+                if (userWait.IsCompleted)
+                {
+                    bool more = await userWait.ConfigureAwait(false);
+                    userWait = more ? null : never;   // 닫히면 더 기다리지 않는다
+                    lock (sync) if (sealedOff) return;
+                    DrainUserEvents();
+                }
+                if (!roundWait.IsCompleted) continue;
+                bool rounds = await roundWait.ConfigureAwait(false);
+                roundWait = null;
+                if (!rounds)
+                {
+                    lock (sync) if (sealedOff) return;
+                    DrainUserEvents();   // 큐가 닫혔다: 들어온 사용자 이벤트를 마저 쓰고 끝낸다
+                    return;
+                }
                 while (true)
                 {
                     RoundSnapshot? item;
@@ -260,6 +274,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
                         if (!queue.Reader.TryRead(out item)) break;
                     }
                     DrainLinks();
+                    DrainUserEvents();
                     Process(item);
                 }
             }
@@ -309,11 +324,14 @@ public sealed partial class MeasurementSession : IAsyncDisposable
             pending.AddLast((data.Round, RecordSchema.RoundLine(Id, data)));
         }
 
-        foreach (var g in verdict.Closed) WriteGapLine(g);
-        if (s.Routes is not null) WriteRouteChanges(s.Tick.Index, startMs, s.At, s.Routes);
+        // 이 회차를 처리하며 만든 이벤트는 회차와 한 항목으로 게시한다 (M5 설계 3.2)
+        var related = new List<string>();
+        foreach (var g in verdict.Closed) WriteGapLine(g, related);
+        if (s.Routes is not null) WriteRouteChanges(s.Tick.Index, startMs, s.At, s.Routes, related);
         if (clockDelta is long delta)
-            WriteEvent(RecordSchema.EventLine(Id, "clock", s.Tick.Index, startMs, s.At, new JsonObject { ["deltaMs"] = delta, ["prevAtMs"] = clockPrevMs }));
+            WriteEvent(RecordSchema.EventLine(Id, "clock", s.Tick.Index, startMs, s.At, new JsonObject { ["deltaMs"] = delta, ["prevAtMs"] = clockPrevMs }), related);
         FlushPending(s.Tick.Actual, s.At, fromWorker: true);
+        PublishRound(data, related);
     }
 
     /// <summary>
@@ -397,8 +415,15 @@ public sealed partial class MeasurementSession : IAsyncDisposable
         }
         rounds = new LineAppender(created, "rounds");
         events = new LineAppender(created, "events");
-        lock (sync) pendingEvents.Insert(0, line);   // 새 조각에는 반드시
+        // 새 조각에는 반드시: 대기열 맨 앞으로
+        var relocatedId = RegisterEvent(line, null);
+        lock (sync)
+        {
+            int at = pendingEvents.FindIndex(p => p.EventId == relocatedId);
+            if (at > 0) { var p = pendingEvents[at]; pendingEvents.RemoveAt(at); pendingEvents.Insert(0, p); }
+        }
         RetryEvents();
+        PublishEvent(relocatedId);
         return true;
     }
 
@@ -422,7 +447,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
                 new JsonObject { ["kind"] = "dropped", ["fromRound"] = dr.From, ["toRound"] = dr.To }));
     }
 
-    private void WriteRouteChanges(long round, long atMs, DateTimeOffset wall, IReadOnlyList<RouteSample> samples)
+    private void WriteRouteChanges(long round, long atMs, DateTimeOffset wall, IReadOnlyList<RouteSample> samples, List<string> related)
     {
         foreach (var sample in samples)
         {
@@ -441,17 +466,17 @@ public sealed partial class MeasurementSession : IAsyncDisposable
                 ["status"] = effective.Ok ? "ok" : "failed",
             };
             if (effective.Error is not null) fields["code"] = effective.Error;
-            WriteEvent(RecordSchema.EventLine(Id, "route", round, atMs, wall, fields));
+            WriteEvent(RecordSchema.EventLine(Id, "route", round, atMs, wall, fields), related);
         }
     }
 
     private void WriteGapEvent(GapSpan g)
     {
         lock (sync) gapSpans.Add(g);
-        WriteGapLine(g);
+        WriteGapLine(g, null);
     }
 
-    private void WriteGapLine(GapSpan g)
+    private void WriteGapLine(GapSpan g, List<string>? related)
     {
         var fields = new JsonObject
         {
@@ -459,32 +484,39 @@ public sealed partial class MeasurementSession : IAsyncDisposable
             ["fromMs"] = g.FromMs, ["toMs"] = g.ToMs, ["fromWall"] = RecordSchema.Iso(g.FromWall), ["toWall"] = RecordSchema.Iso(g.ToWall),
             ["lastRoundBefore"] = g.LastRoundBefore, ["firstRoundAfter"] = g.FirstRoundAfter,
         };
-        WriteEvent(RecordSchema.EventLine(Id, "gap", g.FirstRoundAfter, g.ToMs, g.ToWall, fields));
+        WriteEvent(RecordSchema.EventLine(Id, "gap", g.FirstRoundAfter, g.ToMs, g.ToWall, fields), related);
     }
 
-    /// <summary>이벤트 한 줄. 못 쓰면 메모리에 두고 다음에 다시 쓴다 (상한을 넘으면 오래된 것부터 버린다).</summary>
-    private void WriteEvent(string line)
+    /// <summary>
+    /// 이벤트 한 줄. 못 쓰면 메모리에 두고 다음에 다시 쓴다 (상한을 넘으면 오래된 것부터 버린다).
+    /// <paramref name="related"/>가 있으면 회차와 함께 게시하도록 ID만 모으고, 없으면 바로 게시한다 (M5 설계 3.2).
+    /// <paramref name="ticket"/>은 첫 쓰기 시도의 결과로 끝난다 (증상·메모).
+    /// </summary>
+    private void WriteEvent(string line, List<string>? related = null, TaskCompletionSource<EventWriteState>? ticket = null)
     {
-        lock (sync)
-        {
-            pendingEvents.Add(line);
-            while (pendingEvents.Count > options.PendingLimit) { pendingEvents.RemoveAt(0); eventsDropped++; }   // 버린 수는 요약에 (M4 A5)
-        }
+        var id = RegisterEvent(line, ticket);
         RetryEvents();
+        if (related is not null) related.Add(id);
+        else PublishEvent(id);
     }
 
     private void RetryEvents()
     {
         while (true)
         {
-            string line;
+            PendingEvent head;
             lock (sync)
             {
                 if (pendingEvents.Count == 0) return;
-                line = pendingEvents[0];
+                head = pendingEvents[0];
             }
-            if (!events.TryAppend(line, out _)) return;
-            lock (sync) pendingEvents.RemoveAt(0);
+            if (!events.TryAppend(head.Line, out _)) return;
+            lock (sync)
+            {
+                // 쓰는 사이 상한으로 버려졌으면 이미 유실로 셌다: 같은 줄일 때만 지운다
+                if (pendingEvents.Count > 0 && ReferenceEquals(pendingEvents[0], head)) pendingEvents.RemoveAt(0);
+                MarkSaved(head.EventId);
+            }
         }
     }
 
@@ -497,6 +529,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
     private async Task<SessionResult> EndAsync(EndReason reason, string? error)
     {
         if (Interlocked.Exchange(ref ending, 1) != 0) return await completion.Task.ConfigureAwait(false);
+        CloseUserInput();   // 이후 증상·메모는 받지 않는다. 이미 들어온 것은 요약 전에 쓴다 (M5 설계 3.1)
         // 측정 끝 경계는 정리(엔진 정지·배출·마감)를 기다리기 전에 고정한다 (M4 G4 2라운드 4)
         var stopElapsed = clock.Elapsed;
         var stopWall = clock.Now;
@@ -541,6 +574,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
             {
                 // 처리 작업이 아직 돈다: 파일을 건드리지 않는다. 기록은 읽을 때 원본으로 다시 계산된다
                 lock (sync) stats = StatsCalculator.Compute(observed.ToArray(), targets.Select(t => t.Id).ToArray(), gapSpans.ToArray());
+                LoseUserEvents();
                 long unsavedNow;
                 lock (sync) unsavedNow = pending.Count;
                 var failed = new SessionResult(Id, reason, null, true, false, unsavedNow, stats, root.Kind, error ?? "기록 마감 실패");
@@ -567,6 +601,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
                 }
                 if (gaveUp)
                 {
+                    LoseUserEvents();
                     var stuck = new SessionResult(Id, reason, null, true, true, left, stats, root.Kind, error ?? "기록 마감 실패");
                     completion.TrySetResult(stuck);
                     return stuck;
@@ -583,6 +618,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
         }
         catch (Exception ex)
         {
+            LoseUserEvents();
             var stats = ComputeStats();
             var result = new SessionResult(Id, EndReason.Error, null, false, true, 0, stats, root.Kind, ex.GetType().Name);
             completion.TrySetResult(result);
@@ -598,6 +634,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
     {
         try
         {
+            DrainUserEvents();   // 처리 작업이 마저 쓰지 못한(마감된) 사용자 이벤트
             foreach (var g in gaps.Close(endMs, endWall)) WriteGapEvent(g);
             FinishLinks(endElapsed, endWall);
             List<(long From, long To)> ranges;
@@ -620,6 +657,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
             summary = new RecordSummary(Id, reason, endWall, observed.Count, committed, pending.Count, dropped, unprocessed, lastCommittedRound, false, error,
                 eventsDropped + pendingEvents.Count,   // 끝까지 못 쓴 이벤트도 유실
                 endMs);                                // 측정 끝 경과 ms (관측해야 했던 회차의 분모, G4 1라운드 1)
+        lock (sync) foreach (var p in pendingEvents) MarkLost(p.EventId);
         try
         {
             // 게시 직전에 포기 여부를 확인하고, 아니면 게시 중으로 표시한다 (그 뒤로는 종료 쪽이 포기하지 않는다)

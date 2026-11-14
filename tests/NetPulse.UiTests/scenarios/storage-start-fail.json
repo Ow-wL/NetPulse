@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "name": "storage-start-fail",
+  "seed": 53,
+  "durationRounds": 180,
+  "startAt": "2026-11-13T13:20:00+09:00",
+  "faults": {
+    "storageStartFail": true
+  },
+  "targets": [
+    {
+      "id": "gateway",
+      "role": "local",
+      "address": "192.0.2.1",
+      "name": "공유기"
+    },
+    {
+      "id": "ext-a",
+      "role": "external",
+      "address": "198.51.100.10",
+      "name": "예시 통신사 A",
+      "provider": "예시 통신사 A"
+    },
+    {
+      "id": "ext-b",
+      "role": "external",
+      "address": "203.0.113.20",
+      "name": "예시 통신사 B",
+      "provider": "예시 통신사 B"
+    }
+  ],
+  "segments": [
+    {
+      "from": 0,
+      "to": 180,
+      "target": "gateway",
+      "rtt": {
+        "base": 2,
+        "jitter": 1
+      }
+    },
+    {
+      "from": 0,
+      "to": 180,
+      "target": "ext-a",
+      "rtt": {
+        "base": 18,
+        "jitter": 6
+      }
+    },
+    {
+      "from": 0,
+      "to": 180,
+      "target": "ext-b",
+      "rtt": {
+        "base": 24,
+        "jitter": 8
+      }
+    }
+  ]
+}

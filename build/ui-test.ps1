@@ -47,7 +47,9 @@ $commands += Invoke-Step 'ui-build' 300 'dotnet' @('build', 'tests/NetPulse.UiTe
 $trxDir = Join-Path $uiDir 'trx'
 $failed = $null
 try {
-    $commands += Invoke-Step 'ui-test' 600 'dotnet' @('test', '--project', 'tests/NetPulse.UiTests', '-c', 'Release', '--no-build', '--report-xunit-trx', '--results-directory', $trxDir) $uiDir
+    # M5: 캡처 매트릭스(약 8분)와 측정 화면 bench(약 7분)가 더해져 10분으로는 모자란다.
+    # 실측 시나리오(M5LiveRunTests, 설계 7.3)는 이 PC 네트워크를 쓰고 결과를 공개하지 않으므로 게이트에서 빼고 따로 돌린다.
+    $commands += Invoke-Step 'ui-test' 3000 'dotnet' @('test', '--project', 'tests/NetPulse.UiTests', '-c', 'Release', '--no-build', '--report-xunit-trx', '--results-directory', $trxDir, '--filter-not-class', 'NetPulse.UiTests.M5LiveRunTests') $uiDir
 } catch { $failed = $_.Exception.Message }
 $trx = Get-ChildItem $trxDir -Filter *.trx -ErrorAction SilentlyContinue | Select-Object -First 1
 $summary = if ($trx) { $neutral = Join-Path $uiDir 'ui-tests.trx'; Move-Item $trx.FullName $neutral; Read-TrxSummary $neutral } else { $null }
@@ -75,8 +77,17 @@ if (Test-Path $g5Path) { Remove-Item $g5Path }
 if (Test-Path $g5Dir) {
     $read = { param($n) $f = Join-Path $g5Dir "$n.json"; if (Test-Path $f) { Get-Content $f -Encoding UTF8 -Raw | ConvertFrom-Json } else { $null } }
     $required = @('bench', 'contrast-dark', 'contrast-light', 'reduced-surface', 'fidelity-dark-overview', 'fidelity-light-overview', 'fidelity-dark-toasts', 'fidelity-light-toasts', 'switch-dark-to-light', 'switch-light-to-dark', 'boundary-dark-to-light', 'boundary-light-to-dark')
+    # M5 (설계 7.4): 개수가 아니라 필수 장면 ID × 테마 × 배율의 결과가 모두 있는지 본다. 목록은 시험과 같은 파일
+    $required += @('flow-firstrun-to-stop', 'flow-first-measurement-actions', 'flow-theme-close-cleanup', 'bench-measure', 'reducedmotion-home', 'contrast-home-dark', 'contrast-home-light')
+    $sceneIds = @(Get-Content (Join-Path $root 'tests\NetPulse.UiTests\m5-scenes.txt') -Encoding UTF8 | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | ForEach-Object { ($_ -split '\|')[0] })
+    foreach ($id in $sceneIds) { foreach ($t in 'dark', 'light') { foreach ($s in '100', '150') { $required += "matrix-m5-$id-$t-$s" } } }
+    $required += @('hc-aquatic', 'hc-desert') | ForEach-Object { "matrix-m5-home-outage-$_"; "matrix-m5-measure-outage-$_" }
+    $required += @('matrix-m5-home-outage-dark-reduced', 'matrix-m5-home-outage-light-reduced', 'matrix-m5-measure-live-dark-reducedmotion', 'matrix-m5-measure-live-light-reducedmotion')
+    foreach ($k in 'crossfade', 'sharedmove') { foreach ($p in '0', '0.5', '1') { $required += "matrix-m5-transition-$k-$p" } }
     $missing = @($required | Where-Object { -not (Test-Path (Join-Path $g5Dir "$_.json")) })
     $matrix = @(Get-ChildItem $g5Dir -Filter 'matrix-*.json' | Sort-Object Name)
+    # M2 회귀 매트릭스는 따로 센다: M5 결과가 합쳐져 M2 캡처 누락을 가리지 않게 (G4 M5 1라운드 C3)
+    $m2Matrix = @($matrix | Where-Object { -not $_.Name.StartsWith('matrix-m5-') })
     $captures = @(Get-ChildItem $env:NETPULSE_UITEST_OUT -Filter *.png | Sort-Object Name | ForEach-Object { [ordered]@{ file = "ui/captures/$($_.Name)"; sha256 = Get-Sha256Text $_.FullName } })
     $bench = & $read 'bench'
     $g5 = [ordered]@{
@@ -85,9 +96,13 @@ if (Test-Path $g5Dir) {
         uiTestsPassed  = $result.passed
         missing        = $missing
         matrixCount    = $matrix.Count
-        passed         = [bool]($result.passed -and $missing.Count -eq 0 -and $matrix.Count -ge $MatrixExpected)
+        m2MatrixCount  = $m2Matrix.Count
+        passed         = [bool]($result.passed -and $missing.Count -eq 0 -and $m2Matrix.Count -ge $MatrixExpected)
         bench          = $bench
-        contrast       = [ordered]@{ dark = & $read 'contrast-dark'; light = & $read 'contrast-light' }
+        benchMeasure   = & $read 'bench-measure'
+        m5Scenes       = $sceneIds.Count
+        flow           = & $read 'flow-firstrun-to-stop'
+        contrast       = [ordered]@{ dark = & $read 'contrast-dark'; light = & $read 'contrast-light'; homeDark = & $read 'contrast-home-dark'; homeLight = & $read 'contrast-home-light' }
         reducedSurface = & $read 'reduced-surface'
         fidelity       = @('dark-overview', 'light-overview', 'dark-toasts', 'light-toasts' | ForEach-Object { [ordered]@{ case = $_; result = & $read "fidelity-$_" } })
         runtimeSwitch  = [ordered]@{ darkToLight = & $read 'switch-dark-to-light'; lightToDark = & $read 'switch-light-to-dark' }
@@ -96,7 +111,7 @@ if (Test-Path $g5Dir) {
     }
     $g5 | ConvertTo-Json -Depth 8 | Set-Content $g5Path -Encoding UTF8
     if ($bench) { Write-BenchSummary $bench.bench (Join-Path $uiDir 'bench.md') }
-    if (-not $g5.passed) { Write-Warning "G5 미완료: 누락 $($missing -join ', '), 매트릭스 $($matrix.Count)/$MatrixExpected" }
+    if (-not $g5.passed) { Write-Warning "G5 미완료: 누락 $($missing -join ', '), M2 매트릭스 $($m2Matrix.Count)/$MatrixExpected" }
 }
 if (-not $result.passed) { throw "UI 테스트 실패: $failed" }
 if ((Test-Path $g5Path) -and -not (Get-Content $g5Path -Encoding UTF8 -Raw | ConvertFrom-Json).passed) { throw 'G5 묶음이 완전하지 않습니다.' }

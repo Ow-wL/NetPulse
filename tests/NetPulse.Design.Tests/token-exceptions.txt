@@ -1,5 +1,2 @@
 # 정적 검사 예외 (M2 설계 4.6): 파일|규칙|줄 내용 일부|이유
 # 파일 단위 일괄 예외는 두지 않는다. 쓰이지 않는 예외는 테스트가 실패시킨다.
-src/NetPulse.App/App.xaml.cs|time-literal|scenario.ProbeTargets, TimeSpan.FromSeconds(1)|측정 주기 1초 (디자인 값이 아니라 측정 설정. M3에서 측정 설정으로 옮긴다)
-src/NetPulse.App/App.xaml.cs|time-literal|new IcmpProbe(TimeSpan.FromMilliseconds(800))|ICMP 응답 제한시간 (측정 설정. M3에서 옮긴다)
-src/NetPulse.App/App.xaml.cs|time-literal|StopAsync(TimeSpan.FromSeconds(3))|엔진 종료 대기 3초 (M1 설계 2절의 수명 규칙, 디자인 값 아님)

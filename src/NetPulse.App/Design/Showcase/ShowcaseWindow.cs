@@ -544,6 +544,9 @@ public sealed partial class ShowcaseWindow : Window
         if (closing) return;
         closing = true;
         runTimer?.Stop();
+        // 진행 중인 테마 전환의 정리를 UI가 살아 있는 동안 기다린다 (M2 이월 1). 닫기 직전 정리 상태를 기록한다.
+        await ui.Theme.ShutdownAsync(Waits.ThemeCleanup);
+        log.Write("closeCleanup", new { snapshotLayers = ui.Theme.SnapshotLayersInTree, inTransition = ui.Theme.InTransition, rendering = ui.Theme.RenderingSubscribed });
         AppWindow.Hide();
         try { await beforeClose(); }
         finally

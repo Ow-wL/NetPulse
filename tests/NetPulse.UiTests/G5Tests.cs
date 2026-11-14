@@ -111,13 +111,13 @@ public sealed class G5Tests
         Assert.True(problems.Count == 0, string.Join("\n", problems));
     }
 
-    private sealed record ContrastMeasure(double CellP10Min, double P1, int LargestFailingBlob, int Cells);
+    internal sealed record ContrastMeasure(double CellP10Min, double P1, int LargestFailingBlob, int Cells);
 
     /// <summary>
     /// 글자 없는 캡처에서 글자 요소 경계 + 4 px 영역의 픽셀마다 (지정 글자색, 그 픽셀)의 대비를 구한다 (설계 7.3).
     /// 칸(글자 높이 크기 정사각) 마다 10백분위, 기준 미달 픽셀의 4방향 연결 덩어리 크기, 전체 1백분위.
     /// </summary>
-    private static ContrastMeasure MeasureContrast(Bitmap bg, Rectangle box, Rgba fg, double threshold)
+    internal static ContrastMeasure MeasureContrast(Bitmap bg, Rectangle box, Rgba fg, double threshold)
     {
         var r = Rectangle.Intersect(Rectangle.Inflate(box, 4, 4), new Rectangle(Point.Empty, bg.Size));
         var px = ImageCompare.Pixels(bg, r);

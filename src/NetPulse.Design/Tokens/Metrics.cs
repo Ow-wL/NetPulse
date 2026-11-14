@@ -33,6 +33,28 @@ public static class Size
     public const double IconStroke = 1.7;
     public const double ToggleTrackWidth = 40, ToggleTrackHeight = 22, ToggleKnob = 16;
     public const double ToastWidth = 340, DialogWidth = 420;
+    /// <summary>등급 고리 (M5 홈): 지름, 고리 굵기</summary>
+    public const double GradeRing = 132, GradeRingStroke = 10;
+    /// <summary>경로 맵 노드 지름, 선 굵기, 흐르는 빛 점</summary>
+    public const double MapNode = 60, MapLine = 2, MapGlow = 6;
+    /// <summary>진행 막대 높이</summary>
+    public const double MeterHeight = 6;
+    /// <summary>최근 측정 줄의 등급 배지</summary>
+    public const double RowBadge = 40;
+    /// <summary>타임라인 높이: 측정 화면, 홈 (간단 모드)</summary>
+    public const double TimelineTall = 300, TimelineCompact = 236;
+    /// <summary>타임라인 위쪽 표시 줄 (증상 점, 링크 막대)의 높이, 증상 점 지름</summary>
+    public const double TimelineLane = 10, MarkerDot = 8;
+    /// <summary>입력 칸 너비: 짧은 숫자, 보통, 긴 글</summary>
+    public const double FieldS = 96, FieldM = 180, FieldL = 260;
+    /// <summary>메모 입력 칸의 최소 높이</summary>
+    public const double MemoMinHeight = 64;
+    /// <summary>대상 카드 최소 너비 (한 줄에 셋)</summary>
+    public const double TargetCardMin = 220;
+    /// <summary>첫 실행 안내 카드 최대 너비</summary>
+    public const double GuideWidth = 640;
+    /// <summary>홈을 두 열로 놓는 최소 너비 (그보다 좁으면 한 열, 배율 150% 상당)</summary>
+    public const double HomeTwoColumns = 760;
     /// <summary>창의 기본 클라이언트 크기 (물리 픽셀). UI 테스트와 캡처 매트릭스도 이 크기를 쓴다.</summary>
     public const int WindowWidth = 1280, WindowHeight = 800;
 }
@@ -52,12 +74,16 @@ public static class Emphasis
     public const double PointerGlow = 0.08;
     /// <summary>격자선</summary>
     public const double Grid = 1;
+    /// <summary>일부 응답 없음 줄, 관측 공백 빗금, 응답이 확인되지 않은 선</summary>
+    public const double PartialBand = 0.85, GapBand = 0.55, Unconfirmed = 0.5;
 }
 
 /// <summary>그래프 스타일 (M2 설계 5.6).</summary>
 public static class ChartStyle
 {
     public const double Line = 2, Line2 = 1.5, DashOn = 4, DashOff = 3, Height = 180, AxisGap = 6, MaxMs = 120;
+    /// <summary>증상 표시 세로선, 공백 빗금 간격</summary>
+    public const double Marker = 1.5, Hatch = 6;
     public const int GridLines = 4;
 }
 

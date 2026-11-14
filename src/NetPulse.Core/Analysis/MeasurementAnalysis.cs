@@ -90,9 +90,20 @@ public static class MeasurementAnalysis
     }
 
     /// <param name="elapsedMs">측정 중(잠정) 분석이면 지금까지의 경과 ms. 끝난 기록은 요약의 끝 시각을 쓴다</param>
+    /// <param name="live">
+    /// 측정 중이면 직접 관측의 지금 상태 (M5 설계 3.2). 끝 요약을 아직 쓰지 않았으면 같은 형식의 잠정 요약 줄을 이벤트 뒤에 붙여
+    /// 진행 중 다운을 마지막 표본까지 복원한다 (현재 시각까지 늘리지 않는다).
+    /// </param>
     public static AnalysisResult Analyze(RecordHeader header, IReadOnlyList<RoundData> rounds, IReadOnlyList<GapSpan> gaps,
-        IReadOnlyList<JsonObject> events, RecordSummary? summary, bool provisional = false, long? elapsedMs = null)
+        IReadOnlyList<JsonObject> events, RecordSummary? summary, bool provisional = false, long? elapsedMs = null,
+        NetPulse.Core.Measurement.LinkLive? live = null)
     {
+        if (live is not null)
+        {
+            long at = elapsedMs ?? rounds.Select(r => r.EndMs ?? r.AtMs).DefaultIfEmpty(0).Max();
+            var extra = live.ToSummaryEvents(header.Id, at, header.StartedAt + TimeSpan.FromMilliseconds(at));
+            if (extra.Count > 0) events = events.Concat(extra).ToArray();
+        }
         var ordered = rounds.OrderBy(r => r.Round).ToArray();
         var links = LinkEvidenceBuilder.FromEvents(events);
         var ctx = JudgeContext.From(header, ordered, events, links);

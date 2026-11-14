@@ -40,6 +40,10 @@ public sealed partial class MeasurementSession
 
     /// <summary>시험 전용: 큐 넣기에 실패한 직후(넘침 등록 전, 잠금 안)에 부른다.</summary>
     internal Action? TestHookAfterLinkEnqueueFailed { get; set; }
+    /// <summary>시험 전용: 표본이 들어와 잠금을 잡기 직전 (재관측 생산자의 진입 신호, G4 M5 1라운드 C1).</summary>
+    internal Action? TestHookLinkSampleArrived { get; set; }
+    /// <summary>시험 전용: 처리 작업이 큐에서 표본을 꺼낸 직후, 잠금 전 (소비자의 배출 신호).</summary>
+    internal Action? TestHookLinkDequeued { get; set; }
     private readonly Dictionary<string, AdapterTrack> adapterTracks = [];   // Key → 추적 (처리 작업 또는 끝에서만, linkGate 안)
     private readonly Dictionary<string, long> overflowByKey = [];
     private readonly object linkGate = new();
@@ -88,6 +92,7 @@ public sealed partial class MeasurementSession
     private void OnLinkSample(LinkSample sample)
     {
         if (linkClosed || directCapability != LinkCapability.Supported) return;
+        TestHookLinkSampleArrived?.Invoke();
         lock (linkGate)
         {
             var item = new LinkItem(sample, (long)clock.Elapsed.TotalMilliseconds, clock.Now, linkOverflow);
@@ -114,10 +119,20 @@ public sealed partial class MeasurementSession
     /// <summary>시험 전용: 링크 수집이 닫혔는지.</summary>
     internal bool LinkClosed => linkClosed;
 
+    /// <summary>시험 전용: 큐에 있는 링크 표본 수.</summary>
+    internal int LinkQueueCount => linkQueue.Reader.Count;
+
+    /// <summary>시험 전용: 링크 표본 마감 시각을 바꾼다 (받을 때·꺼낼 때 검사를 따로 시험, M4 이월 1).</summary>
+    internal void TestSetLinkCutoff(long ms) => Volatile.Write(ref linkCutoffMs, ms);
+
     /// <summary>큐에 쌓인 링크 표본을 처리한다 (처리 작업, 또는 처리 작업이 멈춘 뒤 끝에서).</summary>
     private void DrainLinks()
     {
-        while (linkQueue.Reader.TryRead(out var item)) ProcessLink(item);
+        while (linkQueue.Reader.TryRead(out var item))
+        {
+            TestHookLinkDequeued?.Invoke();
+            ProcessLink(item);
+        }
     }
 
     /// <summary>측정 끝 경계 (경과 ms). 끝낼 때 정리 전에 고정한다. 그 뒤 표본은 큐에 있어도 버린다.</summary>
@@ -158,6 +173,7 @@ public sealed partial class MeasurementSession
         fields["eventMs"] = item.Ms;
         fields["eventWall"] = RecordSchema.Iso(item.Wall);
         if (item.Sample.Code is not null) fields["code"] = item.Sample.Code;
+        string eventId;
         lock (linkGate)
         {
             if (track.State is { } prev)
@@ -168,8 +184,11 @@ public sealed partial class MeasurementSession
             }
             track.State = item.Sample.State;
             track.First = track.Last = item.Ms;
+            // 트랙 상태와 이벤트 등록을 같은 잠금 안에서: 실시간 사본(M5 설계 3.2)이 둘 중 하나만 보지 않게
+            eventId = RegisterEvent(RecordSchema.EventLine(Id, "link", null, item.Ms, item.Wall, fields), null);
         }
-        WriteEvent(RecordSchema.EventLine(Id, "link", null, item.Ms, item.Wall, fields));
+        RetryEvents();
+        PublishEvent(eventId);
     }
 
     private static void CloseUnknown(AdapterTrack t)
@@ -196,44 +215,19 @@ public sealed partial class MeasurementSession
 
         if (options.Links is not null && directCapability == LinkCapability.Supported)
         {
-            if (tracks.Length == 0)
-                WriteEvent(RecordSchema.EventLine(Id, "link", null, at, endWall,
-                    new JsonObject { ["source"] = "direct", ["collection"] = "unsupported", ["code"] = "no-interface" }));
-            foreach (var t in tracks)
+            // 요약 줄은 잠정 분석이 쓰는 것과 같은 함수로 만든다 (DirectSummary, M5 설계 3.2).
+            // 등록·게시·"요약을 썼음" 표시를 한 경계(linkGate → sync) 안에서: 사본(게시한 이벤트만 담음)과 전달이
+            // 실제 요약과 잠정 요약을 함께 보거나, 둘 다 못 보는 순간이 없게 (G4 M5 1라운드 A1·2라운드 1).
+            // 게시는 쓰기 대기 상태로 하고, 디스크 쓰기 결과는 상태 변경 항목으로 뒤따른다
+            lock (linkGate)
             {
-                JsonObject fields;
-                lock (linkGate)
-                {
-                    CloseUnknown(t);
-                    long missed = overflowByKey.GetValueOrDefault(t.Info.Key);
-                    long watched = t.Watched + missed;
-                    fields = AdapterFields(t);
-                    fields["collection"] = "summary";
-                    fields["capability"] = "supported";
-                    fields["watchedRounds"] = watched;
-                    fields["observedRounds"] = t.Observed;
-                    fields["coverage"] = watched == 0 ? 0.0 : Math.Round((double)t.Observed / watched, 4);
-                    fields["unobserved"] = new JsonArray(t.Unobserved.Select(u => (JsonNode)new JsonArray(u.From, u.To)).ToArray());
-                    if (t.UnobservedOverflow > 0) fields["unobservedMore"] = t.UnobservedOverflow;
-                    if (missed > 0) fields["overflow"] = missed;
-                    if (t.State is { } last)
-                    {
-                        fields["lastState"] = LinkEvidenceBuilder.Text(last);
-                        fields["lastFirstMs"] = t.First;
-                        fields["lastLastMs"] = t.Last;
-                    }
-                }
-                WriteEvent(RecordSchema.EventLine(Id, "link", null, at, endWall, fields));
+                foreach (var t in tracks) CloseUnknown(t);
+                var lines = DirectSummary.Lines(tracks.Select(SnapshotTrack).ToArray(), linkOverflow, overflowSpans.ToArray());
+                var ids = lines.Select(fields => RegisterEvent(RecordSchema.EventLine(Id, "link", null, at, endWall, fields), null)).ToArray();
+                foreach (var id in ids) PublishEvent(id);
+                linkSummaryWritten = true;
             }
-            long totalOverflow;
-            (long From, long To)[] spans;
-            lock (linkGate) { totalOverflow = linkOverflow; spans = overflowSpans.ToArray(); }
-            if (totalOverflow > 0)
-                WriteEvent(RecordSchema.EventLine(Id, "link", null, at, endWall, new JsonObject
-                {
-                    ["source"] = "direct", ["collection"] = "overflow", ["count"] = totalOverflow,
-                    ["spans"] = new JsonArray(spans.Select(x => (JsonNode)new JsonArray(x.From, x.To)).ToArray()),
-                }));
+            RetryEvents();
         }
 
         if (options.LinkLog is { } logSource) ReadLinkLog(logSource, tracks, at, endWall);

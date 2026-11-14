@@ -1,0 +1,204 @@
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Shapes;
+using NetPulse.Core.Presentation;
+using NetPulse.Design.Tokens;
+
+namespace NetPulse.App.Design.Controls;
+
+/// <summary>타임라인 조작 (키보드·휠·버튼이 같은 명령).</summary>
+public enum TimelineCommand { ZoomIn, ZoomOut, PanLeft, PanRight, ToStart, ToNow, ShowAll }
+
+/// <summary>
+/// 겹침 타임라인 (M5 설계 4.7, N1). 값은 Core <see cref="TimelineModel"/>이 정하고 이 부품은 그리기만 한다.
+/// <list type="bullet">
+/// <item>공유기 지연 = 보조 계열(점선), 인터넷 지연 = 강조색 실선. 색과 선 모양을 함께 달리한다.</item>
+/// <item>응답 없음이 관측된 회차 = 끊김 색 띠, 일부만 = 위쪽 주의 색 줄, 관측 공백 = 빗금 회색.</item>
+/// <item>위쪽 표시 줄: 증상(주의 색 점 + 세로 점선), 링크 끊김(끊김 색 막대, 이어지는 중이면 마지막 표본까지).</item>
+/// </list>
+/// 키보드(초점이 있을 때): ←/→ 이동, +/− 확대, Home/End 처음/지금. Ctrl+휠 확대, 휠 이동. 화면 읽기 이름은 요약 문장.
+/// XAML 도형으로 그리되 점 수는 열 수의 두 배로 제한된다 (간추리기).
+/// </summary>
+public sealed class TimelinePanel : UserControl
+{
+    private readonly Ui ui;
+    private readonly Canvas canvas = new();
+    private readonly bool compact;
+    private TimelineFrame? frame;
+    private Func<long, string> timeLabel = _ => "";
+    private bool follow;
+
+    public TimelinePanel(Ui ui, string automationId, bool compact)
+    {
+        this.ui = ui;
+        this.compact = compact;
+        AutomationProperties.SetAutomationId(this, automationId);
+        Height = compact ? Size.TimelineCompact : Size.TimelineTall;
+        IsTabStop = !compact;
+        UseSystemFocusVisuals = true;
+        FocusVisualPrimaryBrush = ui.Brushes.FocusOuter;
+        FocusVisualSecondaryBrush = ui.Brushes.FocusInner;
+        FocusVisualPrimaryThickness = new Thickness(Size.FocusOuter);
+        FocusVisualSecondaryThickness = new Thickness(Size.FocusInner);
+        Content = canvas;
+        canvas.Background = ui.Brushes.Transparent;   // 휠·포인터를 받기 위해
+        SizeChanged += (_, _) => Draw();
+        if (!compact)
+        {
+            KeyDown += OnKey;
+            PointerWheelChanged += OnWheel;
+        }
+    }
+
+    /// <summary>조작 요청 (화면이 보기 창을 바꾸고 다시 그린다).</summary>
+    public event Action<TimelineCommand>? Command;
+
+    /// <summary>열 수 = 그래프 폭 (픽셀). 화면이 <see cref="TimelineModel.Frame"/>에 넘긴다.</summary>
+    public int Columns => Math.Max(1, (int)Math.Round(ActualWidth));
+
+    public void Show(TimelineFrame next, Func<long, string> label, bool followingNow, string? range)
+    {
+        frame = next;
+        timeLabel = label;
+        follow = followingNow;
+        AutomationProperties.SetName(this, next.Summary);
+        AutomationProperties.SetHelpText(this, range ?? "");
+        Draw();
+    }
+
+    protected override AutomationPeer OnCreateAutomationPeer() => new Peer(this);
+
+    private sealed class Peer(FrameworkElement owner) : FrameworkElementAutomationPeer(owner)
+    {
+        protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.Group;
+        protected override string GetClassNameCore() => "Timeline";
+    }
+
+    private void OnKey(object sender, KeyRoutedEventArgs e)
+    {
+        TimelineCommand? c = e.Key switch
+        {
+            Windows.System.VirtualKey.Left => TimelineCommand.PanLeft,
+            Windows.System.VirtualKey.Right => TimelineCommand.PanRight,
+            Windows.System.VirtualKey.Add or (Windows.System.VirtualKey)187 => TimelineCommand.ZoomIn,
+            Windows.System.VirtualKey.Subtract or (Windows.System.VirtualKey)189 => TimelineCommand.ZoomOut,
+            Windows.System.VirtualKey.Home => TimelineCommand.ToStart,
+            Windows.System.VirtualKey.End => TimelineCommand.ToNow,
+            _ => null,
+        };
+        if (c is { } cmd) { Command?.Invoke(cmd); e.Handled = true; }
+    }
+
+    private void OnWheel(object sender, PointerRoutedEventArgs e)
+    {
+        int delta = e.GetCurrentPoint(this).Properties.MouseWheelDelta;
+        bool ctrl = (e.KeyModifiers & Windows.System.VirtualKeyModifiers.Control) != 0;
+        Command?.Invoke(ctrl ? (delta > 0 ? TimelineCommand.ZoomIn : TimelineCommand.ZoomOut) : (delta > 0 ? TimelineCommand.PanLeft : TimelineCommand.PanRight));
+        e.Handled = true;
+    }
+
+    private void Draw()
+    {
+        canvas.Children.Clear();
+        double w = ActualWidth, h = ActualHeight;
+        if (frame is not { } f || w <= 0 || h <= 0) return;
+        double laneH = Size.TimelineLane;
+        double top = laneH + Space.S2;                                  // 위쪽 표시 줄 아래부터 그래프
+        double axisH = Typography.Caption.Size + ChartStyle.AxisGap;
+        double plotH = Math.Max(1, h - top - axisH);
+        double span = Math.Max(1, f.ToMs - f.FromMs);
+        double X(double ms) => (ms - f.FromMs) / span * w;
+        double Y(double v) => top + plotH - Math.Min(v, f.AxisMaxMs) / f.AxisMaxMs * plotH;
+
+        // 격자와 세로축 값
+        for (int g = 0; g <= ChartStyle.GridLines; g++)
+        {
+            double y = top + plotH * g / ChartStyle.GridLines;
+            canvas.Children.Add(Decor(new Line { X1 = 0, X2 = w, Y1 = y, Y2 = y, Stroke = ui.Brushes.Faint, StrokeThickness = Emphasis.Grid }));
+        }
+        var axisMax = Fonts.Text($"{f.AxisMaxMs:0} ms", Typography.Caption, ui.Brushes.Muted);
+        Canvas.SetTop(axisMax, top);
+        canvas.Children.Add(axisMax);
+
+        // 띠 (응답 없음이 관측된 회차 칸, 공백)
+        foreach (var b in f.Bands)
+        {
+            double x1 = Math.Max(0, X(b.FromMs)), x2 = Math.Min(w, X(b.ToMs));
+            double bw = Math.Max(Size.Hairline, x2 - x1);
+            Rectangle rect = b.Kind switch
+            {
+                BandKind.ExternalNone => new Rectangle { Width = bw, Height = plotH, Fill = ui.Brushes.Bad, Opacity = Emphasis.LossBand },
+                BandKind.PartialNone => new Rectangle { Width = bw, Height = Size.Hairline * 3, Fill = ui.Brushes.Warn, Opacity = Emphasis.PartialBand },
+                _ => new Rectangle { Width = bw, Height = plotH, Fill = ui.Brushes.Faint, Stroke = ui.Brushes.Edge, StrokeThickness = Size.Hairline, StrokeDashArray = [ChartStyle.Hatch, ChartStyle.Hatch], Opacity = Emphasis.GapBand },
+            };
+            Canvas.SetLeft(rect, x1);
+            Canvas.SetTop(rect, b.Kind == BandKind.PartialNone ? top : top);
+            canvas.Children.Add(Decor(rect));
+        }
+
+        // 선 (구간마다 따로: 누락·공백·값 없음을 건너 잇지 않음)
+        foreach (var seg in f.Router) canvas.Children.Add(Series(seg, ui.Brushes.Series2, ChartStyle.Line2, dashed: true, X, Y));
+        foreach (var seg in f.Internet) canvas.Children.Add(Series(seg, ui.Brushes.Accent, ChartStyle.Line, dashed: false, X, Y));
+
+        // 위쪽 표시 줄: 링크 끊김 막대, 증상 점과 세로 점선
+        foreach (var d in f.LinkDowns)
+        {
+            double x1 = Math.Max(0, X(d.FromMs)), x2 = Math.Min(w, X(d.ToMs));
+            var bar = new Rectangle { Width = Math.Max(Size.MarkerDot / 2, x2 - x1), Height = laneH / 2, Fill = ui.Brushes.Bad, RadiusX = laneH / 4, RadiusY = laneH / 4 };
+            Canvas.SetLeft(bar, x1);
+            Canvas.SetTop(bar, laneH / 4);
+            canvas.Children.Add(Decor(bar));
+        }
+        foreach (var m in f.Marks)
+        {
+            double x = X(m.AtMs);
+            canvas.Children.Add(Decor(new Line { X1 = x, X2 = x, Y1 = top, Y2 = top + plotH, Stroke = ui.Brushes.Warn, StrokeThickness = ChartStyle.Marker, StrokeDashArray = [ChartStyle.DashOn, ChartStyle.DashOff] }));
+            var dot = new Ellipse { Width = Size.MarkerDot, Height = Size.MarkerDot, Fill = ui.Brushes.Warn };
+            Canvas.SetLeft(dot, x - Size.MarkerDot / 2);
+            Canvas.SetTop(dot, (laneH - Size.MarkerDot) / 2);
+            canvas.Children.Add(Decor(dot));
+        }
+
+        // 가로축 시각
+        int ticks = compact ? 3 : 5;
+        for (int i = 0; i < ticks; i++)
+        {
+            double at = (double)i / (ticks - 1);
+            long ms = f.FromMs + (long)(span * at);
+            string text = follow && i == ticks - 1 ? "지금" : timeLabel(ms);
+            var t = Fonts.Text(text, Typography.Caption, ui.Brushes.Muted);
+            t.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+            Canvas.SetLeft(t, Math.Clamp(w * at - t.DesiredSize.Width * at, 0, Math.Max(0, w - t.DesiredSize.Width)));
+            Canvas.SetTop(t, top + plotH + ChartStyle.AxisGap);
+            canvas.Children.Add(t);
+        }
+    }
+
+    private static UIElement Decor(UIElement e)
+    {
+        AutomationProperties.SetAccessibilityView(e, AccessibilityView.Raw);
+        return e;
+    }
+
+    private static Polyline Series(IReadOnlyList<TimelinePoint> points, Brush brush, double thickness, bool dashed, Func<double, double> x, Func<double, double> y)
+    {
+        var line = new Polyline { Stroke = brush, StrokeThickness = thickness, StrokeLineJoin = PenLineJoin.Round };
+        if (dashed) line.StrokeDashArray = [ChartStyle.DashOn, ChartStyle.DashOff];
+        foreach (var p in points)
+        {
+            line.Points.Add(new Windows.Foundation.Point(x(p.XMs), y(p.MinMs)));
+            if (p.MaxMs > p.MinMs) line.Points.Add(new Windows.Foundation.Point(x(p.XMs), y(p.MaxMs)));
+        }
+        if (points.Count == 1)   // 점 하나뿐인 구간도 보이게 (짧은 가로선)
+        {
+            var only = line.Points[0];
+            line.Points.Add(new Windows.Foundation.Point(only.X + thickness, only.Y));
+        }
+        AutomationProperties.SetAccessibilityView(line, AccessibilityView.Raw);
+        return line;
+    }
+}

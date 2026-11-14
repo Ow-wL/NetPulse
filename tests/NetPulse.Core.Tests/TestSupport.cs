@@ -11,6 +11,17 @@ internal static class TestSupport
     public static ProbeTarget Target(string id, string role = "external", string address = "192.0.2.10") =>
         new(id, role, IPAddress.Parse(address));
 
+    /// <summary>제한시간을 정해 기다린다 (처리량이 디스크 속도에 달린 시험).</summary>
+    public static async Task EventuallyWithin(Func<bool> condition, string what, TimeSpan limit)
+    {
+        var deadline = DateTime.UtcNow + limit;
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException("조건을 만족하지 못했습니다: " + what);
+            await Task.Delay(20, TestContext.Current.CancellationToken);
+        }
+    }
+
     /// <summary>비동기 작업이 조건을 만족할 때까지 기다린다 (최대 5초).</summary>
     public static async Task Eventually(Func<bool> condition, string what)
     {

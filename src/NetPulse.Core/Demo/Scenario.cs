@@ -28,6 +28,12 @@ public sealed class Scenario
     /// <summary>선택 (M4): 링크가 내려간 회차 구간 (from 이상 to 미만). 데모 경로·링크 관측이 쓴다.</summary>
     public IReadOnlyList<ScenarioLink>? Links { get; init; }
 
+    /// <summary>선택 (M5): 데모 탐지가 볼 연결. 없으면 유선, 가상 아님, 다른 게이트웨이 0.</summary>
+    public ScenarioNetwork? Network { get; init; }
+
+    /// <summary>선택 (M5): 입력 경계의 고장 주입 (탐지 늦음·실패, 저장 실패, 절전 공백).</summary>
+    public ScenarioFaults? Faults { get; init; }
+
     /// <summary>그 회차에 데모 링크가 내려가 있는지.</summary>
     public bool LinkDownAt(long round) => Links?.Any(l => round >= l.From && round < l.To) ?? false;
 
@@ -85,6 +91,25 @@ public sealed class Scenario
         }
         foreach (var (link, i) in (Links ?? []).Select((l, i) => (l, i)))
             if (link.From < 0 || link.To <= link.From) throw new ScenarioException($"링크 {i}: from은 0 이상, to는 from보다 커야 합니다.");
+        foreach (var target in Targets)
+        {
+            if (target.Name is { } n && (n.Trim().Length == 0 || n.Length > 40)) throw new ScenarioException($"대상 이름은 1~40자여야 합니다: {target.Id}");
+            if (target.Provider is { } p && (p.Trim().Length == 0 || p.Length > 40)) throw new ScenarioException($"사업자 이름은 1~40자여야 합니다: {target.Id}");
+        }
+        if (Network is { } net)
+        {
+            if (net.Kind is not ("wired" or "wireless" or "none")) throw new ScenarioException("network.kind는 wired, wireless, none 중 하나입니다.");
+            if (net.OtherGateways < 0) throw new ScenarioException("network.otherGateways는 0 이상입니다.");
+        }
+        if (Faults is { } f)
+        {
+            if (f.DetectDelayMs is < 0) throw new ScenarioException("faults.detectDelayMs는 0 이상입니다.");
+            if (f.Detect is not (null or "unknown")) throw new ScenarioException("faults.detect는 unknown만 쓸 수 있습니다.");
+            if (f.StorageFailFrom is < 0) throw new ScenarioException("faults.storageFailFrom은 0 이상입니다.");
+            if (f.StorageRecoverAt is { } r && (f.StorageFailFrom is not { } from || r <= from)) throw new ScenarioException("faults.storageRecoverAt은 storageFailFrom보다 커야 합니다.");
+            if ((f.SuspendAt is null) != (f.SuspendSeconds is null)) throw new ScenarioException("faults.suspendAt과 suspendSeconds는 함께 적어야 합니다.");
+            if (f.SuspendAt is < 1 || f.SuspendSeconds is < 1) throw new ScenarioException("faults.suspendAt과 suspendSeconds는 1 이상입니다.");
+        }
     }
 
     internal static bool IsDocumentationAddress(IPAddress address)
@@ -99,6 +124,35 @@ public sealed class ScenarioTarget
     public required string Id { get; init; }
     public required string Role { get; init; }
     public required string Address { get; init; }
+    /// <summary>선택 (M5): 화면에 보일 이름. 없으면 id.</summary>
+    public string? Name { get; init; }
+    /// <summary>선택 (M5): 사업자 (외부 대상 다양성 판단). 없으면 비움.</summary>
+    public string? Provider { get; init; }
+}
+
+/// <summary>데모 탐지가 볼 연결 (M5).</summary>
+public sealed class ScenarioNetwork
+{
+    public string Kind { get; init; } = "wired";
+    public bool Virtual { get; init; }
+    public int OtherGateways { get; init; }
+}
+
+/// <summary>입력 경계의 고장 주입 (M5 설계 3.4). 집계·저장 로직은 제품 코드 그대로 탄다.</summary>
+public sealed class ScenarioFaults
+{
+    /// <summary>탐지가 이만큼 늦게 끝난다 (실제 ms).</summary>
+    public int? DetectDelayMs { get; init; }
+    /// <summary>"unknown"이면 탐지 실패 (경로 조회 실패).</summary>
+    public string? Detect { get; init; }
+    /// <summary>두 저장 위치 모두 측정을 시작하지 못한다.</summary>
+    public bool StorageStartFail { get; init; }
+    /// <summary>이 회차부터 기록 쓰기가 실패한다 (StorageRecoverAt 회차에서 회복).</summary>
+    public long? StorageFailFrom { get; init; }
+    public long? StorageRecoverAt { get; init; }
+    /// <summary>이 회차에서 데모 절전 알림을 보내고 측정 시간을 SuspendSeconds만큼 건너뛴다.</summary>
+    public long? SuspendAt { get; init; }
+    public int? SuspendSeconds { get; init; }
 }
 
 public sealed class ScenarioSegment

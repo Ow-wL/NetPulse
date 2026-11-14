@@ -45,6 +45,9 @@ public sealed class Motion
     /// <summary>시험용: 반복 모션을 시작하지 않는다 (같은 화면을 매번 같은 모습으로 찍기 위해). 진단에 남는다.</summary>
     public bool Frozen { get; set; }
 
+    /// <summary>시험·캡처: 한 번 도는 모션을 이 진행도(0~1)에서 멈춘다 (화면 전환 장면, M5).</summary>
+    public double? HoldAt { get; set; }
+
     public event Action? ActiveChanged;
 
     public IReadOnlyDictionary<MotionKind, int> ActiveByKind =>
@@ -112,6 +115,16 @@ public sealed class Motion
         a.InsertKeyFrame(1, to, linear);
         a.Duration = Reduced ? MotionTokens.Fade : duration ?? MotionTokens.Fade;
         Run(element, MotionKind.Fade, visual, ("Opacity", a), null, () => visual.Opacity = to);
+    }
+
+    /// <summary>
+    /// 교차 페이드 (M2 설계 4.5가 약속한 화면 전환, M5에서 만듦): 나가는 요소를 짧게 흐리고, 들어오는 요소들을 차례로 등장시킨다.
+    /// 줄이기면 들어오는 쪽도 짧은 페이드만 (Enter가 보장).
+    /// </summary>
+    public void CrossFade(UIElement? outgoing, IReadOnlyList<UIElement> incoming)
+    {
+        if (outgoing is not null) Fade(outgoing, (float)Emphasis.Full, 0, MotionTokens.Fade);
+        Stagger(incoming);
     }
 
     /// <summary>요소를 지정 위치(Translation)로 옮김. 줄이기면 바로 옮김.</summary>
@@ -227,8 +240,14 @@ public sealed class Motion
     /// </summary>
     public void SharedMove(FrameworkElement from, FrameworkElement to, UIElement relativeTo)
     {
-        if (Reduced || from.ActualWidth <= 0 || to.ActualWidth <= 0) { Fade(to, 0, (float)Emphasis.Full); return; }
-        var f = from.TransformToVisual(relativeTo).TransformBounds(new Windows.Foundation.Rect(0, 0, from.ActualWidth, from.ActualHeight));
+        if (from.ActualWidth <= 0) { Fade(to, 0, (float)Emphasis.Full); return; }
+        SharedMove(from.TransformToVisual(relativeTo).TransformBounds(new Windows.Foundation.Rect(0, 0, from.ActualWidth, from.ActualHeight)), to, relativeTo);
+    }
+
+    /// <summary>출발 요소가 이미 화면에서 빠진 경우: 빠지기 전에 잰 경계에서 옮겨 온다 (M5 화면 전환).</summary>
+    public void SharedMove(Windows.Foundation.Rect f, FrameworkElement to, UIElement relativeTo)
+    {
+        if (Reduced || f.Width <= 0 || to.ActualWidth <= 0) { Fade(to, 0, (float)Emphasis.Full); return; }
         var t = to.TransformToVisual(relativeTo).TransformBounds(new Windows.Foundation.Rect(0, 0, to.ActualWidth, to.ActualHeight));
         var visual = Prepare(to);
         visual.CenterPoint = Vector3.Zero;
@@ -289,6 +308,12 @@ public sealed class Motion
         visual.StartAnimation(first.Property, first.Animation);
         if (second is { } sec) visual.StartAnimation(sec.Property, sec.Animation);
         batch.End();
+        if (HoldAt is { } p && !forever)
+        {
+            // 캡처용: 화면 전환 등 한 번 도는 모션을 이 진행도에서 멈춘다 (M5 G5 전환 장면)
+            foreach (var prop in second is { } s2 ? new[] { first.Property, s2.Property } : [first.Property])
+                if (visual.TryGetAnimationController(prop) is { } controller) { controller.Pause(); controller.Progress = (float)p; }
+        }
         // 끝없는 반복은 끝나지 않는다. 한 번 돌거나 횟수가 정해진 것은 끝나면 최종 상태로 정리하고 해제한다.
         batch.Completed += (_, _) => owner.DispatcherQueue?.TryEnqueue(() => { if (!forever) Finish(); });
         detachUnloaded = owner.RegisterUnloaded(Finish);

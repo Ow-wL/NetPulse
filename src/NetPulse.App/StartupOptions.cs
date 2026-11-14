@@ -17,6 +17,24 @@ public sealed record StartupOptions
     /// <summary>0보다 크면 그 시간 뒤 스스로 닫힌다 (자동화용)</summary>
     public int RunSeconds { get; init; }
 
+    // ---- M5 (설계 4.1): 캡처·bench 재현용. 기록 머리와 앱 기록에 남는다 ----
+    /// <summary>시작 화면 (home, measure, firstrun, profile, settings, diagnose, records, report)</summary>
+    public string? Screen { get; init; }
+    /// <summary>저장된 프로필로 바로 측정을 시작 (데모에서 프로필이 없으면 데모 탐지 제안으로)</summary>
+    public bool Start { get; init; }
+    /// <summary>데모: 지금 측정이 이 회차 + 0.5초에 닿으면 시간축이 멈춘다</summary>
+    public long? DemoHold { get; init; }
+    /// <summary>데모: 지금 측정이 이 회차에 닿으면 배속을 바꾼다</summary>
+    public (long Round, double Speed)? DemoSpeedAfter { get; init; }
+    /// <summary>최근 측정 분석을 시작하지 않는다 (불러오는 중 화면)</summary>
+    public bool HoldAnalysis { get; init; }
+    /// <summary>측정 시작 직전에 멈춘다 (시작 중 화면)</summary>
+    public bool HoldStart { get; init; }
+    /// <summary>데모: 지금 측정이 이 회차에 닿으면 증상을 표시하고 메모를 붙인다 (캡처에서 표시가 멈춘 시각 가장자리에 오지 않게)</summary>
+    public long? DemoMark { get; init; }
+    /// <summary>한 번 도는 모션을 이 진행도(0~1)에서 멈춘다 (화면 전환 캡처)</summary>
+    public double? MotionHold { get; init; }
+
     /// <summary>부품 전시 화면 (M2)</summary>
     public bool Showcase { get; init; }
     /// <summary>이번 실행에만 쓰는 설정 덮어쓰기 (저장하지 않음)</summary>
@@ -58,6 +76,14 @@ public sealed record StartupOptions
                 "--demo-speed" => o with { DemoSpeed = double.Parse(Next(), CultureInfo.InvariantCulture) },
                 "--user-data" => o with { UserData = Next() },
                 "--run-seconds" => o with { RunSeconds = int.Parse(Next(), CultureInfo.InvariantCulture) },
+                "--screen" => o with { Screen = Next() is var sc && ScreenIds.Contains(sc) ? sc : throw new ArgumentException($"알 수 없는 화면입니다: {sc}") },
+                "--start" => o with { Start = true },
+                "--demo-hold" => o with { DemoHold = long.Parse(Next(), CultureInfo.InvariantCulture) },
+                "--demo-speed-after" => o with { DemoSpeedAfter = ParseSpeedAfter(Next()) },
+                "--hold-analysis" => o with { HoldAnalysis = true },
+                "--hold-start" => o with { HoldStart = true },
+                "--demo-mark" => o with { DemoMark = long.Parse(Next(), CultureInfo.InvariantCulture) },
+                "--motion-hold" => o with { MotionHold = double.Parse(Next(), CultureInfo.InvariantCulture) },
                 "--showcase" => o with { Showcase = true },
                 "--theme" => o with
                 {
@@ -88,7 +114,20 @@ public sealed record StartupOptions
         }
         if (o.UiScale is < 1 or > 3) throw new ArgumentException("--ui-scale은 1~3");
         if (o.UserData.Length == 0)
-            o = o with { UserData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetPulse") };
+        {
+            // 데모 기록이 실제 기록 목록에 섞이지 않게 데모는 따로 (M5 설계 3.4)
+            var baseFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetPulse");
+            o = o with { UserData = o.Demo is null ? baseFolder : Path.Combine(baseFolder, "demo") };
+        }
         return o;
+    }
+
+    public static readonly IReadOnlySet<string> ScreenIds = new HashSet<string> { "home", "measure", "firstrun", "profile", "settings", "diagnose", "records", "report" };
+
+    private static (long, double) ParseSpeedAfter(string v)
+    {
+        var parts = v.Split(':');
+        if (parts.Length != 2) throw new ArgumentException("--demo-speed-after는 회차:배속 형식입니다 (예: 42600:1)");
+        return (long.Parse(parts[0], CultureInfo.InvariantCulture), double.Parse(parts[1], CultureInfo.InvariantCulture));
     }
 }

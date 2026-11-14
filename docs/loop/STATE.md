@@ -6,13 +6,26 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 마일스톤 | M4 근거와 분석 엔진 |
-| 단계 | 마감 (G4 6라운드 APPROVE, 2026-11-14) |
-| 브랜치 | `loop/m4-analysis` (분기 `loop/m3-engine`, M0~M3은 `main`에 병합됨) |
-| 설계 검토 라운드 | 2 / 2 (Claude 판정으로 3판 확정) |
-| diff 리뷰 라운드 | 6 / 6 (사용자 예외. 6라운드 APPROVE, 차단 0) |
-| 누적 실패 | 4 / 8 |
-| PR | base `main` (마감 스크립트가 만든다) |
+| 마일스톤 | M5 홈과 측정 화면 |
+| 단계 | G4 승인 → 마감 (푸시·PR·CI, `close-milestone.ps1 -Screens`). 승인 코드 X `67f071b` (3라운드 승인 `12bbb6b` 뒤 CI 시험 흔들림을 고쳐 사용자 승인 4라운드) |
+| 브랜치 | `loop/m5-home-measure` (base `main` `744aef2`) |
+| 설계 검토 라운드 | 2 / 2 (2라운드 REVISE 8건 → Claude 판정으로 모두 수용, 3판 확정. G4에서 재검토) |
+| diff 리뷰 라운드 | 4 (사용자 예외) / 3 (1라운드 나눠 받음 REVISE 16건 / 2라운드 REVISE 4건 / 3라운드 APPROVE / 4라운드 시험 수정만 APPROVE) |
+| 누적 실패 | 0 / 8 |
+| PR | Ow-wL/NetPulse#1 (base `main`) |
+
+**저장소 이전 (2026-11-14, `DECISIONS.md` "공개 저장소 이전")**: 공개 저장소 `Ow-wL/NetPulse`는 이력을 다시 쓴 새 저장소다. 아래 M0~M4 기록의 SHA·PR 번호는 옛 저장소(`Ow-wL/NetPulse-private`, 비공개) 기준이다.
+
+## 지난 마일스톤의 게이트 (M5)
+
+| 항목 | 값 |
+| --- | --- |
+| 승인받은 코드 커밋 X | `67f071b239be5f7d2bcd9ddd1386d63b1b62e550` (3라운드 승인 `12bbb6b` + 시험 수정) |
+| G1·G2 | `build/build.ps1 -Gate`: Core 302/302, Design 109/109, Platform 29/29, 미실행 0 |
+| G3·G5 | `build/ui-test.ps1`: 배포본 UI 시험 244/244 (실측 시나리오 클래스만 제외). G5 묶음 통과, 필수 누락 0, M5 매트릭스 134, M2 매트릭스 44. 측정 화면 bench (12시간 42,600회차): idle-live 95백분위 6.2 ms, 전환 최대 17.6·23.9·34.3 ms (zoom-full·pan·nav). 이전 실행에서는 nav 최대 48.0 ms도 나왔다 |
+| 실측 시나리오 (설계 7.3) | 이 PC에서 통과 (`.loop/shots/m5-live`, 공개 안 함) |
+| G4 | `.loop/reviews/m5-g4-r3-answer.md` APPROVE, 시험 수정은 `m5-g4-r4-answer.md` APPROVE (차단 0) |
+| manifest.json SHA-256 | `11357843C4D0B1B4607E375062A40D5EAEF9C4C0A83E49EC4C1B4AC6B8AE55E7` |
 
 ## 지난 마일스톤의 게이트 (M4)
 
@@ -53,8 +66,11 @@
 | M2 디자인 시스템 | `loop/m2-design-system` | Ow-wL/NetPulse#3 (base M1) | 열림, 사용자 머지 대기. CI 실행 43415674372 성공 (PR head `085f382`) |
 | M3 측정 엔진 | `loop/m3-engine` | Ow-wL/NetPulse#4 (base M2) | 병합됨 (`loop/m2-design-system`) |
 | M0~M3 통합 | `loop/m2-design-system` | Ow-wL/NetPulse#7 (base `main`) | `main`에 병합됨 (병합 커밋 `2af5dfe`) |
+| M4 근거와 분석 엔진 | `loop/m4-analysis` | Ow-wL/NetPulse#8 (base `main`) | `main`에 병합됨. 이후 새 공개 저장소로 이전 (새 `main` `744aef2`) |
 
-## 미해결 지적 (M2 G4 3라운드, 차단 아님 → M5에서 처리. M3에는 화면이 없어 그대로 둔다)
+(이 표의 PR·SHA는 옛 저장소 기준. M5부터 새 공개 저장소.)
+
+## 미해결 지적 (M2 G4 3라운드, 차단 아님 → M5에서 처리함: 1은 `Theme.ShutdownAsync`, 2·3은 재질·대비 범위 조정)
 
 1. 중요: 창을 닫을 때 진행 중인 원형 전환의 정리 완료를 기다리지 않는다 (`Theme.Detach` 직후 창 닫기). 전환 완료 작업을 보관하고 닫기 전에 기다린다. 실제 종료 오류는 재현되지 않았다.
 2. 중요: 대화상자 뒤 범위에 글자·그래프색이 들어 있지 않다. 넣으면 대화상자 위 `muted` 대비가 계산상 약 4.40으로 기준(4.5) 아래다. 대화상자 배후 범위와 실측 장면을 넓히고 재질을 조정한다.
@@ -67,12 +83,21 @@
 3. 중요: `SuspendGapSurvivesWhenRoundsAfterResumeAreSealedAsUnprocessed`는 원래 경쟁(꺼낸 뒤 분류 잠금 전에 마감)을 재현하지 못한다. 꺼냄과 분류 사이에 끼어드는 시험 지점을 두어 고정한다. 코드는 같은 잠금으로 해결됨.
 - 참고: 요약 게시가 시작된 뒤(이름 바꾸기)는 종료가 제한 없이 기다린다. 일관성을 위한 선택이며 "종료 기한은 게시 시작 전까지"로 표현한다.
 
-## 미해결 지적 (M4 G4 5·6라운드, 차단 아님 → M5에서 처리)
+## 미해결 지적 (M4 G4 5·6라운드, 차단 아님 → M5 A단계에서 처리함)
 
 1. 중요: 링크 표본 마감 검사의 두 위치(받을 때, 큐에서 꺼낼 때)를 각각 고정해 시험한다 (`SessionLinkTests`).
 2. 중요: 넘침 경쟁 시험(`LateOverflowRegistrationCannotMergeDownsAcrossTheLostSample`)이 큐 배출·재관측 생산자 진입을 `Task.Delay(200)`에 기댄다. 신호로 확인하고, 분리된 두 다운 구간의 존재·경계를 단언한다.
+3. 중요 (새 공개 저장소 첫 CI에서 발견): `OverflowIsRecorded`가 CI에서 한 번 시간 초과로 실패했다 (회차마다 알림 3000개를 넣고 "관측" 조건을 기다림). 같은 코드가 옛 저장소 PR CI와 로컬 15회 반복에서는 통과했고, 재실행에서 통과. 느린 실행기에서 시간에 민감한 시험이다. 시험을 신호 기반으로 바꾸거나, 넘침 중 처리 지연이 제품 동작 문제인지 먼저 확인한다.
+
+## 미해결 지적 (M5 G4 3라운드, 차단 아님 → M6에서 처리)
+
+1. 중요: 창을 닫을 때 드물게 WinUI 내부 예외(0xC000027B, CoreMessagingXP.dll)로 끝난 일이 게이트에서 한 번 있었다. 원인 미확정, 닫은 뒤 큐 작업·알림 타이머를 끊는 완화만 했다. 다시 나면 UI 시험이 남기는 `crash-*.jsonl`(처리되지 않은 예외의 HRESULT·스택)과 네이티브 덤프로 원인을 찾는다.
+2. 사소: 측정 화면 bench의 nav(첫 홈 이동) 최대가 실행마다 34~48 ms로 기준 50 ms에 여유가 작다. 반복 측정과 첫 표시 비용 분석.
+4. 중요(시험): `RoundItemsArriveWithTheirRouteEventsInRecordOrder`가 시작 직후 사본 커서를 잡아 0회차가 빠질 수 있다 → 커서를 0부터. `SessionLinkTests`의 `Rounds()`도 관측만 기다리므로 게시까지 기다리게 맞춘다 (G4 4라운드).
+3. 사소: 관측 종류가 바뀌는 순간 상태 알약이 한 번 이전 종류로 그려지고, 외부 응답 없음 → 링크 끊김으로 바로 바뀌면 새 종류의 알림이 나오지 않는다 (`AppShell.Render`). 지금 장면에서 계산한 값으로 그리고 종류별 전환을 따로 추적한다.
 
 ## 다음 할 일
 
-M4 G4 6라운드 승인. 이 기록 커밋 뒤 `close-milestone.ps1 -UiOptional` (base `main`)로 푸시·PR·CI를 마친다.
-- 다음: 사용자가 M4 PR을 `main`에 병합하면 M5. M5에서 위 미해결 지적(M2 3건, M4 2건)을 함께 처리한다.
+M5 마감: `close-milestone.ps1 -Approved 67f071b… -Base main -Screens`로 푸시·PR·CI. 사용자 병합 뒤 M6.
+- 브랜치는 `main`에서 딴다. 옛 이력 브랜치(`loop/m0`~`m4`, 원격 `old-private`)를 `origin`에 푸시하지 않는다.
+- 위 M5 이월 4건을 M6에서 함께 처리한다.

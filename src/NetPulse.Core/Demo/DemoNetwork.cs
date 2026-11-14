@@ -12,6 +12,9 @@ public sealed class DemoNetwork(Scenario scenario) : IRouteObserver, ILinkObserv
 {
     public const int InterfaceIndex = 7;
     public static readonly AdapterInfo Adapter = new("{DEMO-ADAPTER}", InterfaceIndex, "wired", false);
+    /// <summary>시나리오의 연결 종류에 맞춘 어댑터 (M5: Wi‑Fi 데모).</summary>
+    private readonly AdapterInfo adapter = scenario.Network?.Kind == "wireless" ? Adapter with { Kind = "wireless" } : Adapter;
+    private string KindText => adapter.Kind;
     private Action<LinkSample>? sink;
     private long round;
     private bool watching;
@@ -21,7 +24,7 @@ public sealed class DemoNetwork(Scenario scenario) : IRouteObserver, ILinkObserv
         Volatile.Write(ref this.round, round);
         bool down = scenario.LinkDownAt(round);
         return targets.Select(t => down ? new RouteSample(t.Id, null, null, false, "demo-link-down")
-            : new RouteSample(t.Id, InterfaceIndex, round % 30 == 0 ? "wired" : null, true, null)).ToArray();
+            : new RouteSample(t.Id, InterfaceIndex, round % 30 == 0 ? KindText : null, true, null)).ToArray();
     }
 
     public (LinkCapability Capability, string? Code) Start(Action<LinkSample> sink)
@@ -37,10 +40,10 @@ public sealed class DemoNetwork(Scenario scenario) : IRouteObserver, ILinkObserv
         // 링크가 내려간 동안은 경로가 없어 Watch가 안 불리므로, 한 번 감시를 시작하면 계속 읽는다
         if (!watching && scenario.LinkDownAt(Volatile.Read(ref round))) return;
         watching = true;
-        sink?.Invoke(new LinkSample(Adapter, scenario.LinkDownAt(Volatile.Read(ref round)) ? LinkState.Down : LinkState.Up, true));
+        sink?.Invoke(new LinkSample(adapter, scenario.LinkDownAt(Volatile.Read(ref round)) ? LinkState.Down : LinkState.Up, true));
     }
 
-    public IReadOnlyList<AdapterInfo> Adapters => watching ? [Adapter] : [];
+    public IReadOnlyList<AdapterInfo> Adapters => watching ? [adapter] : [];
 
     public void Dispose() { }
 }

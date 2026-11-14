@@ -36,12 +36,27 @@ public sealed class KeyboardTests
         Thread.Sleep(120);
     }
 
+    private const ushort Control = 0x11, KeyM = 0x4D;
+
+    /// <summary>Ctrl+M (증상 표시 단축키, M5). 보낼 때마다 전경 확인은 Press와 같다.</summary>
+    private static void PressCtrlM(AppDriver app)
+    {
+        var fg = Native.GetForegroundWindow();
+        Native.GetWindowThreadProcessId(fg, out uint pid);
+        if (pid != app.ProcessId) throw new InvalidOperationException("미완료(전경 아님): 키를 보내지 않았습니다.");
+        var inputs = new[] { Native.Key(Control, false), Native.Key(KeyM, false), Native.Key(KeyM, true), Native.Key(Control, true) };
+        if (Native.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Native.INPUT>()) != inputs.Length) throw new InvalidOperationException("키 입력을 보내지 못했습니다.");
+        Thread.Sleep(200);
+    }
+
     private static string Focused(AppDriver app) =>
         app.WaitDiag(d => d.GetProperty("focused").ToString(), _ => true, "초점");
 
-    private static AppDriver Launch(params string[] extra)
+    private static AppDriver Launch(params string[] extra) => LaunchAny(null, ["--showcase", "--freeze-motion", .. extra]);
+
+    private static AppDriver LaunchAny(string? userData, string[] args)
     {
-        var app = AppDriver.Launch(["--showcase", "--freeze-motion", .. extra]);
+        var app = AppDriver.LaunchWith(userData, args);
         try
         {
             // 새로 띄운 창은 보통 전경을 받는다. 받을 때까지 잠시 기다리되 빼앗지는 않는다.
@@ -93,6 +108,36 @@ public sealed class KeyboardTests
         var diff = ImageCompare.Diff(before, after, Rectangle.Intersect(band, new Rectangle(Point.Empty, before.Size)));
         Assert.True(diff.P99 >= 40, $"초점 표시가 보이지 않는다: {diff}");
         Assert.Equal(0, app.Close());
+    }
+
+    [Fact]
+    public void KeyboardAloneStartsMarksWithAMemoAndStops()
+    {
+        // M5 설계 4.9: 첫 측정 시작·증상 표시(Ctrl+M)·메모 저장(Enter)·중지를 키보드만으로
+        var userData = AppDriver.NewUserData();
+        try
+        {
+            using var app = LaunchAny(userData, ["--demo", "steady", "--demo-speed", "20", "--freeze-motion"]);
+            app.WaitDiag(d => d.GetProperty("screenDiag").ValueKind == System.Text.Json.JsonValueKind.Object && d.GetProperty("screenDiag").GetProperty("startEnabled").GetBoolean(), b => b, "시작 켜짐");
+            for (int i = 0; i < 40 && Focused(app) != "firstrun.start"; i++) Press(app, Tab);
+            Assert.Equal("firstrun.start", Focused(app));
+            Press(app, Enter);
+            app.WaitDiag(d => d.GetProperty("host").GetString(), s => s == "Measuring", "측정 시작");
+            app.WaitDiag(d => d.GetProperty("rounds").GetInt32(), r => r >= 5, "5회차");
+            PressCtrlM(app);
+            app.WaitDiag(d => d.GetProperty("screenDiag").GetProperty("memoOpen").GetBoolean(), o => o, "메모 패널 (Ctrl+M)");
+            Assert.Equal("measure.memo.text", Focused(app));
+            foreach (var ch in "keyboard") Press(app, (ushort)char.ToUpperInvariant(ch));
+            Press(app, Enter);
+            app.WaitDiag(d => d.GetProperty("marks").EnumerateArray().Any(m => (m.GetProperty("Memo").GetString() ?? "").Length > 0), b => b, "메모 저장 (Enter)");
+            Assert.Equal("measure.mark", Focused(app));   // 저장 뒤 초점은 증상 표시 버튼으로
+            for (int i = 0; i < 10 && Focused(app) != "measure.stop"; i++) PressShiftTab(app);
+            Assert.Equal("measure.stop", Focused(app));
+            Press(app, Enter);
+            app.WaitDiag(d => d.GetProperty("finished").ValueKind == System.Text.Json.JsonValueKind.Object, f => f, "중지");
+            Assert.Equal(0, app.Close());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
     }
 
     [Fact]

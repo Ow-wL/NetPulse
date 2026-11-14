@@ -16,21 +16,35 @@ public sealed class NavRail : GroupPanel
 {
     private readonly Ui ui;
     private readonly StackPanel items = new() { Spacing = Space.S1 };
+    private readonly StackPanel bottom = new() { Spacing = Space.S1 };
+    private readonly Border footer = new();
     private readonly Dictionary<string, RadioButton> byId = [];
+    private readonly List<RadioButton> order = [];
 
     public NavRail(Ui ui, string automationId, string brand) : base(automationId, "탐색")
     {
         this.ui = ui;
         items.XYFocusKeyboardNavigation = XYFocusKeyboardNavigationMode.Enabled;
         items.TabFocusNavigation = KeyboardNavigationMode.Once;
-        var column = new StackPanel { Spacing = Space.S5 };
+        bottom.TabFocusNavigation = KeyboardNavigationMode.Once;
+        var column = new Grid { RowSpacing = Space.S5 };
+        column.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        column.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        column.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        column.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        column.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var brandRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3, Margin = new Thickness(Space.S2, Space.S1, 0, 0) };
         brandRow.Children.Add(new Border { Width = Size.ControlS, Height = Size.ControlS, CornerRadius = new CornerRadius(Radius.Inner - Space.S1), Background = ui.Brushes.Accent, Child = Icons.Make(Icons.Pulse, ui.Brushes.AccentInk, Size.IconM) });
         var name = Fonts.Text(brand, Typography.Headline, ui.Brushes.Ink);
         name.VerticalAlignment = VerticalAlignment.Center;
         brandRow.Children.Add(name);
         column.Children.Add(brandRow);
+        Grid.SetRow(items, 1);
         column.Children.Add(items);
+        Grid.SetRow(bottom, 3);
+        column.Children.Add(bottom);
+        Grid.SetRow(footer, 4);
+        column.Children.Add(footer);
         Width = Size.NavRailWidth;
         Children.Add(ui.Glass.Surface(GlassLevel.Control, column, Radius.Outer, new Thickness(Space.S3, Space.S5, Space.S3, Space.S5)));
     }
@@ -39,7 +53,15 @@ public sealed class NavRail : GroupPanel
 
     public string? Current { get; private set; }
 
-    public void Add(string id, string label, string icon)
+    /// <summary>아래쪽 칸 (M5: 측정 상태 알약).</summary>
+    public UIElement? Footer { get => footer.Child; set => footer.Child = value; }
+
+    /// <summary>아래쪽에 붙는 항목 (M5: 설정). 같은 선택 그룹이고, 위아래 화살표는 위쪽 목록과 이어진다.</summary>
+    public void AddBottom(string id, string label, string icon) => Add(id, label, icon, bottom);
+
+    public void Add(string id, string label, string icon) => Add(id, label, icon, items);
+
+    private void Add(string id, string label, string icon, StackPanel target)
     {
         var text = Fonts.Text(label, Typography.Label, ui.Brushes.Muted);
         text.VerticalAlignment = VerticalAlignment.Center;
@@ -82,12 +104,14 @@ public sealed class NavRail : GroupPanel
         button.PreviewKeyDown += (_, e) =>
         {
             if (e.Key is not (Windows.System.VirtualKey.Down or Windows.System.VirtualKey.Up)) return;
-            int i = items.Children.IndexOf(button) + (e.Key == Windows.System.VirtualKey.Down ? 1 : -1);
-            if (i >= 0 && i < items.Children.Count && items.Children[i] is Control next) next.Focus(FocusState.Keyboard);
+            int i = order.IndexOf(button) + (e.Key == Windows.System.VirtualKey.Down ? 1 : -1);
+            if (i >= 0 && i < order.Count) order[i].Focus(FocusState.Keyboard);
             e.Handled = true;
         };
         byId[id] = button;
-        items.Children.Add(button);
+        if (ReferenceEquals(target, items)) order.Insert(items.Children.Count, button);
+        else order.Add(button);
+        target.Children.Add(button);
         Refresh();
     }
 
@@ -155,6 +179,17 @@ public sealed class SettingToggle : ToggleButton
 public sealed class SegmentedChoice : GroupPanel
 {
     private readonly Dictionary<string, RadioButton> byValue = [];
+
+    /// <summary>읽기 전용 (측정 중 편집 화면): 마우스도 키보드도 고르지 못한다 (G4 M5 1라운드 B5).</summary>
+    public bool ReadOnly
+    {
+        get => !IsHitTestVisible;
+        set
+        {
+            IsHitTestVisible = !value;
+            foreach (var b in byValue.Values) b.IsEnabled = !value;
+        }
+    }
 
     public SegmentedChoice(Ui ui, string automationId, string label, IReadOnlyList<(string Value, string Label)> options, string initial)
         : base(automationId, label)
