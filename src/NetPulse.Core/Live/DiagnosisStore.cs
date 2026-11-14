@@ -19,8 +19,9 @@ public sealed class DiagnosisStore(string folder)
     /// <summary>시험용: 임시 파일에 쓴 뒤 flush 전에 실행 (쓰기 실패를 만든다).</summary>
     internal Action? WriteFailForTest { get; set; }
 
-    /// <param name="stillWanted">이동(확정) 직전에 확인: 거짓이면 확정하지 않는다 (종료 억제)</param>
-    public DiagnosisSave Save(DiagnosisResult result, string appVersion, string? measurementId, Func<bool>? stillWanted = null)
+    /// <param name="stillWanted">이동(확정) 직전마다 확인: 거짓이면 확정하지 않는다 (종료 억제)</param>
+    /// <param name="commitLock">주면 확인과 이동을 그 잠금 안에서 한다 (종료 진입과 직렬화, G4 2라운드 2)</param>
+    public DiagnosisSave Save(DiagnosisResult result, string appVersion, string? measurementId, Func<bool>? stillWanted = null, object? commitLock = null)
     {
         string? tmp = null;
         try
@@ -43,18 +44,16 @@ public sealed class DiagnosisStore(string folder)
         }
         try
         {
-            if (stillWanted?.Invoke() == false) { TryDelete(tmp); return new(null, "cancelled"); }
             var stem = Path.GetFileNameWithoutExtension(DiagnosisRecord.FileName(result.StartedAt));
             for (int n = 1; n <= 999; n++)
             {
                 var target = Path.Combine(folder, n == 1 ? stem + ".json" : $"{stem}-{n}.json");
                 if (File.Exists(target)) continue;
-                try
-                {
-                    File.Move(tmp, target, overwrite: false);
-                    return new(target, null);
-                }
-                catch (IOException) when (File.Exists(target)) { }   // 그 사이 같은 이름이 생김: 다음 접미사
+                // 확인과 이동을 한 덩어리로: 확인한 뒤 종료가 들어와 확정되는 일이 없게 (재시도마다)
+                bool? moved = commitLock is null ? TryCommit(tmp, target, stillWanted) : CommitLocked(commitLock, tmp, target, stillWanted);
+                if (moved is null) { TryDelete(tmp); return new(null, "cancelled"); }
+                if (moved == true) return new(target, null);
+                // false: 그 사이 같은 이름이 생김 → 다음 접미사
             }
             TryDelete(tmp);
             return new(null, "name-exhausted");
@@ -87,6 +86,23 @@ public sealed class DiagnosisStore(string folder)
         }
         var best = found.OrderByDescending(x => x.Stored.StartedAt).ThenByDescending(x => x.Suffix).Select(x => x.Stored).FirstOrDefault();
         return (best, skipped);
+    }
+
+    private static bool? CommitLocked(object commitLock, string tmp, string target, Func<bool>? stillWanted)
+    {
+        lock (commitLock) return TryCommit(tmp, target, stillWanted);
+    }
+
+    /// <summary>null = 원하지 않음(종료), true = 이동함, false = 대상 이름이 그 사이 생김.</summary>
+    private static bool? TryCommit(string tmp, string target, Func<bool>? stillWanted)
+    {
+        if (stillWanted?.Invoke() == false) return null;
+        try
+        {
+            File.Move(tmp, target, overwrite: false);
+            return true;
+        }
+        catch (IOException) when (File.Exists(target)) { return false; }
     }
 
     private static int Suffix(string file)

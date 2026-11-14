@@ -280,20 +280,31 @@ public sealed class AppDriver : IDisposable
 
     public void Dispose()
     {
-        // 시험이 닫지 않았는데 이미 끝나 있으면 (조작 중에 죽음) 증거를 남기고 알린다.
+        // 시험이 닫지 않았으면: 스스로 끝나 있었는지 먼저 본 뒤(관찰), 살아 있으면 끝내고(강제 종료 시도), 실제로 회수됐는지 확인한다 (G4 2라운드 4).
+        // 스스로 끝났으면 0 밖은 모두 비정상(-1 포함). 시험이 끝냈으면 -1(Kill)과 0만 정상.
+        // 회수되지 않으면 증거를 남기고 실패시킨다 (살아 있는 앱을 둔 채 성공처럼 끝내지 않는다).
         // 시험 본문이 이미 실패해 이 예외가 그것을 덮을 수 있지만, 그때도 원인은 대개 이 종료라 증거 경로를 앞에 둔다.
-        // 종료 관찰·회수·종료 코드 판정을 한 경로로 (G4 1라운드 b5): 살아 있으면 시험이 끝내고(종료 코드 -1),
-        // 그 사이 스스로 끝났으면 Kill이 아무것도 하지 않거나 예외를 내므로 종료 코드로 판정한다. 0과 -1(시험이 끝냄) 밖은 비정상
         string? crashed = null;
+        bool alive = false;
         if (!closed)
         {
-            try { process.Kill(); } catch (InvalidOperationException) { } catch (System.ComponentModel.Win32Exception) { }
-            process.WaitForExit(10000);
-            if (process.HasExited && process.ExitCode is not (0 or -1))
-                crashed = $"앱이 시험 도중 비정상 종료했습니다 (종료 코드 0x{process.ExitCode:X8}). 증거: {CrashEvidence.Collect(process, UserData, "during-test", startedUtc)}";
+            bool exitedOnItsOwn = process.HasExited;
+            string? killError = null;
+            if (!exitedOnItsOwn)
+            {
+                try { process.Kill(); }
+                catch (InvalidOperationException) { }                                   // 그 사이 스스로 끝남: 아래 회수에서 확인
+                catch (System.ComponentModel.Win32Exception e) { killError = e.NativeErrorCode.ToString("X", System.Globalization.CultureInfo.InvariantCulture); }
+            }
+            bool reaped = process.WaitForExit(10000);
+            alive = !reaped;
+            if (!reaped)
+                crashed = $"앱을 끝내지 못했습니다 (강제 종료 {(killError is null ? "요청함" : "실패 0x" + killError)}, 10초 안에 회수 안 됨). 증거: {CrashEvidence.Collect(process, UserData, "not-reaped", startedUtc)}";
+            else if (exitedOnItsOwn ? process.ExitCode != 0 : process.ExitCode is not (0 or -1))
+                crashed = $"앱이 시험 도중 비정상 종료했습니다 (종료 코드 0x{process.ExitCode:X8}{(exitedOnItsOwn ? ", 스스로 끝남" : "")}). 증거: {CrashEvidence.Collect(process, UserData, "during-test", startedUtc)}";
         }
         process.Dispose();
-        if (ownsUserData) DeleteUserData(UserData);
+        if (ownsUserData && !alive) DeleteUserData(UserData);   // 살아 있는 앱의 폴더는 지우지 않는다 (증거·사용 중)
         if (crashed is not null) throw new AppCrashedException(crashed);
     }
 

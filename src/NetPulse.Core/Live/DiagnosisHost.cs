@@ -163,16 +163,16 @@ public sealed class DiagnosisHost
     private async Task FlushFlowAsync(Task waitFor)
     {
         try { await waitFor.ConfigureAwait(false); } catch (Exception) { /* 앞 진단의 결과는 그 작업이 다룬다 */ }
-        // 종료 검사와 상태 바꾸기를 한 잠금 안에서 (검사 직후 종료가 끼어들어도 바꾸지 않게, G4 1라운드 a1)
+        if (BeforeFlushForTest is { } hook) await hook().ConfigureAwait(false);
+        // 명령 시작 승인은 종료 진입과 같은 잠금 안에서 한 번만 (G4 2라운드 1): 종료가 먼저 잠금을 잡았으면 시작하지 않고,
+        // 승인이 먼저면 그 명령은 "종료 전에 시작한 것"이다 (설계 3.4: 이미 시작한 것은 취소 신호만 받고 끝까지).
+        // 실제 명령 쪽도 이미 취소된 토큰이면 프로세스를 띄우지 않는다
         lock (gate)
         {
             if (closed) return;
             flushStage = FlushStage.Flushing;
         }
         Publish();
-        if (BeforeFlushForTest is { } hook) await hook().ConfigureAwait(false);
-        // 실제 명령을 시작하기 직전에 한 번 더: 그 사이 종료가 들어왔으면 시작하지 않는다
-        if (stop.IsCancellationRequested) return;
         SystemActionResult flush;
         try { flush = await world.Actions.FlushDnsAsync(stop.Token).ConfigureAwait(false); }
         catch (OperationCanceledException) { return; }
@@ -208,7 +208,8 @@ public sealed class DiagnosisHost
         PreviousDiagnosis? previous;
         lock (gate) previous = last is { } l ? FromResult(l.Result) : recent;
         var changes = previous is null ? null : Compare(previous, result);
-        var save = store.Save(result, appVersion, measurementId, () => !closed);
+        // 확정(이동)은 종료 진입과 같은 잠금 안에서, 이름 충돌로 다시 해도 매번 확인 (G4 2라운드 2)
+        var save = store.Save(result, appVersion, measurementId, () => !closed, gate);
         if (closed) return null;
         return new DiagnosisRun(result, measurementId, flush, save, changes, previous);
     }
@@ -275,7 +276,7 @@ public sealed class DiagnosisHost
         }
     }
 
-    /// <summary>시험용: 비우기 단계를 게시한 뒤, 실제 명령을 부르기 직전에 실행 (종료 끼어들기를 고정한다).</summary>
+    /// <summary>시험용: 앞 진단을 기다린 뒤, 명령 시작 승인(잠금) 직전에 실행 (종료 끼어들기를 고정한다).</summary>
     internal Func<Task>? BeforeFlushForTest { get; set; }
 
     /// <summary>gate 안 (생성자에서는 밖).</summary>

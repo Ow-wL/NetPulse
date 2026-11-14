@@ -75,7 +75,7 @@ public sealed class DiagnoseScreen : Screen
         siteInput = new GlassTextBox(Ui, "diagnose.site.input", "도메인", "", "예: example.com", Size.FieldL, multiline: false);
         siteInput.Box.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.Enter) { e.Handled = true; CheckSite(); } };
         // TextChanged는 비동기로 늦게 올 수 있다: 오류를 낸 그 입력 그대로면 지우지 않는다
-        siteInput.Box.TextChanged += (_, _) => { if (siteInput.Text != erroredInput) siteInput.SetError(null); };
+        siteInput.Box.TextChanged += (_, _) => { userActions++; if (siteInput.Text != erroredInput) siteInput.SetError(null); };
         siteRun = new GlassButton(Ui, ButtonKind.Secondary, "diagnose.site.run", "점검", Icons.Globe) { VerticalAlignment = VerticalAlignment.Top };
         // 단추를 입력 칸과 같은 높이에 둔다 (아래 정렬이면 오류 줄이 생길 때 단추가 오류 옆으로 내려갔다)
         siteInput.SizeChanged += (_, _) =>
@@ -141,50 +141,61 @@ public sealed class DiagnoseScreen : Screen
         bool had = start.FocusState != FocusState.Unfocused;
         Context.Diagnosis.StartDiagnosis();
         Render(Context.Host.Snapshot);
-        NoteDisplacedFocus(start, had, e => startDisplaced = e, to => startDisplacedTo = to, top: true);
+        NoteDisplacedFocus(start, had, e => startDisplaced = e, b => startBaseline = b, top: true);
     }
 
     /// <summary>
     /// 초점을 가진 단추가 꺼지면 WinUI가 초점을 다음 요소로 옮기고 그 요소가 보이게 화면을 내린다.
-    /// 누를 때 초점이 단추에 있었으면 적어 두었다가, 작업이 끝나면 단추로 돌려놓는다 (그 사이 글 상자에 입력 중이면 두기).
+    /// 누를 때 초점이 단추에 있었으면 적어 두었다가, 작업이 끝나면 단추로 돌려놓는다. 그 자동 이동이 끝난 뒤의
+    /// 사용자 조작 수를 기준으로 적어 두고, 끝났을 때 그 뒤에 조작이 있었으면 아무것도 바꾸지 않는다 (G4 2라운드 3).
     /// </summary>
-    private void NoteDisplacedFocus(Control button, bool hadFocus, Action<bool> note, Action<DependencyObject?> noteTarget, bool top = false)
+    private void NoteDisplacedFocus(Control button, bool hadFocus, Action<bool> note, Action<long> noteBaseline, bool top = false)
     {
+        HookUserActions();
         bool displaced = hadFocus && !button.IsEnabled;
         note(displaced);
-        noteTarget(null);
-        if (!displaced) return;
-        // 초점이 옮겨 간 요소를 적어 둔다: 끝났을 때 초점이 아직 거기(글 상자여도)면 사용자가 옮긴 것이 아니다
+        noteBaseline(-1);
+        // 자동 초점 이동(같은 차례에 일어남)이 끝난 뒤에 기준을 잡는다. 끝나는 쪽 작업도 같은 낮은 우선순위로
+        // 나중에 넣으므로, 진단이 아주 빨리 끝나도 기준이 먼저 잡힌다
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
-            noteTarget(Focused());
-            if (top) scroll.ChangeView(null, 0, null, true);   // 진행 중에도 결론 자리가 보이게
+            noteBaseline(userActions);
+            if (top && displaced) scroll.ChangeView(null, 0, null, true);   // 진행 중에도 결론 자리가 보이게
         });
     }
 
-    private DependencyObject? Focused() =>
-        XamlRoot is null ? null : Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(XamlRoot) as DependencyObject;
-
-    /// <param name="displacedTo">단추가 꺼질 때 초점이 옮겨 간 요소. 지금 초점이 그 밖의 글 상자면 사용자가 입력 중이라 두기</param>
-    private bool RestoreFocus(Control button, bool displaced, DependencyObject? displacedTo)
-    {
-        if (!displaced || !button.IsEnabled || !Undisturbed(displacedTo)) return false;
-        return button.Focus(FocusState.Programmatic);
-    }
+    private bool RestoreFocus(Control button, bool displaced) =>
+        displaced && button.IsEnabled && button.Focus(FocusState.Programmatic);
 
     /// <summary>
-    /// 작업이 끝났을 때 화면을 건드려도 되는지 (G4 1라운드 b1): 대화상자가 열렸거나, 이 화면이 보이지 않거나,
-    /// 초점이 단추가 꺼질 때 옮겨 간 자리가 아닌 다른 곳(사용자가 옮김)이면 초점도 스크롤도 바꾸지 않는다.
+    /// 작업이 끝났을 때 화면(초점·스크롤)을 건드려도 되는지 (G4 1·2라운드 b1): 대화상자가 열렸거나, 이 화면이 보이지 않거나,
+    /// 작업을 시작한 뒤 사용자가 무엇이든 조작했으면(키·누르기·휠·입력·이 화면 밖으로의 초점 이동) 그대로 둔다.
     /// </summary>
-    private bool Undisturbed(DependencyObject? displacedTo)
+    private bool Undisturbed(long baseline) =>
+        !Context.Dialog.IsOpen && Visibility == Visibility.Visible && baseline >= 0 && userActions == baseline;
+
+    /// <summary>
+    /// 창 전체의 사용자 조작 수 (UI 스레드에서만). 키·포인터 누르기·휠은 이미 처리된 것까지 센다.
+    /// 초점 이동은 이 화면 밖으로 나간 것만 센다: 화면 안의 이동은 키·누르기로 이미 세었거나, 다시 그리기가 만든 자동 이동이다.
+    /// </summary>
+    private long userActions;
+    private UIElement? actionRoot;
+
+    private void HookUserActions()
     {
-        if (Context.Dialog.IsOpen || Visibility != Visibility.Visible) return false;
-        var now = Focused();
-        return now is null || ReferenceEquals(now, displacedTo) || ReferenceEquals(now, start) || ReferenceEquals(now, siteRun) || !IsInside(now, this);
+        if (actionRoot is not null || XamlRoot?.Content is not UIElement root) return;
+        actionRoot = root;
+        root.AddHandler(KeyDownEvent, new Microsoft.UI.Xaml.Input.KeyEventHandler((_, _) => userActions++), true);
+        root.AddHandler(PointerPressedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_, _) => userActions++), true);
+        root.AddHandler(PointerWheelChangedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_, _) => userActions++), true);
+        Microsoft.UI.Xaml.Input.FocusManager.GotFocus += (_, e) =>
+        {
+            if (e.NewFocusedElement is DependencyObject now && !IsInside(now, this)) userActions++;
+        };
     }
 
     private bool startDisplaced, siteDisplaced;
-    private DependencyObject? startDisplacedTo, siteDisplacedTo;
+    private long startBaseline = -1, siteBaseline = -1;
     private string? erroredInput;
 
     private void CheckSite()
@@ -204,7 +215,7 @@ public sealed class DiagnoseScreen : Screen
             });
         }
         Render(Context.Host.Snapshot);
-        NoteDisplacedFocus(siteRun, had, e => siteDisplaced = e, to => siteDisplacedTo = to);
+        NoteDisplacedFocus(siteRun, had, e => siteDisplaced = e, b => siteBaseline = b);
     }
 
     private void ConfirmFlush(Control opener)
@@ -335,12 +346,12 @@ public sealed class DiagnoseScreen : Screen
     {
         var displaced = startDisplaced;
         startDisplaced = false;
-        // 배치가 끝난 뒤에 (초점 이동이 만든 스크롤보다 나중에). 옮겨 간 요소는 그때 읽는다:
-        // 진단이 아주 빨리 끝나면 옮겨 간 요소를 적는 작업(같은 낮은 우선순위, 먼저 넣음)이 아직 돌지 않았다
+        // 배치가 끝난 뒤에 (초점 이동이 만든 스크롤보다 나중에). 기준은 그때 읽는다:
+        // 진단이 아주 빨리 끝나면 기준을 잡는 작업(같은 낮은 우선순위, 먼저 넣음)이 아직 돌지 않았다
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
-            if (Context.IsClosing() || !Undisturbed(startDisplacedTo)) return;
-            RestoreFocus(start, displaced, startDisplacedTo);
+            if (Context.IsClosing() || !Undisturbed(startBaseline)) return;
+            RestoreFocus(start, displaced);
             scroll.ChangeView(null, 0, null, true);
         });
     }
@@ -390,7 +401,8 @@ public sealed class DiagnoseScreen : Screen
     private void RenderConclusion(DiagnosisSnapshot d)
     {
         // 사이트 점검처럼 결론과 무관한 변경으로 결론 단추(대화상자를 연 단추)가 사라지지 않게 (G4 1라운드 b2)
-        string key = $"{d.Operation}|{d.Flush}|{d.Partial.Count}|{RuntimeHelpersId(d.Last)}|{d.Recent?.StartedAt}|{d.Recent?.Conclusion}|{d.SkippedRecords}";
+        // 최근 기록 설명의 "오늘/어제"가 날짜에 따라 바뀌므로 오늘 날짜도 넣는다 (G4 2라운드 5)
+        string key = $"{d.Operation}|{d.Flush}|{d.Partial.Count}|{RuntimeHelpersId(d.Last)}|{d.Recent?.StartedAt}|{d.Recent?.Conclusion}|{d.SkippedRecords}|{Context.Now.Date:yyyyMMdd}";
         if (key == conclusionKey) return;
         conclusionKey = key;
         conclusion.Children.Clear();
@@ -513,8 +525,8 @@ public sealed class DiagnoseScreen : Screen
             siteDisplaced = false;
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
-                if (Context.IsClosing() || !Undisturbed(siteDisplacedTo)) return;
-                RestoreFocus(siteRun, displaced, siteDisplacedTo);
+                if (Context.IsClosing() || !Undisturbed(siteBaseline)) return;
+                RestoreFocus(siteRun, displaced);
                 siteResult.UpdateLayout();
                 siteResult.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false });
             });
