@@ -139,9 +139,11 @@ public sealed class DiagnoseScreen : Screen
     public void Start()
     {
         bool had = start.FocusState != FocusState.Unfocused;
-        Context.Diagnosis.StartDiagnosis();
+        var r = Context.Diagnosis.StartDiagnosis();
         Render(Context.Host.Snapshot);
-        NoteDisplacedFocus(start, had, e => startDisplaced = e, b => startBaseline = b, top: true);
+        // 실제로 새 작업을 시작했을 때만 그 작업의 기준을 잡는다: 바쁨·닫힘이면 진행 중인 작업의 기준을 그대로 (G4 3라운드 1)
+        if (r == DiagnosisRequest.Started)
+            NoteDisplacedFocus(start, had, e => startDisplaced = e, b => startBaseline = b, top: true);
     }
 
     /// <summary>
@@ -215,7 +217,9 @@ public sealed class DiagnoseScreen : Screen
             });
         }
         Render(Context.Host.Snapshot);
-        NoteDisplacedFocus(siteRun, had, e => siteDisplaced = e, b => siteBaseline = b);
+        // 점검 중 입력 칸의 Enter는 바쁨으로 끝난다: 진행 중인 점검의 기준(그 뒤의 수정 포함)을 덮지 않는다 (G4 3라운드 1)
+        if (r == DiagnosisRequest.Started)
+            NoteDisplacedFocus(siteRun, had, e => siteDisplaced = e, b => siteBaseline = b);
     }
 
     private void ConfirmFlush(Control opener)
@@ -304,7 +308,8 @@ public sealed class DiagnoseScreen : Screen
     {
         var d = Context.Diagnosis.Snapshot;
         folderTarget = PickFolder();
-        string folderKey = (folderTarget ?? "") + "|" + (Context.Host.RunningId ?? "");
+        // 오늘 날짜도 넣는다: 최근 기록의 "오늘/어제"가 진단 상태 변화 없이 자정에 바뀐다 (G4 3라운드 4)
+        string folderKey = (folderTarget ?? "") + "|" + (Context.Host.RunningId ?? "") + "|" + Context.Now.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture);
         if (d.Version == renderedVersion && folderKey == renderedFolderKey) return;
         bool finished = renderedVersion >= 0 && d.Operation == DiagnosisOperation.None && d.Last is not null
             && !ReferenceEquals(d.Last, lastRun);
@@ -619,6 +624,8 @@ public sealed class DiagnoseScreen : Screen
             folderEnabled = folder.IsEnabled,
             scrollY = (int)scroll.VerticalOffset,
             focus = FocusedId(),
+            // 완료 처리의 사용자 조작 기준 (수: 지금까지의 조작 수, 기준 -1 = 아직 없음)
+            guard = new { inputs = userActions, start = startBaseline, site = siteBaseline },
         };
     }
 }

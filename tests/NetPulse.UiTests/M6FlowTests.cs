@@ -163,12 +163,16 @@ public sealed class M6FlowTests
         var saved = ClipboardText.Save();
         if (saved.Blocked) Assert.Skip("미완료: 클립보드에 그대로 되돌릴 수 없는 형식이 있어 덮어쓰지 않았습니다.");
         var userData = AppDriver.NewUserData();
+        string? ours = null;   // 시험(앱)이 클립보드에 쓴 글. null이면 쓰지 않았다 → 되돌리지 않는다
         try
         {
             using var app = Open(userData, "profile", "--demo tests:diag-dns --screen diagnose");
             app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "diagnose", "진단 화면");
             app.Invoke("diagnose.start");
             var d = WaitRun(app);
+            // 보관한 뒤 다른 곳에서 클립보드를 바꿨으면 (사용자가 새로 복사) 덮어쓰지 않고 미완료 (G4 3라운드 2)
+            if (ClipboardText.Sequence() != saved.Sequence) Assert.Skip("미완료: 시험 중 클립보드가 바뀌어 덮어쓰지 않았습니다.");
+            ours = S(d, "copyText");
             app.Invoke("diagnose.copy");
             app.WaitDiag(d2 => S(d2, "copyState"), s => s.Length > 0, "복사 결과");
             Assert.Equal("ok", S(app.Diag(), "copyState"));
@@ -177,7 +181,7 @@ public sealed class M6FlowTests
         }
         finally
         {
-            ClipboardText.Restore(saved);
+            ClipboardText.Restore(saved, ours);
             AppDriver.DeleteUserData(userData);
         }
     }
@@ -215,6 +219,36 @@ public sealed class M6FlowTests
                 Assert.Equal(https, S(d, "site", "https"));
                 Assert.Equal(state, S(d, "site", "httpsState"));
             }
+            Assert.Equal(0, app.Close());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
+    /// <summary>
+    /// 점검 중 입력을 고치고 Enter를 다시 누르면 바쁨으로 끝나고, 진행 중인 점검의 사용자 조작 기준을 덮지 않는다 (G4 3라운드 1).
+    /// 끝났을 때 기준보다 조작이 많으므로 완료 처리는 초점·스크롤을 건드리지 않는다.
+    /// </summary>
+    [Fact]
+    public void EnterWhileASiteCheckRunsKeepsThatChecksBaseline()
+    {
+        var userData = AppDriver.NewUserData();
+        try
+        {
+            using var app = Open(userData, "profile", "--demo tests:diag-ok --screen diagnose");
+            app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "diagnose", "진단 화면");
+            app.SetText("diagnose.site.input", "slow.example");
+            app.Invoke("diagnose.site.run");
+            var running = app.WaitDiag(x => x, x => Sd(x).GetProperty("site").GetProperty("Running").GetBoolean()
+                && Sd(x).GetProperty("guard").GetProperty("site").GetInt64() >= 0, "점검 중, 기준 잡힘");
+            long baseline = Sd(running).GetProperty("guard").GetProperty("site").GetInt64();
+            app.SetText("diagnose.site.input", "shop.example");   // 진행 중 입력 수정
+            app.PressEnter("diagnose.site.input");                 // 진행 중 Enter → 바쁨
+            var after = app.WaitDiag(x => x, x => Sd(x).GetProperty("guard").GetProperty("inputs").GetInt64() > baseline, "조작이 세어짐");
+            Assert.True(Sd(after).GetProperty("site").GetProperty("Running").GetBoolean(), "앞 점검이 아직 진행 중이어야 한다 (시나리오 시간 부족)");
+            Assert.Equal(baseline, Sd(after).GetProperty("guard").GetProperty("site").GetInt64());
+            var done = app.WaitDiag(x => x, x => !Sd(x).GetProperty("site").GetProperty("Running").GetBoolean(), "앞 점검 끝남");
+            Assert.Equal(baseline, Sd(done).GetProperty("guard").GetProperty("site").GetInt64());
+            Assert.Equal("slow.example", app.Text("diagnose.site.domain"));   // 끝난 것은 앞 점검
             Assert.Equal(0, app.Close());
         }
         finally { AppDriver.DeleteUserData(userData); }
@@ -429,7 +463,15 @@ public sealed class M6FlowTests
 internal static class ClipboardText
 {
     /// <summary>보관한 형식과 그 값 (글은 string, 그 밖은 바이트). 막힘이면 보관하지 않았다.</summary>
-    public sealed record Saved(bool Blocked, IReadOnlyList<KeyValuePair<string, object>> Items);
+    public sealed record Saved(bool Blocked, IReadOnlyList<KeyValuePair<string, object>> Items, uint Sequence);
+
+    /// <summary>클립보드가 바뀔 때마다 느는 시스템 번호.</summary>
+    public static uint Sequence() => Native.GetClipboardSequenceNumber();
+
+    private static class Native
+    {
+        [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetClipboardSequenceNumber();
+    }
 
     private static T Sta<T>(Func<T> body)
     {
@@ -450,34 +492,43 @@ internal static class ClipboardText
     /// </summary>
     public static Saved Save() => Sta(() =>
     {
+        uint sequence = Sequence();
         var data = System.Windows.Forms.Clipboard.GetDataObject();
         var items = new List<KeyValuePair<string, object>>();
         foreach (var f in data?.GetFormats(autoConvert: false) ?? [])
         {
             object? v;
             try { v = data!.GetData(f, autoConvert: false); }
-            catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException or OutOfMemoryException or InvalidOperationException) { return new Saved(true, []); }
+            catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException or OutOfMemoryException or InvalidOperationException) { return new Saved(true, [], sequence); }
             switch (v)
             {
                 case string text: items.Add(new(f, text)); break;
                 case MemoryStream ms: items.Add(new(f, ms.ToArray())); break;
-                default: return new Saved(true, []);
+                default: return new Saved(true, [], sequence);
             }
         }
-        return new Saved(false, items);
+        // 읽는 사이에 바뀌었으면 섞인 보관일 수 있다: 막힘
+        return Sequence() == sequence ? new Saved(false, items, sequence) : new Saved(true, [], sequence);
     });
 
     public static string Read() => Sta(() => System.Windows.Forms.Clipboard.GetText());
 
-    public static void Restore(Saved saved)
+    /// <summary>
+    /// 시험이 쓴 글(<paramref name="ours"/>)이 아직 그대로 있을 때만 보관한 것을 되돌린다 (G4 3라운드 2).
+    /// 시험이 쓰지 않았거나(null), 그 뒤 다른 곳에서 바꿨으면(사용자가 새로 복사) 그 내용을 지우거나 덮지 않는다.
+    /// </summary>
+    public static void Restore(Saved saved, string? ours)
     {
-        if (saved.Blocked) return;
+        if (saved.Blocked || ours is null) return;
         Sta(() =>
         {
+            // 글이 시험의 글 그대로인지로 본다 (클립보드 관리 도구가 표시 형식을 덧붙여도 시험의 내용이다)
+            bool stillOurs = System.Windows.Forms.Clipboard.ContainsText() && System.Windows.Forms.Clipboard.GetText() == ours;
+            if (!stillOurs) return false;
             if (saved.Items.Count == 0) { System.Windows.Forms.Clipboard.Clear(); return true; }
             var o = new System.Windows.Forms.DataObject();
             foreach (var (f, v) in saved.Items) o.SetData(f, false, v is byte[] bytes ? new MemoryStream(bytes) : v);
-            System.Windows.Forms.Clipboard.SetDataObject(o, copy: true);
+            System.Windows.Forms.Clipboard.SetDataObject(o, copy: true, retryTimes: 10, retryDelay: 100);
             return true;
         });
     }
