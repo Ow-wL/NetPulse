@@ -25,7 +25,7 @@ public sealed record OpenedRecord(string Key, string Stamp, MeasurementRecord Re
 /// <item>갱신은 UI 밖에서, 진행 중이면 합친다 (마지막 요청 하나).</item>
 /// </list>
 /// </summary>
-public sealed class RecordLibrary(Func<IReadOnlyList<string>> roots, bool holdAnalysis = false)
+public sealed class RecordLibrary(Func<IReadOnlyList<string>> roots, bool holdAnalysis = false, bool holdList = false)
 {
     public const int HoldLimit = 3;
 
@@ -55,6 +55,7 @@ public sealed class RecordLibrary(Func<IReadOnlyList<string>> roots, bool holdAn
     /// <summary>다시 읽는다. 진행 중인 갱신이 있으면 그 뒤 한 번만 더 (합침).</summary>
     public Task RefreshAsync(string? running)
     {
+        if (holdList) return Task.CompletedTask;   // G5 "목록 읽는 중" 장면
         lock (gate)
         {
             runningId = running;
@@ -183,10 +184,30 @@ public sealed class RecordLibrary(Func<IReadOnlyList<string>> roots, bool holdAn
         lock (gate)
         {
             var item = items.FirstOrDefault(i => !i.External && i.Entry.Id == measurementId);
-            if (item is null) return false;
+            if (item is null || item.Entry.Lifecycle == RecordLifecycle.Running) return false;
             Hold(new OpenedRecord(item.Key, item.Stamp, record, analysis, item.Entry.Lifecycle));
-            return true;
+            // 요약도 이 결과로 채운다 (목록 분석이 같은 기록을 다시 읽지 않게)
+            var (summary, damage) = Summarize(item.Entry, record, analysis);
+            summaries[item.Key] = (item.Stamp, summary, damage, record.Status);
+            var copy = items.ToArray();
+            int at = Array.FindIndex(copy, i => i.Key == item.Key);
+            copy[at] = copy[at] with { Summary = summary, Damage = damage, Status = record.Status };
+            items = copy;
         }
+        Changed?.Invoke();
+        return true;
+    }
+
+    private static (RecentItem Summary, IReadOnlyList<string> Damage) Summarize(RecordEntry e, MeasurementRecord record, AnalysisResult a)
+    {
+        var marks = SymptomMarks.FromEvents(record.Events, record.NoteLines);
+        var memo = marks.Marks.Select(m => m.Memo).FirstOrDefault(m => m is not null);
+        long? duration = record.Summary?.EndMs ?? record.Rounds.LastOrDefault()?.AtMs;
+        var damage = RecordView.DamageNotices(record, marks.Ignored);
+        string? notice = e.Lifecycle == RecordLifecycle.NoSummary ? "끝 기록 없음" : damage.Count > 0 ? "읽지 못한 부분 있음" : null;
+        return (new RecentItem(e, false, LiveSummary.Badge(a.Grade.Grade), a.Episodes.Count,
+            a.Episodes.Count == 0 ? null : a.Episodes.Max(x => x.MinDurationMs), PathMapModel.ConnectionKind(record.Events), memo, duration, notice, null,
+            a.Grade.Sentence, a.Grade.Grade), damage);
     }
 
     /// <summary>핀: 열린 비교·상세는 보유 상한에서 내보내지 않는다.</summary>
@@ -198,6 +219,12 @@ public sealed class RecordLibrary(Func<IReadOnlyList<string>> roots, bool holdAn
             pinned.UnionWith(keys);
             Trim();
         }
+    }
+
+    /// <summary>알려진 위치에서 그 측정 ID의 항목 열쇠 (측정 화면 결과 카드 → 상세). 없으면 null.</summary>
+    public string? KeyOf(string measurementId)
+    {
+        lock (gate) return items.FirstOrDefault(i => !i.External && i.Entry.Id == measurementId)?.Key;
     }
 
     /// <summary>다른 위치의 기록을 이번 실행 동안 목록 맨 위에 둔다. 돌려주는 열쇠로 연다.</summary>
@@ -286,14 +313,7 @@ public sealed class RecordLibrary(Func<IReadOnlyList<string>> roots, bool holdAn
             var record = RecordReader.Read(e.Segments);
             if (record.Header is null) return (null, Failed(e, record.Problem), [], record.Status);
             var a = MeasurementAnalysis.Analyze(record);
-            var marks = SymptomMarks.FromEvents(record.Events, record.NoteLines);
-            var memo = marks.Marks.Select(m => m.Memo).FirstOrDefault(m => m is not null);
-            long? duration = record.Summary?.EndMs ?? record.Rounds.LastOrDefault()?.AtMs;
-            var damage = RecordView.DamageNotices(record, marks.Ignored);
-            string? notice = e.Lifecycle == RecordLifecycle.NoSummary ? "끝 기록 없음" : damage.Count > 0 ? "읽지 못한 부분 있음" : null;
-            var summary = new RecentItem(e, false, LiveSummary.Badge(a.Grade.Grade), a.Episodes.Count,
-                a.Episodes.Count == 0 ? null : a.Episodes.Max(x => x.MinDurationMs), PathMapModel.ConnectionKind(record.Events), memo, duration, notice, null,
-                a.Grade.Sentence, a.Grade.Grade);
+            var (summary, damage) = Summarize(e, record, a);
             return (new OpenedRecord(item.Key, item.Stamp, record, a, e.Lifecycle), summary, damage, record.Status);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)

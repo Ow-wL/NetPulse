@@ -30,7 +30,10 @@ public sealed class RecentRecords
 
     public RecordLibrary Library { get; }
 
-    public IReadOnlyList<RecentItem> Items => Library.Items.Where(i => !i.External).Take(max).Select(i => i.Summary).ToArray();
+    public IReadOnlyList<RecentItem> Items => Entries.Select(i => i.Summary).ToArray();
+
+    /// <summary>앞 몇 개의 목록 항목 (열쇠로 그 기록 상세를 연다).</summary>
+    public IReadOnlyList<LibraryItem> Entries => Library.Items.Where(i => !i.External).Take(max).ToArray();
     public bool Listed => Library.Listed;
 
     /// <summary>목록이나 분석이 바뀜 (백그라운드 스레드).</summary>

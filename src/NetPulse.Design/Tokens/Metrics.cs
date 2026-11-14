@@ -1,4 +1,4 @@
-namespace NetPulse.Design.Tokens;
+﻿namespace NetPulse.Design.Tokens;
 
 /// <summary>간격, 반경, 크기 (M2 설계 4.2, 4.4). 화면 코드는 이 값만 쓴다.</summary>
 public static class Space
@@ -55,6 +55,8 @@ public static class Size
     public const double GuideWidth = 640;
     /// <summary>홈을 두 열로 놓는 최소 너비 (그보다 좁으면 한 열, 배율 150% 상당)</summary>
     public const double HomeTwoColumns = 760;
+    /// <summary>기록 목록이 한 번에 더 보여 주는 줄 수 (M7 설계 3.1)</summary>
+    public const int RecordsPage = 30;
     /// <summary>창의 기본 클라이언트 크기 (물리 픽셀). UI 테스트와 캡처 매트릭스도 이 크기를 쓴다.</summary>
     public const int WindowWidth = 1280, WindowHeight = 800;
 }

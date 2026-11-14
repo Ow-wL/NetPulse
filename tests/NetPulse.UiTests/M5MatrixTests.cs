@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 using Size = NetPulse.Design.Tokens.Size;
 
@@ -40,7 +40,8 @@ public sealed class M5MatrixTests
     {
         var userData = AppDriver.NewUserData();
         M5Fixtures.Prepare(userData, scene.Prep);
-        var app = AppDriver.LaunchWith(userData, [.. M5Fixtures.Args(scene.Args), "--freeze-motion", .. extra]);
+        // {userData}: 그 실행의 사용자 폴더 (다른 위치 기록 열기 장면, M7)
+        var app = AppDriver.LaunchWith(userData, [.. M5Fixtures.Args(scene.Args.Replace("{userData}", userData, StringComparison.Ordinal)), "--freeze-motion", .. extra]);
         try
         {
             foreach (var a in scene.Actions) Act(app, a);
@@ -120,6 +121,18 @@ public sealed class M5MatrixTests
             case "siterunning": app.WaitDiag(d => Sd(d) is { } s && s.GetProperty("site").GetProperty("Running").GetBoolean(), b => b, "사이트 점검 중"); break;
             case "siteerror": app.WaitDiag(d => Sd(d) is { } s && s.GetProperty("site").GetProperty("InputError").ValueKind == JsonValueKind.String, b => b, "입력 오류"); break;
             case "exists": AppDriver.WaitFor(() => app.Exists(value), e => e, "요소 " + value); break;
+            // M7 기록 화면 (screenDiag = RecordsScreen.Diag)
+            case "recordsListed": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("listed", out var l) && l.GetBoolean(), b => b, "기록 목록"); break;
+            case "recordsAnalyzed":
+                app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("listed", out var l) && l.GetBoolean() && s.GetProperty("analyzing").GetInt32() == 0, b => b, "기록 목록 분석");
+                break;
+            case "detailReady": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("detail", out var x) && x.ValueKind == JsonValueKind.Object, b => b, "기록 상세"); break;
+            case "detailLoading": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("detailLoading", out var x) && x.GetBoolean(), b => b, "기록 상세 여는 중"); break;
+            case "compareReady": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("comparison", out var x) && x.ValueKind == JsonValueKind.Object, b => b, "비교"); break;
+            case "diagnosesReady": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("diagnoses", out var x) && x.GetInt32() >= 0, b => b, "진단 기록"); break;
+            case "memoState":
+                app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("memoState", out var x) && x.EnumerateArray().Any(v => v.GetString()!.StartsWith(value, StringComparison.Ordinal)), b => b, "메모 상태 " + value);
+                break;
             default: throw new ArgumentException("알 수 없는 기다림: " + what);
         }
     }

@@ -50,7 +50,7 @@ public sealed partial class AppShell : Window
     private bool lastStorageFailing;
     private UIElement liveContent = null!;
 
-    public AppShell(StartupOptions options, AppLog log, AppSettings settings, MeasurementHost host, RecentRecords recent, DiagnosisHost diagnosis, Func<Task> beforeClose)
+    public AppShell(StartupOptions options, AppLog log, AppSettings settings, MeasurementHost host, RecentRecords recent, RecordMemos memos, DiagnosisHost diagnosis, Func<Task> beforeClose)
     {
         this.options = options;
         this.log = log;
@@ -100,6 +100,7 @@ public sealed partial class AppShell : Window
         {
             Ui = ui, Host = host, Recent = recent, Toasts = toasts, Dialog = dialog, Options = options, Log = log,
             Diagnosis = diagnosis, Navigate = Navigate, QueueDiag = QueueDiag, SetRevealOrigin = SetRevealOrigin, IsClosing = () => closing,
+            Memos = memos, OpenRecord = OpenRecord, WindowHandle = () => WinRT.Interop.WindowNative.GetWindowHandle(this),
         };
         screens.Register("home", () => new HomeScreen(context));
         screens.Register("measure", () => new MeasureScreen(context));
@@ -107,7 +108,7 @@ public sealed partial class AppShell : Window
         screens.Register("profile", () => new ProfileEditor(context));
         screens.Register("settings", () => new SettingsScreen(context));
         screens.Register("diagnose", () => new DiagnoseScreen(context));
-        screens.Register("records", () => new PendingScreen(context, "records", "기록", "측정 목록, 끊김 목록과 통계, 분석, 비교를 이 화면에서 보게 됩니다."));
+        screens.Register("records", () => new RecordsScreen(context));
         screens.Register("report", () => new PendingScreen(context, "report", "리포트", "통신사에 전달할 리포트를 이 화면에서 만들게 됩니다."));
 
         BuildLayout();
@@ -146,6 +147,7 @@ public sealed partial class AppShell : Window
             QueueDiag();
             if (options.SelfTest is not null) selfTestTimer.Start();
             if (options.Bench) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, RunBench);
+            if (options.OpenRecord is { } folder) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => OpenExternal(folder));
         };
         if (options.RunSeconds > 0)
         {
@@ -157,6 +159,21 @@ public sealed partial class AppShell : Window
     }
 
     public Ui Ui => ui;
+
+    /// <summary>기록 화면으로 가서 그 항목 상세를 연다 (null이면 목록, M7 4.2).</summary>
+    private void OpenRecord(string? key)
+    {
+        Navigate("records", null);
+        if (screens.Get("records") is RecordsScreen r) r.Show(key);
+    }
+
+    /// <summary>다른 위치의 기록 열기 (시작 인수, M7 3.7). 경로는 앱 기록에 남기지 않는다.</summary>
+    private void OpenExternal(string folder)
+    {
+        if (closing) return;
+        Navigate("records", null);
+        if (screens.Get("records") is RecordsScreen r) r.OpenExternal(folder);
+    }
 
     private void BuildLayout()
     {
@@ -305,7 +322,14 @@ public sealed partial class AppShell : Window
 
     private void OnFinished(FinishedMeasurement f)
     {
-        _ = recent.RefreshAsync(host.RunningId);
+        string? running = host.RunningId;
+        _ = Task.Run(async () =>
+        {
+            // 목록을 다시 읽고, 방금 끝난 기록은 호스트가 가진 원본·분석을 그대로 넘긴다 (다시 읽지 않음, M7 구현 중 결정 3)
+            await recent.Library.RefreshAsync(running).ConfigureAwait(false);
+            if (f.Record is { } record && f.Analysis is { } analysis) recent.Library.Share(f.Result.Id, record, analysis);
+            await recent.RefreshAsync(running).ConfigureAwait(false);
+        });
         string reason = f.Result.EndReason switch { EndReason.Completed => "계획한 시간을 마쳤습니다.", EndReason.Stopped => "측정을 멈추고 저장했습니다.", _ => "측정이 끝났습니다." };
         if (f.Result.Unsaved > 0 || f.Result.SealFailed)
             toasts.Show(ToastKind.Warning, "측정이 끝났습니다 · 일부 저장 안 됨", $"저장하지 못한 회차 {f.Result.Unsaved}개", autoClose: false);

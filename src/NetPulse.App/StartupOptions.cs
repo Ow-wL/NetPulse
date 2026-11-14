@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using NetPulse.Design.Settings;
 
 namespace NetPulse.App;
@@ -28,6 +28,10 @@ public sealed record StartupOptions
     public (long Round, double Speed)? DemoSpeedAfter { get; init; }
     /// <summary>최근 측정 분석을 시작하지 않는다 (불러오는 중 화면)</summary>
     public bool HoldAnalysis { get; init; }
+    /// <summary>기록 목록을 읽지 않고 멈춤 (G5 "목록 읽는 중" 장면, M7)</summary>
+    public bool HoldList { get; init; }
+    /// <summary>시작할 때 다른 위치의 기록 폴더를 연다 (M7 설계 3.7, 시험·외부 열기 공용). 경로는 앱 기록에 남기지 않는다</summary>
+    public string? OpenRecord { get; init; }
     /// <summary>측정 시작 직전에 멈춘다 (시작 중 화면)</summary>
     public bool HoldStart { get; init; }
     /// <summary>데모: 지금 측정이 이 회차에 닿으면 증상을 표시하고 메모를 붙인다 (캡처에서 표시가 멈춘 시각 가장자리에 오지 않게)</summary>
@@ -81,6 +85,8 @@ public sealed record StartupOptions
                 "--demo-hold" => o with { DemoHold = long.Parse(Next(), CultureInfo.InvariantCulture) },
                 "--demo-speed-after" => o with { DemoSpeedAfter = ParseSpeedAfter(Next()) },
                 "--hold-analysis" => o with { HoldAnalysis = true },
+                "--hold-list" => o with { HoldList = true },
+                "--open-record" => o with { OpenRecord = Next() },
                 "--hold-start" => o with { HoldStart = true },
                 "--demo-mark" => o with { DemoMark = long.Parse(Next(), CultureInfo.InvariantCulture) },
                 "--motion-hold" => o with { MotionHold = double.Parse(Next(), CultureInfo.InvariantCulture) },
