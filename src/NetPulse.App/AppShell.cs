@@ -118,7 +118,7 @@ public sealed partial class AppShell : Window
 
         rail.Selected += id => { if (!navigating) Navigate(id, null); };
         host.Changed += QueueRender;
-        host.Finished += f => DispatcherQueue.TryEnqueue(() => OnFinished(f));
+        host.Finished += f => DispatcherQueue.TryEnqueue(() => { if (!closeAllowed) OnFinished(f); });
         recent.Changed += QueueDiag;
         ui.Effects.Changed += (_, _) => QueueDiag();
         ui.Motion.ActiveChanged += QueueDiag;
@@ -248,11 +248,12 @@ public sealed partial class AppShell : Window
 
     private void QueueRender()
     {
-        if (renderQueued) return;
+        if (renderQueued || closeAllowed) return;
         renderQueued = true;
         DispatcherQueue.TryEnqueue(() =>
         {
             renderQueued = false;
+            if (closeAllowed) return;   // 창을 닫은 뒤 큐에서 도는 그리기는 요소를 건드리지 않는다
             try { RenderProfile.Time("shell.render", () => Render(host.Snapshot)); }
             catch (Exception ex) { log.Write("renderFailed", new { type = ex.GetType().Name, message = ex.Message, at = ex.StackTrace?.Split(Environment.NewLine).Where(l => l.Contains("NetPulse")).Take(6) }); }
         });
@@ -340,8 +341,11 @@ public sealed partial class AppShell : Window
         }
         finally
         {
-            ui.Detach();
+            // 닫은 뒤에는 화면 요소를 건드리는 큐 작업·타이머가 돌지 않게 먼저 끊는다
+            // (게이트에서 닫을 때 드물게 WinUI 내부 예외 0xC000027B로 끝났다, G4 M5 2라운드 반영 중)
             closeAllowed = true;
+            toasts.StopAll();
+            ui.Detach();
             Close();
         }
     }

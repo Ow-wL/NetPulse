@@ -35,6 +35,14 @@ public sealed class ToastHost : StackPanel
 
     public int Count => Children.Count;
 
+    /// <summary>창을 닫기 직전: 자동 닫기 타이머를 모두 멈추고 알림을 치운다 (닫힌 창에서 타이머가 요소를 건드리지 않게).</summary>
+    public void StopAll()
+    {
+        foreach (var t in timers) t.Stop();
+        timers.Clear();
+        Children.Clear();
+    }
+
     public void Show(ToastKind kind, string title, string body, bool autoClose = true)
     {
         var id = "toast." + kind.ToString().ToLowerInvariant() + "." + sequence++;

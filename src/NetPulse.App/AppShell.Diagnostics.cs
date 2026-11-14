@@ -17,11 +17,12 @@ public sealed partial class AppShell
 {
     private void QueueDiag()
     {
-        if (diagQueued) return;
+        if (diagQueued || closeAllowed) return;
         diagQueued = true;
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             diagQueued = false;
+            if (closeAllowed) return;
             try { RenderProfile.Time("shell.diag", WriteDiag); }
             catch (Exception ex) { log.Write("diagFailed", new { type = ex.GetType().Name, message = ex.Message, at = ex.StackTrace?.Split(Environment.NewLine).Take(4) }); }
         });

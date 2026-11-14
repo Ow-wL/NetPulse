@@ -231,9 +231,22 @@ public sealed class AppDriver : IDisposable
     public int Close()
     {
         ((WindowPattern)Window.GetCurrentPattern(WindowPattern.Pattern)).Close();
-        if (!process.WaitForExit(15000)) { process.Kill(); process.WaitForExit(10000); throw new TimeoutException("창을 닫았지만 15초 안에 끝나지 않았습니다."); }
+        if (!process.WaitForExit(15000)) { process.Kill(); process.WaitForExit(10000); KeepLog("timeout"); throw new TimeoutException("창을 닫았지만 15초 안에 끝나지 않았습니다."); }
         closed = true;
+        if (process.ExitCode != 0) KeepLog("exit-" + process.ExitCode.ToString("X8", System.Globalization.CultureInfo.InvariantCulture));
         return process.ExitCode;
+    }
+
+    /// <summary>비정상 종료면 앱 기록을 출력 폴더에 남긴다 (사용자 폴더는 시험이 지운다).</summary>
+    private void KeepLog(string why)
+    {
+        try
+        {
+            var path = Path.Combine(UserData, "app-log.jsonl");
+            if (File.Exists(path)) File.Copy(path, Path.Combine(OutputDirectory, $"crash-{DateTime.Now:HHmmss}-{why}.jsonl"), overwrite: true);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     public IReadOnlyList<JsonElement> ReadLog()

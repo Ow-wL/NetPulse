@@ -20,7 +20,17 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
-        UnhandledException += (_, e) => log?.Write("unhandled", new { type = e.Exception.GetType().Name, message = e.Message });
+        // 처리되지 않은 예외는 종류·HRESULT·우리 코드 쪽 스택 줄까지 남긴다 (드문 종료 충돌의 원인을 다음에 바로 보려고)
+        UnhandledException += (_, e) => log?.Write("unhandled", new
+        {
+            type = e.Exception.GetType().Name, hresult = e.Exception.HResult, message = e.Message,
+            at = e.Exception.StackTrace?.Split(Environment.NewLine).Where(l => l.Contains("NetPulse", StringComparison.Ordinal)).Take(8),
+        });
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => log?.Write("unhandledDomain", new
+        {
+            type = e.ExceptionObject.GetType().Name,
+            at = (e.ExceptionObject as Exception)?.StackTrace?.Split(Environment.NewLine).Where(l => l.Contains("NetPulse", StringComparison.Ordinal)).Take(8),
+        });
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
