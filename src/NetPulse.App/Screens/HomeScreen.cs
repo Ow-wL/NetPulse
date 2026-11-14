@@ -41,7 +41,7 @@ public sealed class HomeScreen : Screen
     private readonly GroupPanel heroCard, mapCard, chartCard, recentCard, diagCard;
     private readonly Grid side = new() { RowSpacing = Space.S5 };
     private readonly CardBody diagBody;
-    private long diagVersion = -1;
+    private string diagKey = "";
     private readonly FrameworkElement chartEmpty;
     private readonly StackPanel recentList = new() { Spacing = Space.S1 };
     private string recentState = "";
@@ -212,9 +212,11 @@ public sealed class HomeScreen : Screen
     private void RenderDiagnosis()
     {
         var d = Context.Diagnosis.Snapshot;
-        if (d.Version == diagVersion) return;
-        diagVersion = d.Version;
         var now = Context.Now;
+        // 날짜도 열쇠에 넣는다: 진단이 그대로여도 자정을 넘기면 "오늘"이 "어제"로 바뀌어야 한다 (M6 G4 4라운드 이월 4)
+        string key = $"{d.Version}|{now.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture)}";
+        if (key == diagKey) return;
+        diagKey = key;
         (int Conclusion, DateTimeOffset At)? latest = d.Last is { } l ? (l.Result.Main.Number, l.Result.EndedAt) : d.Recent is { } r ? (r.Conclusion, r.StartedAt) : null;
         if (d.Operation != DiagnosisOperation.None)
         {

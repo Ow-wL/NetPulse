@@ -58,7 +58,11 @@ public sealed class M6LiveRunTests
                 app.Invoke("diagnose.site.run");
                 app.WaitDiag(x => M5Fixtures.Str(Sd(x), "site", "dns"), s => s.Length > 0, "사이트 점검 결과");
                 app.CaptureClient("live-site");
-                Assert.Empty(Sd(app.Diag()).GetProperty("actions").EnumerateArray());   // 실제 동작(비우기·설정·폴더)은 누르지 않았다
+                // 실제 동작(비우기·설정·폴더)은 누르지 않았다. 실측에서는 데모 동작 기록이 없어 actions가 null이다 (M6 G4 4라운드 이월 5)
+                var acted = Sd(app.Diag());
+                var acts = acted.GetProperty("actions");
+                Assert.True(acts.ValueKind == JsonValueKind.Null || (acts.ValueKind == JsonValueKind.Array && acts.GetArrayLength() == 0), "동작 기록: " + acts.GetRawText());
+                Assert.Equal(JsonValueKind.Null, acted.GetProperty("lastAction").ValueKind);
 
                 app.Select("nav.measure");
                 app.WaitDiag(Screen, s => s == "measure", "측정 화면");

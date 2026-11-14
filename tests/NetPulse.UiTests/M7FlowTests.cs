@@ -139,7 +139,7 @@ public sealed class M7FlowTests
         var saved = ClipboardText.Save();
         if (saved.Blocked) Assert.Skip("미완료: 클립보드에 그대로 되돌릴 수 없는 형식이 있어 덮어쓰지 않았습니다.");
         var userData = AppDriver.NewUserData();
-        string? ours = null;   // 시험(앱)이 쓴 글. null이면 쓰지 않았다 → 되돌리지 않는다 (M6 G4 3라운드 2)
+        uint? owned = null;   // 앱이 쓴 뒤 자리 잡은 클립보드 번호. null이면 시험의 내용이 아니다 → 되돌리지 않는다 (M6 G4 4라운드 이월 1)
         try
         {
             using var app = Open(userData, "rec-mixed", "--demo steady --screen records");
@@ -162,15 +162,15 @@ public sealed class M7FlowTests
             var expected = RecordView.Copy(record.Header!, EpisodeDetail.For(record, analysis, episode));
             // 보관한 뒤 다른 곳에서 클립보드를 바꿨으면 덮어쓰지 않고 미완료
             if (ClipboardText.Sequence() != saved.Sequence) Assert.Skip("미완료: 시험 중 클립보드가 바뀌어 덮어쓰지 않았습니다.");
-            ours = expected;
             app.Invoke("records.episode.0.copy");
             app.WaitDiag(x => M5Fixtures.Str(Sd(x), "copyState"), s => s.Length > 0, "복사");
+            owned = ClipboardText.Claim(expected);
             Assert.Equal(expected, ClipboardText.Read());
             Assert.Equal(0, app.Close());
         }
         finally
         {
-            ClipboardText.Restore(saved, ours);
+            ClipboardText.Restore(saved, owned);
             AppDriver.DeleteUserData(userData);
         }
     }
@@ -224,7 +224,8 @@ public sealed class M7FlowTests
             app.SetText("records.mark.0.text", "못 쓴 메모");
             app.Invoke("records.mark.0.save");
             app.WaitDiag(d => Sd(d).GetProperty("memoState").EnumerateArray().Select(v => v.GetString()).ToArray(), s => s.Contains("저장하지 못했습니다"), "저장 실패");
-            Assert.True(app.Exists("records.mark.0.text.error"));
+            // 상태 기록과 오류 줄 그리기는 같은 프레임이 아닐 수 있다 (M7 UI 시험 1차: 한 번 먼저 읽어 실패)
+            AppDriver.WaitFor(() => app.Exists("records.mark.0.text.error"), e => e, "메모 오류 줄");
             Assert.Equal("못 쓴 메모", ((System.Windows.Automation.ValuePattern)app.Find("records.mark.0.text").GetCurrentPattern(System.Windows.Automation.ValuePattern.Pattern)).Current.Value);
             Assert.Equal(0, app.Close());
         }

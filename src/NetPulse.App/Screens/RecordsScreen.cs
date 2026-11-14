@@ -194,7 +194,11 @@ public sealed class RecordsScreen : Screen
             view.ShowAll(EndMs(opened));
             Rerender();
             scroll.ChangeView(null, 0, null, true);
-            back.Focus(FocusState.Programmatic);
+            // 다시 그리면 [목록으로]가 새 줄로 옮겨 붙어 아직 배치 전이다: 배치 뒤에 초점을 준다 (M7 UI 시험 1차: 초점이 탐색으로 빠짐)
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                if (!Context.IsClosing() && detailKey == key && mode == Mode.Detail) back.Focus(FocusState.Programmatic);
+            });
         });
     }
 
@@ -416,11 +420,24 @@ public sealed class RecordsScreen : Screen
 
     // ---------------- 상세 ----------------
 
+    /// <summary>
+    /// "목록으로" 줄. 버튼은 한 개를 다시 쓰므로, 이전 그리기의 줄에서 떼어 낸 뒤 붙인다
+    /// (부모가 있는 요소를 다른 패널에 넣으면 XAML이 0x800F1000으로 앱을 즉시 끝낸다. M7 UI 시험 1차).
+    /// 이전 줄은 직접 들고 있다가 뗀다: 화면에서 빠진 줄의 버튼은 Parent로 찾지 못하는 경우가 있었다.
+    /// </summary>
+    private StackPanel BackBar()
+    {
+        backBar?.Children.Remove(back);
+        backBar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
+        backBar.Children.Add(back);
+        return backBar;
+    }
+
+    private StackPanel? backBar;
+
     private void RenderDetail()
     {
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
-        bar.Children.Add(back);
-        content.Children.Add(bar);
+        content.Children.Add(BackBar());
         var item = Context.Records.Items.FirstOrDefault(i => i.Key == detailKey);
         foreach (var n in item?.External == true ? externalNotices : [])
             content.Children.Add(new Banner(Ui, "records.external.notice", BannerKind.Info, n));
@@ -483,9 +500,10 @@ public sealed class RecordsScreen : Screen
             var box = new StackPanel { Spacing = Space.S0 };
             box.Children.Add(Fonts.Text($"{t.Name} ({(t.Role == TargetRole.Local ? "로컬" : "외부")} · {t.Method})", Typography.Label, Ui.Brushes.Ink));
             box.Children.Add(Fonts.Wrapped($"{t.Loss} · 평균 {t.Average} · 최대 {t.Max} · 최대 연속 손실 {t.Consecutive} · 마지막 성공 {t.LastSuccess} · 마지막 손실 {t.LastLoss}", Typography.Caption, Ui.Brushes.Muted));
-            AutomationProperties.SetAutomationId(box, $"records.detail.target.{t.TargetId}");
-            AutomationProperties.SetName(box, $"{t.Name}, {t.Loss}, 평균 {t.Average}, 최대 {t.Max}, 최대 연속 손실 {t.Consecutive}");
-            stats.Children.Add(box);
+            // 이름 붙은 묶음은 GroupPanel이어야 UI 자동화 트리에 나온다 (StackPanel은 peer가 없어 숨는다. M7 UI 시험 1차)
+            var group = new GroupPanel($"records.detail.target.{t.TargetId}", $"{t.Name}, {t.Loss}, 평균 {t.Average}, 최대 {t.Max}, 최대 연속 손실 {t.Consecutive}");
+            group.Children.Add(box);
+            stats.Children.Add(group);
         }
         var (statsCard, statsBody) = ScreenParts.Card(Ui, "records.detail.stats", "통계");
         statsBody.Set(stats, "normal");
@@ -725,7 +743,6 @@ public sealed class RecordsScreen : Screen
         var names = h.Targets.Where(t => t.Enabled).ToDictionary(t => t.Id, t => t.Name);
         var offset = TimeSpan.FromMinutes(h.UtcOffsetMinutes);
         var panel = new StackPanel { Spacing = Space.S2, Margin = new Thickness(Space.S5, 0, 0, Space.S3) };
-        AutomationProperties.SetAutomationId(panel, $"records.episode.{index}.detail");
         if (episode.Parts.Count > 1)
         {
             panel.Children.Add(Fonts.Text("판정이 바뀐 구간", Typography.Label, Ui.Brushes.Ink));
@@ -751,7 +768,9 @@ public sealed class RecordsScreen : Screen
         var copy = new GlassButton(Ui, ButtonKind.Ghost, $"records.episode.{index}.copy", "상세 복사", Icons.Card) { HorizontalAlignment = HorizontalAlignment.Left };
         copy.Click += async (_, _) => await CopyAsync(RecordView.Copy(h, d));
         panel.Children.Add(copy);
-        return panel;
+        var group = new GroupPanel($"records.episode.{index}.detail", $"끊김 {index + 1} 상세");   // UI 자동화에 보이는 묶음
+        group.Children.Add(panel);
+        return group;
     }
 
     private async Task CopyAsync(string text)
@@ -866,9 +885,7 @@ public sealed class RecordsScreen : Screen
 
     private void RenderCompare()
     {
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
-        bar.Children.Add(back);
-        content.Children.Add(bar);
+        content.Children.Add(BackBar());
         if (loadError is { } err)
         {
             content.Children.Add(new Banner(Ui, "records.compare.failed", BannerKind.Error, err));
@@ -946,7 +963,7 @@ public sealed class RecordsScreen : Screen
             Lower.B => lowerIsWorse ? "A가 더 좋음" : "B가 더 적음",
             _ => suppressed is { } s && s != "값만" ? "비교 안 함 (" + s + ")" : "",
         };
-        var grid = new Grid { ColumnSpacing = Space.S3 };
+        var grid = new GroupPanel(id) { ColumnSpacing = Space.S3 };   // UI 자동화에 보이는 줄
         foreach (var w in new[] { 2.0, 3.0, 3.0, 3.0 }) grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(w, GridUnitType.Star) });
         void Cell(int col, string text, Microsoft.UI.Xaml.Media.Brush brush)
         {
@@ -958,7 +975,6 @@ public sealed class RecordsScreen : Screen
         Cell(1, a, Ui.Brushes.Ink);
         Cell(2, b, Ui.Brushes.Ink);
         Cell(3, verdict, lower == Lower.None ? Ui.Brushes.Muted : Ui.Brushes.Ink);
-        AutomationProperties.SetAutomationId(grid, id);
         AutomationProperties.SetName(grid, $"{label}, A {a}, B {b}" + (verdict.Length > 0 ? ", " + verdict : ""));
         AutomationProperties.SetItemStatus(grid, lower.ToString());
         return grid;
@@ -995,9 +1011,7 @@ public sealed class RecordsScreen : Screen
 
     private void RenderDiagnosis()
     {
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
-        bar.Children.Add(back);
-        content.Children.Add(bar);
+        content.Children.Add(BackBar());
         if (openDiagnosis is not { } s) return;
         var v = StoredDiagnosisView.From(s);
         var (icon, brush) = DiagnosisLook.Weight(Ui, v.Weight);
