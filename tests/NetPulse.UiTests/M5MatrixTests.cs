@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 using Size = NetPulse.Design.Tokens.Size;
 
@@ -109,7 +109,9 @@ public sealed class M5MatrixTests
             case "diagdone":
                 app.WaitDiag(d => Sd(d) is { } s && s.GetProperty("operation").GetString() == "None" && s.GetProperty("conclusion").ValueKind == JsonValueKind.Number, b => b, "진단 끝");
                 break;
-            case "diagpartial": app.WaitDiag(d => Sd(d) is { } s ? s.GetProperty("partial").GetInt32() : 0, n => n >= int.Parse(value), "끝난 검사 " + value); break;
+            case "diagpartial":
+                app.WaitDiag(d => Sd(d) is { } s && s.GetProperty("operation").GetString() == "Diagnosing" && s.GetProperty("partial").GetInt32() >= int.Parse(value), b => b, "진행 중 끝난 검사 " + value);
+                break;
             case "diag": app.WaitDiag(d => Sd(d) is { } s ? s.GetProperty("operation").GetString() : "", o => o == value, "진단 작업 " + value); break;
             case "flushstage": app.WaitDiag(d => Sd(d) is { } s ? M5Fixtures.Str(s, "flush") : "", f => f == value, "비우기 단계 " + value); break;
             case "flushdone":

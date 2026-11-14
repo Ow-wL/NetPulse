@@ -41,6 +41,8 @@ public sealed class DiagnoseScreen : Screen
     private int columns;
     private ScrollViewer scroll = null!;
     private bool siteWasRunning;
+    /// <summary>끝난 사이트 점검 수 (진단 값: 시험이 새 결과를 기다리는 표지. 도메인은 넣지 않는다).</summary>
+    private int siteChecks;
 
     public DiagnoseScreen(ScreenContext context) : base(context, "diagnose")
     {
@@ -164,12 +166,21 @@ public sealed class DiagnoseScreen : Screen
         XamlRoot is null ? null : Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(XamlRoot) as DependencyObject;
 
     /// <param name="displacedTo">단추가 꺼질 때 초점이 옮겨 간 요소. 지금 초점이 그 밖의 글 상자면 사용자가 입력 중이라 두기</param>
-    private void RestoreFocus(Control button, bool displaced, DependencyObject? displacedTo)
+    private bool RestoreFocus(Control button, bool displaced, DependencyObject? displacedTo)
     {
-        if (!displaced || !button.IsEnabled) return;
+        if (!displaced || !button.IsEnabled || !Undisturbed(displacedTo)) return false;
+        return button.Focus(FocusState.Programmatic);
+    }
+
+    /// <summary>
+    /// 작업이 끝났을 때 화면을 건드려도 되는지 (G4 1라운드 b1): 대화상자가 열렸거나, 이 화면이 보이지 않거나,
+    /// 초점이 단추가 꺼질 때 옮겨 간 자리가 아닌 다른 곳(사용자가 옮김)이면 초점도 스크롤도 바꾸지 않는다.
+    /// </summary>
+    private bool Undisturbed(DependencyObject? displacedTo)
+    {
+        if (Context.Dialog.IsOpen || Visibility != Visibility.Visible) return false;
         var now = Focused();
-        if (now is TextBox && !ReferenceEquals(now, displacedTo)) return;
-        button.Focus(FocusState.Programmatic);
+        return now is null || ReferenceEquals(now, displacedTo) || ReferenceEquals(now, start) || ReferenceEquals(now, siteRun) || !IsInside(now, this);
     }
 
     private bool startDisplaced, siteDisplaced;
@@ -201,6 +212,8 @@ public sealed class DiagnoseScreen : Screen
         void Closed(bool ok)
         {
             Context.Dialog.Closed -= Closed;
+            // 연 단추가 그 사이 화면에서 빠졌으면 지금 있는 같은 역할의 단추로 초점을 돌린다 (G4 1라운드 b2)
+            if (opener.XamlRoot is null || !opener.IsLoaded) (FindById("diagnose.conclusion.flush") ?? flush).Focus(FocusState.Programmatic);
             if (!ok) return;
             if (Context.Diagnosis.RequestFlush() == DiagnosisRequest.Queued)
                 Context.Toasts.Show(ToastKind.Info, "진단이 끝나면 DNS 캐시를 비웁니다", "비운 뒤 빠른 진단을 다시 돌립니다.");
@@ -326,10 +339,27 @@ public sealed class DiagnoseScreen : Screen
         // 진단이 아주 빨리 끝나면 옮겨 간 요소를 적는 작업(같은 낮은 우선순위, 먼저 넣음)이 아직 돌지 않았다
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
-            if (Context.IsClosing()) return;
+            if (Context.IsClosing() || !Undisturbed(startDisplacedTo)) return;
             RestoreFocus(start, displaced, startDisplacedTo);
             scroll.ChangeView(null, 0, null, true);
         });
+    }
+
+    private static string RuntimeHelpersId(object? o) => o is null ? "-" : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(o).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private Control? FindById(string id)
+    {
+        static IEnumerable<DependencyObject> All(DependencyObject root)
+        {
+            int n = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root);
+            for (int i = 0; i < n; i++)
+            {
+                var c = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, i);
+                yield return c;
+                foreach (var x in All(c)) yield return x;
+            }
+        }
+        return All(this).OfType<Control>().FirstOrDefault(c => AutomationProperties.GetAutomationId(c) == id);
     }
 
     /// <summary>초점을 가진 요소에서 가장 가까운 자동화 Id (진단 출력용).</summary>
@@ -355,8 +385,14 @@ public sealed class DiagnoseScreen : Screen
         _ => "DNS 캐시를 비웠고 다시 검사하는 중",
     };
 
+    private string? conclusionKey;
+
     private void RenderConclusion(DiagnosisSnapshot d)
     {
+        // 사이트 점검처럼 결론과 무관한 변경으로 결론 단추(대화상자를 연 단추)가 사라지지 않게 (G4 1라운드 b2)
+        string key = $"{d.Operation}|{d.Flush}|{d.Partial.Count}|{RuntimeHelpersId(d.Last)}|{d.Recent?.StartedAt}|{d.Recent?.Conclusion}|{d.SkippedRecords}";
+        if (key == conclusionKey) return;
+        conclusionKey = key;
         conclusion.Children.Clear();
         if (d.Operation != DiagnosisOperation.None)
         {
@@ -469,6 +505,7 @@ public sealed class DiagnoseScreen : Screen
         siteRun.IsEnabled = !d.Site.Running;
         bool siteFinished = siteWasRunning && !d.Site.Running;
         siteWasRunning = d.Site.Running;
+        if (siteFinished) siteChecks++;
         // 결과 줄이 카드 아래에 붙으므로, 점검이 끝나면 결과가 보이게 한다
         if (siteFinished)
         {
@@ -476,7 +513,7 @@ public sealed class DiagnoseScreen : Screen
             siteDisplaced = false;
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
-                if (Context.IsClosing()) return;
+                if (Context.IsClosing() || !Undisturbed(siteDisplacedTo)) return;
                 RestoreFocus(siteRun, displaced, siteDisplacedTo);
                 siteResult.UpdateLayout();
                 siteResult.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false });
@@ -560,7 +597,7 @@ public sealed class DiagnoseScreen : Screen
             compare = d.Last is { } run && DiagnosisView.Compare(run, d.SkippedRecords) is { } c ? c.Title : null,
             changes = d.Last?.Changes?.Select(x => x.Id.ToString()).ToArray(),
             recent = d.Recent?.Conclusion,
-            site = new { d.Site.InputError, d.Site.Running, domain = d.Site.Result?.Domain, dns = d.Site.Result?.Dns.Judgment.ToString(), https = d.Site.Result?.Https.Judgment.ToString(), httpsState = d.Site.Result?.Https.State.ToString() },
+            site = new { d.Site.InputError, d.Site.Running, checks = siteChecks, dns = d.Site.Result?.Dns.Judgment.ToString(), https = d.Site.Result?.Https.Judgment.ToString(), httpsState = d.Site.Result?.Https.State.ToString() },
             expanded = checkCards.Values.Where(c => c.Expanded).Select(c => c.Id.ToString()).ToArray(),
             copyState,
             // 결과 복사가 쓰는 글 그대로 (주소·도메인 없음, G2가 검사). 흐름 시험이 실제 클립보드와 비교한다 (설계 7.2-4)

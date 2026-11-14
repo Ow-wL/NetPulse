@@ -82,4 +82,6 @@ public static class BenchTokens
     public static readonly TimeSpan DiagRunLimit = TimeSpan.FromSeconds(15);
     public static readonly TimeSpan DiagSettle = TimeSpan.FromSeconds(2);
     public const int DiagReenterCount = 6;
+    /// <summary>bench의 메모리 표본 간격</summary>
+    public static readonly TimeSpan MemorySample = TimeSpan.FromMilliseconds(500);
 }

@@ -321,12 +321,14 @@ public sealed partial class AppShell : Window
         if (closing) return;
         closing = true;
         runTimer?.Stop();
+        // 진단 억제는 첫 await 전에 (테마 정리를 기다리는 동안 결과를 저장·게시하지 않게, G4 1라운드 b4). 끝나기는 아래에서 기다린다
+        var diagnosisStop = diagnosis.ShutdownAsync();
         await ui.Theme.ShutdownAsync(Waits.ThemeCleanup);
         log.Write("closeCleanup", new { snapshotLayers = ui.Theme.SnapshotLayersInTree, inTransition = ui.Theme.InTransition, rendering = ui.Theme.RenderingSubscribed });
         AppWindow.Hide();
         try
         {
-            await diagnosis.ShutdownAsync();   // 진단을 먼저 멈춘다: 억제 → 취소 → 최대 3초 (M6 설계 3.4)
+            await diagnosisStop;   // 진단을 먼저 멈춘다: 억제 → 취소 → 최대 3초 (M6 설계 3.4)
             var shutdown = host.ShutdownAsync();
             if (await Task.WhenAny(shutdown, Task.Delay(Waits.CloseWrites + Waits.CloseWrites + Waits.CloseWrites)) != shutdown)
                 log.Write("closeTimeout", new { state = host.Snapshot.State.ToString() });

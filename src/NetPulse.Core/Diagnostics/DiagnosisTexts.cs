@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 
 namespace NetPulse.Core.Diagnostics;
 
@@ -48,7 +48,9 @@ public static class DiagnosisTexts
         int ok = c.Targets.Count(t => t.Outcome == TargetOutcome.Ok);
         return (c.Id, c.Judgment) switch
         {
-            (CheckId.Adapter, CheckJudgment.Normal) => "어댑터가 켜져 있고 주소·게이트웨이·DNS 설정이 있습니다.",
+            (CheckId.Adapter, CheckJudgment.Normal) => c.Facts.GetValueOrDefault("dns") == "none"
+                ? "어댑터가 켜져 있고 주소·게이트웨이는 있지만 DNS 서버 설정이 없습니다."   // 판정은 그대로, 설명은 관측 사실대로 (G4 1라운드 a4)
+                : "어댑터가 켜져 있고 주소·게이트웨이·DNS 설정이 있습니다.",
             (CheckId.Adapter, _) => Reason(c.Code) + ".",
             (CheckId.Gateway, CheckJudgment.Normal) => "공유기가 Ping에 답했습니다.",
             (CheckId.Gateway, CheckJudgment.Check) => "공유기가 Ping에 답하지 않았습니다 (Ping을 막는 장비일 수 있음).",
@@ -123,7 +125,20 @@ public static class DiagnosisTexts
             case "scenario-undefined": return "데모 시나리오에 정의되지 않은 시각입니다";
             case "scenario-error": return "검사 오류 (데모)";
             case "ProbeError": return "검사 중 오류";
+            case "access-denied": return "읽을 권한이 없습니다";
+            case "not-found": return "어댑터를 찾지 못했습니다";
+            case "not-allowed": return "허용된 폴더가 아닙니다";
+            case "missing": return "폴더가 없습니다";
+            case "missing-tool": return "필요한 Windows 명령을 찾지 못했습니다";
+            case "start-failed": return "명령을 시작하지 못했습니다";
+            case "log-not-found": return "링크 기록을 찾지 못했습니다";
+            case "no-known-driver": return "이 어댑터의 링크 기록 형식을 알지 못합니다";
+            case "wlan-log-unavailable": return "무선 연결 기록을 읽을 수 없습니다";
+            case "lookback-truncated": return "링크 기록이 앞부분만 남아 있습니다";
         }
+        foreach (var (prefix, text) in new[] { ("GetIfEntry2_", "어댑터 상태를 읽지 못했습니다"), ("GetBestRoute_", "경로를 조회하지 못했습니다"),
+            ("GetBestInterface_", "경로의 어댑터를 조회하지 못했습니다"), ("NotifyIpInterfaceChange_", "링크 변화 알림을 받을 수 없습니다") })
+            if (code.StartsWith(prefix, StringComparison.Ordinal)) return $"{text} (오류 {code[prefix.Length..]})";
         if (code.StartsWith("dns-", StringComparison.Ordinal)) return $"이름 해석 실패 ({code[4..]})";
         if (code.StartsWith("socket-", StringComparison.Ordinal)) return $"연결 실패 ({code[7..]})";
         if (code.StartsWith("http-", StringComparison.Ordinal))

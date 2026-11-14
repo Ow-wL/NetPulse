@@ -282,10 +282,16 @@ public sealed class AppDriver : IDisposable
     {
         // 시험이 닫지 않았는데 이미 끝나 있으면 (조작 중에 죽음) 증거를 남기고 알린다.
         // 시험 본문이 이미 실패해 이 예외가 그것을 덮을 수 있지만, 그때도 원인은 대개 이 종료라 증거 경로를 앞에 둔다.
+        // 종료 관찰·회수·종료 코드 판정을 한 경로로 (G4 1라운드 b5): 살아 있으면 시험이 끝내고(종료 코드 -1),
+        // 그 사이 스스로 끝났으면 Kill이 아무것도 하지 않거나 예외를 내므로 종료 코드로 판정한다. 0과 -1(시험이 끝냄) 밖은 비정상
         string? crashed = null;
-        if (!closed && process.HasExited && process.ExitCode != 0)
-            crashed = $"앱이 시험 도중 비정상 종료했습니다 (종료 코드 0x{process.ExitCode:X8}). 증거: {CrashEvidence.Collect(process, UserData, "during-test", startedUtc)}";
-        else if (!closed && !process.HasExited) { process.Kill(); process.WaitForExit(10000); }
+        if (!closed)
+        {
+            try { process.Kill(); } catch (InvalidOperationException) { } catch (System.ComponentModel.Win32Exception) { }
+            process.WaitForExit(10000);
+            if (process.HasExited && process.ExitCode is not (0 or -1))
+                crashed = $"앱이 시험 도중 비정상 종료했습니다 (종료 코드 0x{process.ExitCode:X8}). 증거: {CrashEvidence.Collect(process, UserData, "during-test", startedUtc)}";
+        }
         process.Dispose();
         if (ownsUserData) DeleteUserData(UserData);
         if (crashed is not null) throw new AppCrashedException(crashed);

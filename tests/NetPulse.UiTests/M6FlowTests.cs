@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 using NetPulse.Core.Diagnostics;
 
@@ -202,12 +202,15 @@ public sealed class M6FlowTests
                 Assert.Equal("", S(d, "site", "dns"));
                 Assert.True(app.Exists("diagnose.site.input.error"), "칸 오류가 보여야 한다: " + input);
             }
+            int done = 0;
             foreach (var (domain, https, state) in new[] { ("shop.example", "Normal", "Run"), ("down.example", "Fail", "Run"), ("slow.example", "Unmeasured", "Timeout") })
             {
                 app.SetText("diagnose.site.input", domain);
                 app.Invoke("diagnose.site.run");
-                // 같은 진단 값 안에서 그 도메인의 결과인지 본다 (화면 글을 따로 읽으면 앞 결과의 값과 섞인다)
-                var d = app.WaitDiag(x => x, x => !Sd(x).GetProperty("site").GetProperty("Running").GetBoolean() && S(x, "site", "domain") == domain, "사이트 점검 " + domain);
+                // 끝난 점검 수가 늘어난 그 진단 값으로 판정하고, 도메인은 화면 글로 본다 (진단 값에 도메인을 넣지 않음, 설계 결정)
+                var d = app.WaitDiag(x => x, x => !Sd(x).GetProperty("site").GetProperty("Running").GetBoolean() && Sd(x).GetProperty("site").GetProperty("checks").GetInt32() == done + 1, "사이트 점검 " + domain);
+                done++;
+                Assert.Equal(domain, app.Text("diagnose.site.domain"));
                 Assert.Equal("Normal", S(d, "site", "dns"));
                 Assert.Equal(https, S(d, "site", "https"));
                 Assert.Equal(state, S(d, "site", "httpsState"));
@@ -327,7 +330,7 @@ public sealed class M6FlowTests
             Assert.Equal(session, stored.MeasurementId);   // 진단을 시작한 순간의 측정
             app.Select("nav.home");
             app.WaitDiag(x => M5Fixtures.Str(x, "screen"), s => s == "home", "홈");
-            Assert.True(app.Exists("home.diagnosis.last"));
+            AppDriver.WaitFor(() => app.Exists("home.diagnosis.last"), e => e, "홈 진단 카드");   // 홈은 이동 뒤 그려진다
             app.Invoke("home.diagnosis.open");
             app.WaitDiag(x => M5Fixtures.Str(x, "screen"), s => s == "diagnose", "홈 카드 → 진단 화면");
             Assert.Equal(0, app.Close());
@@ -439,12 +442,14 @@ internal static class ClipboardText
         return result;
     }
 
+    /// <summary>글 형식(유니코드·ANSI·OEM 글, 로캘)만 있으면 보관, 그 밖의 형식이 하나라도 있으면 막힘 (HTML·RTF·그림이 섞인 경우 포함, G4 1라운드 b3).</summary>
     public static Saved Save() => Sta(() =>
     {
-        if (System.Windows.Forms.Clipboard.ContainsText()) return new Saved(false, System.Windows.Forms.Clipboard.GetText());
         var data = System.Windows.Forms.Clipboard.GetDataObject();
-        bool other = data is not null && data.GetFormats().Length > 0;
-        return new Saved(other, null);
+        var formats = data?.GetFormats(autoConvert: false) ?? [];
+        string[] textOnly = ["UnicodeText", "Text", "OEMText", "Locale", "System.String"];
+        if (formats.Any(f => !textOnly.Contains(f))) return new Saved(true, null);
+        return new Saved(false, System.Windows.Forms.Clipboard.ContainsText() ? System.Windows.Forms.Clipboard.GetText() : null);
     });
 
     public static string Read() => Sta(() => System.Windows.Forms.Clipboard.GetText());

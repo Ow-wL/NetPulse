@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using NetPulse.Core.Diagnostics;
 
@@ -16,23 +16,29 @@ public sealed class DiagnosisStore(string folder)
 {
     public string Folder => folder;
 
+    /// <summary>시험용: 임시 파일에 쓴 뒤 flush 전에 실행 (쓰기 실패를 만든다).</summary>
+    internal Action? WriteFailForTest { get; set; }
+
     /// <param name="stillWanted">이동(확정) 직전에 확인: 거짓이면 확정하지 않는다 (종료 억제)</param>
     public DiagnosisSave Save(DiagnosisResult result, string appVersion, string? measurementId, Func<bool>? stillWanted = null)
     {
-        string tmp;
+        string? tmp = null;
         try
         {
             Directory.CreateDirectory(folder);
-            tmp = Path.Combine(folder, ".diagnosis-" + Guid.NewGuid().ToString("N") + ".tmp");
+            var path = Path.Combine(folder, ".diagnosis-" + Guid.NewGuid().ToString("N") + ".tmp");
             var bytes = new UTF8Encoding(false).GetBytes(DiagnosisRecord.ToJson(result, appVersion, measurementId));
-            using (var fs = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (var fs = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
+                tmp = path;   // 만들었으면 실패해도 지운다
                 fs.Write(bytes);
+                WriteFailForTest?.Invoke();
                 fs.Flush(flushToDisk: true);
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
         {
+            if (tmp is not null) TryDelete(tmp);   // 쓰기·flush·닫기 실패에서도 임시 파일을 남기지 않는다 (G4 1라운드 a2)
             return new(null, Code(ex));
         }
         try

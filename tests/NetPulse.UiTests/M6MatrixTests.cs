@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 using Size = NetPulse.Design.Tokens.Size;
 
@@ -34,6 +34,12 @@ public sealed class M6MatrixTests
         var path = app.Save(shot, "matrix-" + name);
         var problems = M5MatrixTests.LayoutProblems(app.LayoutNow());
         var diag = app.Diag();
+        // 진행 장면은 캡처한 그 순간에도 진행 중이어야 한다 (기다린 뒤 끝나 버린 화면을 진행 장면으로 세지 않게, G4 1라운드 b7)
+        var sd = diag.GetProperty("screenDiag");
+        if (id is "diagnose-running") Assert.Equal("Diagnosing", sd.GetProperty("operation").GetString());
+        if (id is "diagnose-flush-queued") Assert.Equal("Waiting", M5Fixtures.Str(sd, "flush"));
+        if (id is "diagnose-flush-running") Assert.Equal("Flushing", M5Fixtures.Str(sd, "flush"));
+        if (id is "diagnose-site-running") Assert.True(sd.GetProperty("site").GetProperty("Running").GetBoolean());
         File.WriteAllText(Path.Combine(G5Dir, "matrix-" + name + ".json"), JsonSerializer.Serialize(
             new { name, scene = id, theme, scale, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, layoutProblems = problems, diag },
             new JsonSerializerOptions { WriteIndented = true }));
