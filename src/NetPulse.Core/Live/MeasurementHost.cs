@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text.Json.Nodes;
 using NetPulse.Core.Analysis;
 using NetPulse.Core.Detection;
@@ -271,6 +271,20 @@ public sealed class MeasurementHost : IAsyncDisposable
     }
 
     public string? Draft(string sessionId, string mark) { lock (drafts) return drafts.GetValueOrDefault((sessionId, mark)); }
+
+    /// <summary>노트 쓰기 직렬 작업 (기록 화면의 메모 고치기도 같은 인스턴스를 쓴다, M7 구현 중 결정 4).</summary>
+    public NotesWriter Notes => notes;
+
+    /// <summary>
+    /// 기록 화면에서 그 표시의 메모를 저장했다: 측정 화면에 남은 옛 초안을 버려 종료 때 덮어쓰지 않게 하고,
+    /// 방금 끝난 측정이면 결과 카드의 메모를 다시 읽는다 (M7 구현 중 결정 4).
+    /// </summary>
+    public void MemoSavedElsewhere(string sessionId, string mark)
+    {
+        lock (drafts) drafts.Remove((sessionId, mark));
+        RefreshFinishedMarks(sessionId);
+        Publish();
+    }
 
     /// <summary>
     /// 메모 저장 (설계 4.5 [2-5]): 측정 중이면 세션 입력 통로, 끝났으면 노트. 결과가 저장이면 초안을 지운다.
