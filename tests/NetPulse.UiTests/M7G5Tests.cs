@@ -56,7 +56,8 @@ public sealed class M7G5Tests
     {
         using var app = M5MatrixTests.Open(Scene("records-list-problems"), "--theme", "dark", "--motion-hold", progress);
         app.Invoke("records.row.0");
-        app.WaitDiag(d => d.GetProperty("screenDiag").TryGetProperty("detail", out var x) && x.ValueKind == JsonValueKind.Object, b => b, "상세");
+        app.WaitDiag(d => d.GetProperty("screenDiag").TryGetProperty("detail", out var x) && x.ValueKind == JsonValueKind.Object
+            && d.GetProperty("screenDiag").TryGetProperty("detailComplete", out var c) && c.GetBoolean(), b => b, "상세");
         Thread.Sleep(500);
         using var shot = app.CaptureBitmap();
         string name = $"m7-transition-crossfade-{progress}";

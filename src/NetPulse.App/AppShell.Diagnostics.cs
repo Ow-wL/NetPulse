@@ -214,12 +214,24 @@ public sealed partial class AppShell
             var segments = new List<object>();
             var memory = new List<object>();
             var timings = new List<object>();
+            var profile = new List<object>();
             async Task Segment(string name, Func<Task> body)
             {
+                // 구간마다 그리기 부분별 시간과 GC (M6 bench와 같은 방식, M7 UI 시험 1차: 예산 초과 원인 찾기)
+                RenderProfile.Take();
+                RenderProfile.On = true;
+                int[] gcBefore = [GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2)];
+                var pauseBefore = GC.GetTotalPauseDuration();
                 ui.Pacer.BeginSegment();
                 var watch = System.Diagnostics.Stopwatch.StartNew();
                 await body();
                 segments.Add(ui.Pacer.EndSegment(name));
+                RenderProfile.On = false;
+                profile.Add(new
+                {
+                    segment = name, parts = RenderProfile.Take(),
+                    gc = new { gen0 = GC.CollectionCount(0) - gcBefore[0], gen1 = GC.CollectionCount(1) - gcBefore[1], gen2 = GC.CollectionCount(2) - gcBefore[2], pauseMs = (GC.GetTotalPauseDuration() - pauseBefore).TotalMilliseconds },
+                });
                 timings.Add(new { segment = name, ms = watch.ElapsedMilliseconds });
                 memory.Add(new { segment = name, privateMb = PrivateMb(), held = library.HeldCount });
             }
@@ -301,7 +313,7 @@ public sealed partial class AppShell
                 await Task.Delay(BenchTokens.RecordsSettle);
             });
             sampler.Stop();
-            log.Write("bench", new { kind = "records", segments, timings, memory, peakPrivateMb = Math.Max(peakMb, PrivateMb()), records = library.Items.Count, baselineMs = ui.Pacer.Baseline });
+            log.Write("bench", new { kind = "records", segments, timings, memory, profile, peakPrivateMb = Math.Max(peakMb, PrivateMb()), records = library.Items.Count, baselineMs = ui.Pacer.Baseline });
         }
         catch (Exception ex)
         {

@@ -66,7 +66,8 @@ public sealed class M7LiveRunTests
     /// <summary>상세가 열리길 기다려 화면 값과 파일 재분석 값이 같은지 보고 그 값을 돌려준다.</summary>
     private static string?[] Values(AppDriver app, string id)
     {
-        var d = app.WaitDiag(x => x, x => Sd(x).ValueKind == JsonValueKind.Object && Sd(x).TryGetProperty("detail", out var v) && v.ValueKind == JsonValueKind.Object, "기록 상세");
+        var d = app.WaitDiag(x => x, x => Sd(x).ValueKind == JsonValueKind.Object && Sd(x).TryGetProperty("detail", out var v) && v.ValueKind == JsonValueKind.Object
+            && Sd(x).TryGetProperty("detailComplete", out var c) && c.GetBoolean(), "기록 상세");
         var detail = Sd(d).GetProperty("detail");
         Assert.Equal(id, detail.GetProperty("Id").GetString());
         var record = RecordReader.Read(RecordReader.FindSegments(id, RootsOf(app.UserData)));

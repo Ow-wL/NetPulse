@@ -49,12 +49,14 @@ public sealed class RecordsScreen : Screen
     private bool diagnosesLoaded;
     private StoredDiagnosis? openDiagnosis;
     private string renderedKey = "";
+    private int renderGen;
+    private bool detailComplete;   // 상세의 아래 카드까지 그려짐 (한 차례 늦게 만든다)
     private Mode? renderedMode;
 
     // ---------------- bench·시험 고리 ----------------
 
     /// <summary>상세가 열려 그려짐.</summary>
-    public bool DetailReady => mode == Mode.Detail && detail is not null;
+    public bool DetailReady => mode == Mode.Detail && detail is not null && detailComplete;
     /// <summary>비교 표가 그려짐.</summary>
     public bool CompareReady => mode == Mode.Compare && comparison is not null;
     /// <summary>상세 타임라인 조작 (bench).</summary>
@@ -186,19 +188,19 @@ public sealed class RecordsScreen : Screen
     private async Task LoadDetailAsync(string key)
     {
         var opened = await Context.Records.OpenAsync(key);
+        // 타임라인의 창과 무관한 부분은 UI 밖에서 미리 구한다 (12시간 기록에서 UI 프레임을 막지 않게)
+        (TimelineData Timeline, RecordDetailView View)? prepared = opened?.Record.Header is null ? null : await Task.Run(() => (Timeline: TimelineData.Build(opened).Warm(), View: RecordView.Detail(opened.Record, opened.Analysis, opened.Lifecycle)));
         DispatcherQueue.TryEnqueue(() =>
         {
             if (Context.IsClosing() || detailKey != key) return;
             detail = opened;
+            if (prepared is { } p) { timelineData = p.Timeline; detailView = (opened!, p.View); }
             loadError = opened is null ? "기록을 읽지 못했습니다." : null;
             view.ShowAll(EndMs(opened));
             Rerender();
             scroll.ChangeView(null, 0, null, true);
-            // 다시 그리면 [목록으로]가 새 줄로 옮겨 붙어 아직 배치 전이다: 배치 뒤에 초점을 준다 (M7 UI 시험 1차: 초점이 탐색으로 빠짐)
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
-            {
-                if (!Context.IsClosing() && detailKey == key && mode == Mode.Detail) back.Focus(FocusState.Programmatic);
-            });
+            // 다시 그리면 [목록으로]가 새 줄로 옮겨 붙어 아직 배치 전이다: 프레임을 그린 뒤에 초점을 준다 (M7 UI 시험 1차: 초점이 탐색으로 빠짐)
+            OnePerFrame(() => { if (detailKey == key && mode == Mode.Detail) back.Focus(FocusState.Programmatic); });
         });
     }
 
@@ -300,13 +302,15 @@ public sealed class RecordsScreen : Screen
         compareButton.IsEnabled = mode is Mode.List or Mode.Compare or Mode.Detail;
         AutomationProperties.SetItemStatus(compareButton, picking ? "picking" : "off");
         content.Children.Clear();
+        renderGen++;
+        detailComplete = false;
         bool modeChanged = renderedMode is { } rm && rm != mode;
         renderedMode = mode;
         switch (mode)
         {
-            case Mode.List: RenderList(items); break;
-            case Mode.Detail: RenderDetail(); break;
-            case Mode.Compare: RenderCompare(); break;
+            case Mode.List: RenderProfile.Time("records.list", () => RenderList(items)); break;
+            case Mode.Detail: RenderProfile.Time("records.detail", RenderDetail); break;
+            case Mode.Compare: RenderProfile.Time("records.compare", RenderCompare); break;
             case Mode.Diagnoses: RenderDiagnoses(); break;
             case Mode.Diagnosis: RenderDiagnosis(); break;
         }
@@ -343,7 +347,19 @@ public sealed class RecordsScreen : Screen
         }
         var list = new StackPanel { Spacing = Space.S1 };
         var visible = items.Take(shown).ToArray();
-        for (int i = 0; i < visible.Length; i++) list.Children.Add(Row(visible[i], i));
+        // 화면에 먼저 보이는 줄만 이번에 만들고 나머지는 다음 차례에 (한 프레임에 30줄을 만들고 배치하면 예산 50 ms에 닿았다, M7 bench)
+        int first = Math.Min(visible.Length, Size.RecordsFirstRows);
+        for (int i = 0; i < first; i++) list.Children.Add(Row(visible[i], i));
+        if (first < visible.Length)
+        {
+            int gen = renderGen;
+            OnePerFrame(() =>
+            {
+                if (gen != renderGen) return;
+                for (int i = first; i < visible.Length; i++) list.Children.Insert(i, Row(visible[i], i));
+                Context.QueueDiag();
+            });
+        }
         Context.Records.SetVisible(visible.Select(v => v.Key));
         if (items.Count > shown)
         {
@@ -464,7 +480,13 @@ public sealed class RecordsScreen : Screen
         }
         var r = detail.Record;
         var a = detail.Analysis;
-        var v = RecordView.Detail(r, a, detail.Lifecycle);
+        // 화면 모델은 기록마다 한 번 (펼치기·메모 고치기로 다시 그릴 때마다 12시간 기록의 추세를 다시 구하지 않게)
+        if (!ReferenceEquals(detailView?.For, detail))
+        {
+            var d0 = detail;
+            RenderProfile.Time("records.detail.view", () => detailView = (d0, RecordView.Detail(d0.Record, d0.Analysis, d0.Lifecycle)));
+        }
+        var v = detailView!.Value.View;
         var h = r.Header!;
         var label = ScreenParts.TimeLabel(h.StartedAt, Context.Now);
 
@@ -490,24 +512,6 @@ public sealed class RecordsScreen : Screen
         foreach (var (d, i) in v.Damage.Select((d, i) => (d, i)))
             content.Children.Add(new Banner(Ui, $"records.detail.damage.{i}", BannerKind.Warn, d));
 
-        // 통계
-        var stats = new StackPanel { Spacing = Space.S2 };
-        if (v.Verdicts.Count == 0) stats.Children.Add(Fonts.Wrapped("판정별로 셀 끊김이 없습니다.", Typography.Body, Ui.Brushes.Muted));
-        foreach (var line in v.Verdicts) stats.Children.Add(Named($"records.detail.verdict.{line.Verdict}", $"{line.Name}: {line.Text}", Typography.Body, Ui.Brushes.Ink));
-        if (v.CountNote is { } note) stats.Children.Add(Fonts.Wrapped(note, Typography.Caption, Ui.Brushes.Muted));
-        foreach (var t in v.TargetLines)
-        {
-            var box = new StackPanel { Spacing = Space.S0 };
-            box.Children.Add(Fonts.Text($"{t.Name} ({(t.Role == TargetRole.Local ? "로컬" : "외부")} · {t.Method})", Typography.Label, Ui.Brushes.Ink));
-            box.Children.Add(Fonts.Wrapped($"{t.Loss} · 평균 {t.Average} · 최대 {t.Max} · 최대 연속 손실 {t.Consecutive} · 마지막 성공 {t.LastSuccess} · 마지막 손실 {t.LastLoss}", Typography.Caption, Ui.Brushes.Muted));
-            // 이름 붙은 묶음은 GroupPanel이어야 UI 자동화 트리에 나온다 (StackPanel은 peer가 없어 숨는다. M7 UI 시험 1차)
-            var group = new GroupPanel($"records.detail.target.{t.TargetId}", $"{t.Name}, {t.Loss}, 평균 {t.Average}, 최대 {t.Max}, 최대 연속 손실 {t.Consecutive}");
-            group.Children.Add(box);
-            stats.Children.Add(group);
-        }
-        var (statsCard, statsBody) = ScreenParts.Card(Ui, "records.detail.stats", "통계");
-        statsBody.Set(stats, "normal");
-
         // 타임라인
         timeline = new TimelinePanel(Ui, "records.timeline", compact: false);
         timeline.Command += OnTimeline;
@@ -529,14 +533,91 @@ public sealed class RecordsScreen : Screen
         tstack.Children.Add(timeline);
         tstack.Children.Add(Legend());
         timelineBody.Set(tstack, "normal");
-        timeline.SizeChanged += (_, _) => DrawTimeline();
+        // 크기가 바뀔 때마다 배치 중에 바로 그리지 않고 프레임마다 한 번만 (첫 그리기 30 ms가 배치 프레임에 겹쳤다, M7 bench)
+        timeline.SizeChanged += (_, _) => QueueTimeline();
+        content.Children.Add(timelineCard);
+        QueueTimeline();
+
+        // 아래 카드(통계·추세·끊김·메모·진단)는 다음 차례에 만든다: 한 프레임에 상세 전체를 만들고 배치하면 12시간 기록에서
+        // 예산(50 ms)을 넘었다 (M7 UI 시험 1차 bench). 그 사이 다른 그리기가 있었으면 버린다.
+        int gen = renderGen;
+        var opened = detail;
+        OnePerFrame(() =>
+        {
+            if (gen != renderGen || !ReferenceEquals(opened, detail) || mode != Mode.Detail) return;
+            RenderProfile.Time("records.detail.rest", () => RenderDetailRest(opened, v, item, label));
+            detailComplete = true;
+            Context.QueueDiag();
+        });
+    }
+
+    // ---------------- 프레임 나누기 ----------------
+
+    private readonly Queue<Action> perFrame = new();
+    private bool frameHooked, timelineQueued;
+
+    /// <summary>
+    /// 무거운 그리기 조각을 프레임마다 하나씩 한다 (한 틈에 몰아서 하면 조각을 나눈 보람이 없다). 다음 프레임을 그린 뒤 낮은 우선순위로.
+    /// 12시간 기록의 상세·목록을 한 프레임에 만들고 배치하면 예산(50 ms)을 넘었다 (M7 UI 시험 1차 bench).
+    /// </summary>
+    private void OnePerFrame(Action action)
+    {
+        perFrame.Enqueue(action);
+        if (frameHooked) return;
+        frameHooked = true;
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += RunOnePerFrame;
+    }
+
+    private void RunOnePerFrame(object? sender, object e)
+    {
+        if (perFrame.Count == 0 || Context.IsClosing())
+        {
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= RunOnePerFrame;
+            frameHooked = false;
+            perFrame.Clear();
+            return;
+        }
+        var next = perFrame.Dequeue();
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { if (!Context.IsClosing()) next(); });
+    }
+
+    private void QueueTimeline()
+    {
+        if (timelineQueued) return;
+        timelineQueued = true;
+        OnePerFrame(() => { timelineQueued = false; DrawTimeline(); });
+    }
+
+    private void RenderDetailRest(OpenedRecord opened, RecordDetailView v, LibraryItem? item, Func<long, string> label)
+    {
+        var r = opened.Record;
+        var a = opened.Analysis;
+        var h = r.Header!;
+        // 통계
+        var stats = new StackPanel { Spacing = Space.S2 };
+        if (v.Verdicts.Count == 0) stats.Children.Add(Fonts.Wrapped("판정별로 셀 끊김이 없습니다.", Typography.Body, Ui.Brushes.Muted));
+        foreach (var line in v.Verdicts) stats.Children.Add(Named($"records.detail.verdict.{line.Verdict}", $"{line.Name}: {line.Text}", Typography.Body, Ui.Brushes.Ink));
+        if (v.CountNote is { } note) stats.Children.Add(Fonts.Wrapped(note, Typography.Caption, Ui.Brushes.Muted));
+        foreach (var t in v.TargetLines)
+        {
+            var box = new StackPanel { Spacing = Space.S0 };
+            box.Children.Add(Fonts.Text($"{t.Name} ({(t.Role == TargetRole.Local ? "로컬" : "외부")} · {t.Method})", Typography.Label, Ui.Brushes.Ink));
+            box.Children.Add(Fonts.Wrapped($"{t.Loss} · 평균 {t.Average} · 최대 {t.Max} · 최대 연속 손실 {t.Consecutive} · 마지막 성공 {t.LastSuccess} · 마지막 손실 {t.LastLoss}", Typography.Caption, Ui.Brushes.Muted));
+            // 이름 붙은 묶음은 GroupPanel이어야 UI 자동화 트리에 나온다 (StackPanel은 peer가 없어 숨는다. M7 UI 시험 1차)
+            var group = new GroupPanel($"records.detail.target.{t.TargetId}", $"{t.Name}, {t.Loss}, 평균 {t.Average}, 최대 {t.Max}, 최대 연속 손실 {t.Consecutive}");
+            group.Children.Add(box);
+            stats.Children.Add(group);
+        }
+        var (statsCard, statsBody) = ScreenParts.Card(Ui, "records.detail.stats", "통계");
+        statsBody.Set(stats, "normal");
+
 
         // 지연 추세
         var trend = new TrendChart(Ui, "records.trend");
         var roles = h.Targets.ToDictionary(t => t.Id, t => t.Role);
         var lines = v.Trend.Where(t => !t.NoBaseline).Select(t => (t, roles.GetValueOrDefault(t.TargetId, TargetRole.External))).ToArray();
         long end = EndMs(detail);
-        trend.SetData(lines, 0, end, label, TrendSummary(v.Trend));
+        RenderProfile.Time("records.detail.trend", () => trend.SetData(lines, 0, end, label, TrendSummary(v.Trend)));
         var trendStack = new StackPanel { Spacing = Space.S2 };
         trendStack.Children.Add(trend);
         foreach (var t in v.Trend.Where(t => t.NoBaseline)) trendStack.Children.Add(Fonts.Wrapped($"{t.Name}: 값이 적어 추세 없음", Typography.Caption, Ui.Brushes.Muted));
@@ -551,13 +632,13 @@ public sealed class RecordsScreen : Screen
             episodes.Children.Add(Named("records.episodes.none", none, Typography.Body, Ui.Brushes.Ink));
             episodes.Children.Add(Fonts.Wrapped(v.Coverage, Typography.Caption, Ui.Brushes.Muted));
         }
-        for (int i = 0; i < v.Episodes.Count; i++) episodes.Children.Add(EpisodeRow(v.Episodes[i], a.Episodes[i], i, label));
+        RenderProfile.Time("records.detail.episodes", () => { for (int i = 0; i < v.Episodes.Count; i++) episodes.Children.Add(EpisodeRow(v.Episodes[i], a.Episodes[i], i, label)); });
         var (episodeCard, episodeBody) = ScreenParts.Card(Ui, "records.detail.episodes", "끊김 목록", v.Episodes.Count == 0 ? null : $"{v.Episodes.Count}번 · 줄을 펼치면 주변 회차");
         episodeBody.Set(episodes, v.Episodes.Count == 0 ? "empty" : "normal");
 
         // 증상 표시와 메모
         var (marksCard, marksBody) = ScreenParts.Card(Ui, "records.detail.marks", "증상 표시와 메모");
-        marksBody.Set(MarksPanel(r, h, label), "normal");
+        RenderProfile.Time("records.detail.marks", () => marksBody.Set(MarksPanel(r, h, label), "normal"));
 
         // 이 측정 중 진단
         var during = (diagnosesLoaded ? diagnoses : []).Where(x => x.Stored.MeasurementId == h.Id).ToArray();
@@ -578,11 +659,11 @@ public sealed class RecordsScreen : Screen
         diagBody.Set(diagStack, "normal");
 
         var grid = TwoColumns([statsCard], [episodeCard, marksCard, diagCard]);
-        content.Children.Add(timelineCard);
         content.Children.Add(trendCard);
         content.Children.Add(grid);
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, DrawTimeline);
     }
+
+    private void DrawTimeline() => RenderProfile.Time("records.timeline", DrawTimelineNow);
 
     private static string TrendSummary(IReadOnlyList<TrendLine> lines) =>
         "지연 추세. " + string.Join(". ", lines.Select(t => t.NoBaseline ? $"{t.Name} 값이 적어 추세 없음"
@@ -672,22 +753,57 @@ public sealed class RecordsScreen : Screen
         DrawTimeline();
     }
 
-    private void DrawTimeline()
+    private void DrawTimelineNow()
     {
         if (detail?.Record.Header is not { } h || timeline is null || timeline.ActualWidth <= 0) return;
         var r = detail.Record;
         long nowMs = EndMs(detail);
         var (from, to) = view.Window(nowMs);
         var label = ScreenParts.TimeLabel(h.StartedAt, Context.Now);
-        var marks = SymptomMarks.FromEvents(r.Events, r.NoteLines).Marks;
-        var downs = detail.Analysis.Links.Downs.Select(d => new LinkDownView(d.Adapter, d.Source, d.FromMs, d.ToMs, false)).ToArray();
-        var bands = TimelineModel.Bands(r.Rounds, h.Targets, r.Gaps, h.IntervalMs);
-        var frame = TimelineModel.Frame(r.Rounds, h.Targets, r.Gaps, marks, downs, bands, from, to, timeline.Columns, h.IntervalMs, $"{label(from)}~{label(to)}");
-        timeline.Show(frame, label, false, $"{label(from)}부터 {label(to)}까지 ({view.Label})");
+        // 창과 무관한 부분(증상 표시·링크 끊김·띠·회차 대표값)은 기록마다 한 번만 구한다. 보통은 상세를 열 때 백그라운드에서
+        // 미리 구해 둔다 (M7 UI 시험 1차: 12시간 기록에서 그릴 때마다 4만 회차를 다시 구해 프레임 예산을 넘김)
+        if (!ReferenceEquals(timelineData?.For, detail))
+        {
+            var built = TimelineData.Build(detail);
+            RenderProfile.Time("records.timeline.prepare", () => built.Warm());
+            timelineData = built;
+        }
+        var td = timelineData!;
+        TimelineFrame frame = default!;
+        RenderProfile.Time("records.timeline.frame", () => frame = TimelineModel.Frame(r.Rounds, h.Targets, r.Gaps, td.Marks, td.Downs, td.Bands, from, to, timeline.Columns, h.IntervalMs, $"{label(from)}~{label(to)}", td.Reps));
+        RenderProfile.Time("records.timeline.show", () => timeline.Show(frame, label, false, $"{label(from)}부터 {label(to)}까지 ({view.Label})"));
         if (timelineRange is not null)
         {
             timelineRange.Text = $"{label(from)} ~ {label(to)} · {view.Label}";
             AutomationProperties.SetName(timelineRange, timelineRange.Text);
+        }
+    }
+
+    private TimelineData? timelineData;
+    private (OpenedRecord For, RecordDetailView View)? detailView;
+
+    /// <summary>한 기록의 타임라인에서 보기 창과 무관한 부분. Warm은 UI 밖에서 불러도 된다 (그 뒤 UI만 읽는다).</summary>
+    private sealed class TimelineData(OpenedRecord record, IReadOnlyList<SymptomMark> marks, LinkDownView[] downs, IReadOnlyList<TimelineBand> bands)
+    {
+        public OpenedRecord For { get; } = record;
+        public IReadOnlyList<SymptomMark> Marks { get; } = marks;
+        public LinkDownView[] Downs { get; } = downs;
+        public IReadOnlyList<TimelineBand> Bands { get; } = bands;
+        public RepresentativeCache Reps { get; } = new();
+
+        public static TimelineData Build(OpenedRecord o)
+        {
+            var r = o.Record;
+            var h = r.Header!;
+            return new TimelineData(o, SymptomMarks.FromEvents(r.Events, r.NoteLines).Marks,
+                o.Analysis.Links.Downs.Select(d => new LinkDownView(d.Adapter, d.Source, d.FromMs, d.ToMs, false)).ToArray(),
+                TimelineModel.Bands(r.Rounds, h.Targets, r.Gaps, h.IntervalMs));
+        }
+
+        public TimelineData Warm()
+        {
+            Reps.Update(For.Record.Rounds, For.Record.Header!.Targets);
+            return this;
         }
     }
 
@@ -1077,6 +1193,7 @@ public sealed class RecordsScreen : Screen
                 window = d.Record.Header is null ? null : view.Window(EndMs(d)).ToString(),
             } : null,
             detailLoading = mode == Mode.Detail && detail is null && loadError is null,
+            detailComplete = DetailReady,   // 아래 카드까지 그려짐 (한 프레임 늦게 만든다)
             loadError,
             editing = editingMark,
             memoState = memoState.Values.ToArray(),

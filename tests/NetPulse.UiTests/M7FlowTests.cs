@@ -31,7 +31,8 @@ public sealed class M7FlowTests
         app.WaitDiag(d => Sd(d).ValueKind == JsonValueKind.Object && Sd(d).TryGetProperty("listed", out var l) && l.GetBoolean() && Sd(d).GetProperty("analyzing").GetInt32() == 0, b => b, "기록 목록 분석");
 
     private static JsonElement WaitDetail(AppDriver app) =>
-        app.WaitDiag(d => d, d => Sd(d).ValueKind == JsonValueKind.Object && Sd(d).TryGetProperty("detail", out var x) && x.ValueKind == JsonValueKind.Object, "기록 상세");
+        app.WaitDiag(d => d, d => Sd(d).ValueKind == JsonValueKind.Object && Sd(d).TryGetProperty("detail", out var x) && x.ValueKind == JsonValueKind.Object
+            && Sd(d).TryGetProperty("detailComplete", out var c) && c.GetBoolean(), "기록 상세");
 
     private static (MeasurementRecord Record, AnalysisResult Analysis) Reanalyze(string userData, string id)
     {

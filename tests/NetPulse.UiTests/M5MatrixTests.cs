@@ -128,7 +128,8 @@ public sealed class M5MatrixTests
             case "recordsAnalyzed":
                 app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("listed", out var l) && l.GetBoolean() && s.GetProperty("analyzing").GetInt32() == 0, b => b, "기록 목록 분석");
                 break;
-            case "detailReady": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("detail", out var x) && x.ValueKind == JsonValueKind.Object, b => b, "기록 상세"); break;
+            case "detailReady": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("detail", out var x) && x.ValueKind == JsonValueKind.Object
+                && s.TryGetProperty("detailComplete", out var c) && c.GetBoolean(), b => b, "기록 상세"); break;
             case "detailLoading": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("detailLoading", out var x) && x.GetBoolean(), b => b, "기록 상세 여는 중"); break;
             case "compareReady": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("comparison", out var x) && x.ValueKind == JsonValueKind.Object, b => b, "비교"); break;
             case "diagnosesReady": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("diagnoses", out var x) && x.GetInt32() >= 0, b => b, "진단 기록"); break;
