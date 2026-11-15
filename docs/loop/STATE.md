@@ -7,13 +7,13 @@
 | 항목 | 값 |
 | --- | --- |
 | 마일스톤 | M7 기록 화면 (M6은 PR Ow-wL/NetPulse#2, 사용자 병합 대기) |
-| 단계 | 게이트 통과 (`579833a`, 아래 "M7 게이트"). 다음: M6 PR 병합(사용자) → `main` 병합 → G4 → 마감 |
-| 브랜치 | `loop/m7-records` (`loop/m6-diagnose` 위, M6 마감 `441e656`까지 병합. M6이 `main`에 병합되면 `main`을 병합해 가져옴) |
+| 단계 | G4 1라운드 REVISE 13건 반영 (DECISIONS "M7 G4 1라운드"). 다음: G4 2라운드 → 승인 커밋에서 게이트 다시 → 마감 |
+| 브랜치 | `loop/m7-records` (M6 PR 병합 뒤 `main`(`1c0ef7a`)을 병합) |
 | 설계 검토 라운드 | 2 / 2 (1라운드 REVISE 13건 → 2판, 2라운드 APPROVE + 구현 중 결정 7건) |
-| diff 리뷰 라운드 | 0 / 3 |
+| diff 리뷰 라운드 | 1 / 3 (1라운드 `69ec52d` REVISE: 차단 2·중요 9·사소 2) |
 | 누적 실패 | 0 / 8 |
-| PR | 없음 (M7 PR은 M6 병합 뒤) |
-| M6 | 마감 끝: 승인 코드 X `426642e`, PR Ow-wL/NetPulse#2 CI 통과, 사용자 병합 대기 |
+| PR | 없음 (G4 승인 뒤 마감 스크립트가 만든다) |
+| M6 | 끝: PR Ow-wL/NetPulse#2 사용자 병합 (`1c0ef7a`) |
 
 **저장소 이전 (2026-11-14, `DECISIONS.md` "공개 저장소 이전")**: 공개 저장소 `Ow-wL/NetPulse`는 이력을 다시 쓴 새 저장소다. 아래 M0~M4 기록의 SHA·PR 번호는 옛 저장소(`Ow-wL/NetPulse-private`, 비공개) 기준이다.
 
