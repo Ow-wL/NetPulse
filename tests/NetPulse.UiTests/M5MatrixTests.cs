@@ -133,6 +133,7 @@ public sealed class M5MatrixTests
             case "detailLoading": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("detailLoading", out var x) && x.GetBoolean(), b => b, "기록 상세 여는 중"); break;
             case "compareReady": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("comparison", out var x) && x.ValueKind == JsonValueKind.Object, b => b, "비교"); break;
             case "diagnosesReady": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("diagnoses", out var x) && x.GetInt32() >= 0, b => b, "진단 기록"); break;
+            case "focused": app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == value, "초점 " + value); break;
             case "memoState":
                 app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("memoState", out var x) && x.EnumerateArray().Any(v => v.GetString()!.StartsWith(value, StringComparison.Ordinal)), b => b, "메모 상태 " + value);
                 break;

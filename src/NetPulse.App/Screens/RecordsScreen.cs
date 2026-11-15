@@ -1056,11 +1056,17 @@ public sealed class RecordsScreen : Screen
                 state.Visibility = st is null ? Visibility.Collapsed : Visibility.Visible;
                 memoStateText[m.Mark] = state;
                 row.Children.Add(state);
-                // 막 연 칸에만 초점 (다시 그릴 때마다 초점을 가져가면 끊김 줄을 펼칠 때 초점을 빼앗는다)
+                // 막 연 칸에만 초점 (다시 그릴 때마다 초점을 가져가면 끊김 줄을 펼칠 때 초점을 빼앗는다).
+                // 초점만 주면 글 상자까지만 내려가 그 아래 오류 글·저장 단추·상태 글이 잘렸다: 칸 전체가 보이게 한다 (M7 UI 시험 2차)
                 if (focusMark == m.Mark)
                 {
                     focusMark = null;
-                    DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => box.Box.Focus(FocusState.Programmatic));
+                    var whole = row;
+                    DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+                    {
+                        box.Box.Focus(FocusState.Programmatic);
+                        whole.StartBringIntoView();
+                    });
                 }
             }
             else
@@ -1094,6 +1100,10 @@ public sealed class RecordsScreen : Screen
             t.Text = Fonts.KeepAll(text);
             AutomationProperties.SetName(t, text);
             t.Visibility = Visibility.Visible;
+            // 방금 누른 저장 단추 아래라 화면 밖일 수 있다 (M7 UI 시험 2차: 150%에서 "저장하는 중…"이 잘림).
+            // 막 보이게 한 글은 아직 배치 전이라 배치 뒤에 부른다
+            var shown = t;
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => shown.StartBringIntoView());
         }
         Context.QueueDiag();
     }
@@ -1127,7 +1137,9 @@ public sealed class RecordsScreen : Screen
         else
         {
             memoState[(key, mark.Mark)] = "저장하지 못했습니다";
-            if (Here()) Rerender();   // 칸 오류 + 초안 유지 (초안은 memoDrafts에 그대로)
+            // 칸 오류 + 초안 유지 (초안은 memoDrafts에 그대로). 다시 그리면 글 상자가 바뀌어 초점이 사이드바로 가고 맨 위로 올라가
+            // 오류가 보이지 않았다: 그 칸에 초점을 돌려준다 (M7 UI 시험 2차, 1라운드 b1 "막 연 칸에만 초점"에서 빠짐)
+            if (Here()) { focusMark = mark.Mark; Rerender(); }
             else Context.Toasts.Show(ToastKind.Error, "메모를 저장하지 못했습니다", "그 기록을 다시 열면 다시 저장할 수 있습니다.");
         }
         Context.QueueDiag();

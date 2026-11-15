@@ -212,7 +212,10 @@ public sealed class AppDriver : IDisposable
         // 닫는 사이 새 알림이 올 수 있어 몇 번 되풀이한다
         for (int attempt = 0; attempt < 5; attempt++)
         {
-            var all = Window.FindAll(TreeScope.Descendants, Condition.TrueCondition);
+            AutomationElementCollection all;
+            // 훑는 사이 화면이 바뀌면(초점이 가며 지우기 단추가 생김 등) 요소가 사라져 던진다: 다시 훑는다 (M7 UI 시험 2차)
+            try { all = Window.FindAll(TreeScope.Descendants, Condition.TrueCondition); }
+            catch (ElementNotAvailableException) when (attempt < 4) { Thread.Sleep(100); continue; }
             foreach (AutomationElement e in all)
             {
                 string id;

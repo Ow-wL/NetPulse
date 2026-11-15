@@ -228,6 +228,8 @@ public sealed class M7FlowTests
             app.WaitDiag(d => Sd(d).GetProperty("memoState").EnumerateArray().Select(v => v.GetString()).ToArray(), s => s.Contains("저장하지 못했습니다"), "저장 실패");
             // 상태 기록과 오류 줄 그리기는 같은 프레임이 아닐 수 있다 (M7 UI 시험 1차: 한 번 먼저 읽어 실패)
             AppDriver.WaitFor(() => app.Exists("records.mark.0.text.error"), e => e, "메모 오류 줄");
+            // 다시 그린 뒤에도 그 칸에 초점 (사이드바로 가서 화면이 맨 위로 올라가면 오류가 안 보인다, M7 UI 시험 2차)
+            app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == "records.mark.0.text", "실패 뒤 메모 칸 초점");
             Assert.Equal("못 쓴 메모", ((System.Windows.Automation.ValuePattern)app.Find("records.mark.0.text").GetCurrentPattern(System.Windows.Automation.ValuePattern.Pattern)).Current.Value);
             Assert.Equal(0, app.Close());
         }
