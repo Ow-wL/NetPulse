@@ -72,6 +72,25 @@ internal static class M7Fixtures
                 return true;
             }
             case "rec-diag-empty": Ok(userData); return true;
+            case "rec-diag-mismatch":
+            {
+                // 저장된 결론 번호를 바꿔, 다시 해석한 결론과 다르게 (설계 3.6·4.3 "불일치")
+                Ok(userData);
+                M5Fixtures.MakeDiagnosisRecord(userData);
+                var file = Directory.GetFiles(Path.Combine(userData, "diagnoses"), "*.json").Single();
+                var o = JsonNode.Parse(File.ReadAllText(file))!.AsObject();
+                o["conclusion"] = (int)o["conclusion"]! == 1 ? 2 : 1;
+                File.WriteAllText(file, o.ToJsonString());
+                return true;
+            }
+            case "rec-mixed-memo-blocked":
+            {
+                // 끊김과 증상 표시가 있는 기록, 노트 쓰기는 막힘 (저장하는 중이 몇 초 보임)
+                var id = Synthetic(userData, Kst.AddMinutes(-40), mixed: true);
+                AddMark(userData, id, 30_000, "회의 중 끊김");
+                Directory.CreateDirectory(Path.Combine(Folder(userData, id), RecordNotes.FileName));
+                return true;
+            }
             case "rec-compare":
                 M5Fixtures.SaveProfile(userData, "steady");
                 M5Fixtures.MakeRecord(userData, "outage-long", Kst.AddHours(-3), 3);

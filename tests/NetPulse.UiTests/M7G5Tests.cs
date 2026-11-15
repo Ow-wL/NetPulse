@@ -120,9 +120,14 @@ public sealed class M7G5Tests
             Record("bench-records", bench);
             Assert.False(bench.TryGetProperty("error", out var err), "bench 실패: " + err);
             var problems = new List<string>();
+            // 필수 구간이 모두 있고 구간마다 프레임 표본이 있어야 한다 (빠진 구간·표본 없는 구간을 통과로 세지 않음, G4 M7 1라운드 b7)
+            string[] required = ["records-enter", "records-open", "records-timeline", "records-switch", "records-compare", "records-nav-during-analysis", "records-reenter", "records-after-memo"];
+            var seen = bench.GetProperty("segments").EnumerateArray().Select(s => s.GetProperty("Segment").GetString()!).ToArray();
+            foreach (var r in required.Except(seen)) problems.Add($"{r} 구간이 없습니다");
             foreach (var s in bench.GetProperty("segments").EnumerateArray())
             {
                 string seg = s.GetProperty("Segment").GetString()!;
+                if (s.GetProperty("Samples").GetInt32() < 10) problems.Add($"{seg} 프레임 표본 {s.GetProperty("Samples").GetInt32()}개 (10개 미만)");
                 double max = s.GetProperty("Max").GetDouble();
                 int over = s.GetProperty("Over33").GetInt32();
                 if (max > FrameBudget.TransitionMax || over > FrameBudget.TransitionHitches) problems.Add($"{seg} 최대 {max:0.0} ms, 33 ms 초과 {over}회");

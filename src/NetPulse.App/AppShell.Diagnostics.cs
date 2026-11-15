@@ -235,10 +235,21 @@ public sealed partial class AppShell
                 timings.Add(new { segment = name, ms = watch.ElapsedMilliseconds });
                 memory.Add(new { segment = name, privateMb = PrivateMb(), held = library.HeldCount });
             }
-            async Task Until(Func<bool> done)
+            // 준비를 기다리다 한도를 넘으면 bench 실패 (프레임만 좋고 화면이 준비되지 않은 구간을 통과시키지 않게, G4 M7 1라운드 b7)
+            async Task Until(Func<bool> done, string what)
             {
                 var limit = DateTime.UtcNow + BenchTokens.RecordsOpenLimit;
-                while (DateTime.UtcNow < limit && !done()) await Task.Delay(MotionTokens.Fast);
+                while (!done())
+                {
+                    if (DateTime.UtcNow >= limit) throw new TimeoutException(what + " 준비가 한도 안에 끝나지 않았습니다");
+                    await Task.Delay(MotionTokens.Fast);
+                }
+            }
+            // 캐시 없는 열기·비교 (설계 5절): 구간 전에 화면이 쥔 기록을 놓고 보유분을 비운 뒤, 정말 비었는지 확인한다
+            void NoCache(string what)
+            {
+                library.DropUnpinned();
+                if (library.HeldCount != 0) throw new InvalidOperationException($"{what}: 보유분이 비지 않았습니다 ({library.HeldCount})");
             }
             RecordsScreen Screen() => (RecordsScreen)screens.Get("records");
 
@@ -250,11 +261,12 @@ public sealed partial class AppShell
 
             // 목록 분석이 끝난 뒤 보유분을 비워 "캐시 없는 열기"로 시작한다
             library.SetPinned([]);
+            NoCache("records-open");
             await Segment("records-open", async () =>
             {
                 var watch = System.Diagnostics.Stopwatch.StartNew();
                 Screen().Show(longs[0]);
-                await Until(() => Screen().DetailReady);
+                await Until(() => Screen().DetailReady, "records-open 상세");
                 timings.Add(new { segment = "records-open-analysis", ms = watch.ElapsedMilliseconds });
                 await Task.Delay(BenchTokens.RecordsSettle);
             });
@@ -270,15 +282,19 @@ public sealed partial class AppShell
                 Screen().Show(null);
                 await Task.Delay(BenchTokens.NavStep);
                 Screen().Show(longs[1]);
-                await Until(() => Screen().DetailReady);
+                await Until(() => Screen().DetailReady, "records-switch 둘째 상세");
                 Screen().Show(shorts[0]);
-                await Until(() => Screen().DetailReady);
+                await Until(() => Screen().DetailReady, "records-switch 셋째 상세");
                 await Task.Delay(BenchTokens.RecordsSettle);
             });
+            // 앞 구간에서 연 12시간 기록 둘이 보유분에 남아 있었다: 목록으로 돌아가 놓고 비운 뒤 비교한다 (b7)
+            Screen().Show(null);
+            await Task.Delay(BenchTokens.NavStep);
+            NoCache("records-compare");
             await Segment("records-compare", async () =>
             {
                 _ = Screen().Compare(longs[0], longs[1]);
-                await Until(() => Screen().CompareReady);
+                await Until(() => Screen().CompareReady, "records-compare 비교");
                 await Task.Delay(BenchTokens.RecordsSettle);
             });
             await Segment("records-nav-during-analysis", async () =>
@@ -308,7 +324,7 @@ public sealed partial class AppShell
                     await memos.SaveAsync(item.Key, item.Entry.Segments, opened.Record.Header!.Id, mark.Mark, mark.AtMs, "bench 메모");
                     await library.RefreshAsync(host.RunningId);
                     Screen().Show(item.Key);
-                    await Until(() => Screen().DetailReady);
+                    await Until(() => Screen().DetailReady, "records-after-memo 상세");
                 }
                 await Task.Delay(BenchTokens.RecordsSettle);
             });

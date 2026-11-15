@@ -11,7 +11,9 @@ public sealed record MemoSaveResult(EventWriteState State, bool Latest, bool Tru
 /// <list type="bullet">
 /// <item>쓰기는 측정 화면과 <b>같은</b> <see cref="NotesWriter"/> 인스턴스 (앱에 하나인 직렬 작업, 1초·3초 재시도 뒤 유실).</item>
 /// <item>(기록 출처, 표시)별 세대 번호: 완료가 와도 더 새 요청이 있으면 Latest = 거짓.</item>
-/// <item>저장되면 <see cref="Saved"/>로 알린다: 측정 호스트가 같은 표시의 옛 초안을 버려 종료 때 덮어쓰지 않게.</item>
+/// <item>쓰기를 넣기 <b>전에</b> <see cref="Saving"/>으로 알린다: 측정 호스트가 같은 기록 폴더·표시의 옛 초안을 버리고 세대를 올려,
+/// 이미 직렬 작업에 들어간 옛 초안 쓰기도 실행 때 건너뛴다 (G4 M7 1라운드 a1: 저장이 끝나기 전 창을 닫으면 옛 초안이 새 글을 덮었다).</item>
+/// <item>알림에는 노트 폴더가 함께 간다: 같은 ID의 다른 위치 복사본을 고쳐도 원본의 초안은 건드리지 않는다 (a2).</item>
 /// <item>화면을 떠난 뒤 실패한 글은 앱 실행 동안 보관해, 상세로 돌아오면 칸 오류 + 다시 저장.</item>
 /// </list>
 /// </summary>
@@ -22,8 +24,11 @@ public sealed class RecordMemos(NotesWriter writer, Func<DateTimeOffset> now)
     private readonly Dictionary<(string Key, string Mark), long> latest = [];
     private readonly Dictionary<(string Key, string Mark), string?> failed = [];
 
-    /// <summary>저장됨 (측정 ID, 표시). 백그라운드 스레드.</summary>
-    public event Action<string, string>? Saved;
+    /// <summary>쓰기를 넣기 직전 (노트 폴더, 측정 ID, 표시). 백그라운드 스레드. 처리기가 끝난 뒤에 쓰기를 넣는다.</summary>
+    public event Action<string, string, string>? Saving;
+
+    /// <summary>저장됨 (노트 폴더, 측정 ID, 표시). 백그라운드 스레드.</summary>
+    public event Action<string, string, string>? Saved;
 
     /// <summary>
     /// 그 기록의 노트 폴더: 요약이 있는 조각 (없으면 마지막 조각). 측정 호스트와 같은 규칙.
@@ -42,8 +47,14 @@ public sealed class RecordMemos(NotesWriter writer, Func<DateTimeOffset> now)
             latest[(key, mark)] = generation;
         }
         var folder = NotesFolder(segments);
-        var state = folder is null ? EventWriteState.Lost
-            : await writer.WriteAsync(folder, measurementId, mark, markAtMs, now(), text).ConfigureAwait(false);
+        EventWriteState state;
+        if (folder is null) state = EventWriteState.Lost;
+        else
+        {
+            // 처리기는 기록 폴더를 찾느라 디스크를 읽을 수 있어 UI 밖에서 부른다. 끝난 뒤에 쓰기를 넣어야 세대 순서가 맞다
+            if (Saving is { } saving) await Task.Run(() => saving(folder, measurementId, mark)).ConfigureAwait(false);
+            state = await writer.WriteAsync(folder, measurementId, mark, markAtMs, now(), text).ConfigureAwait(false);
+        }
         bool isLatest;
         lock (gate)
         {
@@ -54,7 +65,7 @@ public sealed class RecordMemos(NotesWriter writer, Func<DateTimeOffset> now)
                 else failed[(key, mark)] = memo;
             }
         }
-        if (state == EventWriteState.Saved) Saved?.Invoke(measurementId, mark);
+        if (state == EventWriteState.Saved) Saved?.Invoke(folder!, measurementId, mark);
         return new MemoSaveResult(state, isLatest, truncated, text);
     }
 

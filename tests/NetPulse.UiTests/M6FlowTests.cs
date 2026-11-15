@@ -175,6 +175,7 @@ public sealed class M6FlowTests
             app.Invoke("diagnose.copy");
             app.WaitDiag(d2 => S(d2, "copyState"), s => s.Length > 0, "복사 결과");
             owned = ClipboardText.Claim(S(d, "copyText"));
+            Assert.True(owned is not null, "앱이 쓴 클립보드로 확인하지 못함 (형식: " + ClipboardText.LastFormats + ")");
             Assert.Equal("ok", S(app.Diag(), "copyState"));
             Assert.Equal(S(d, "copyText"), ClipboardText.Read());
             Assert.Equal(0, app.Close());
@@ -517,10 +518,25 @@ internal static class ClipboardText
 
     public static string Read() => Sta(() => System.Windows.Forms.Clipboard.GetText());
 
+    /// <summary>앱의 글 복사(WinRT <c>DataPackage.SetText</c>)가 남기는 형식: 글 형식과 그 합성, OLE 내부 형식.</summary>
+    private static readonly HashSet<string> TextFormats = new(StringComparer.OrdinalIgnoreCase) { "UnicodeText", "Text", "OEMText", "Locale", "System.String", "Ole Private Data" };
+
+    /// <summary>내용이 아니라 클립보드 기록·관리 도구가 붙이는 표시 형식.</summary>
+    private static bool MarkerFormat(string f) =>
+        f.StartsWith("Clipboard Viewer Ignore", StringComparison.OrdinalIgnoreCase)
+        || f.StartsWith("ExcludeClipboardContentFromMonitorProcessing", StringComparison.OrdinalIgnoreCase)
+        || f.StartsWith("CanIncludeInClipboardHistory", StringComparison.OrdinalIgnoreCase)
+        || f.StartsWith("CanUploadToCloudClipboard", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>마지막 <see cref="Claim"/>이 본 형식 (실패 문장용).</summary>
+    public static string LastFormats { get; private set; } = "";
+
     /// <summary>
     /// 앱이 <paramref name="text"/>를 실제로 썼는지 확인하고, 그 쓰기가 자리 잡은(번호가 잠시 그대로인) 클립보드 번호를 돌려준다.
-    /// 클립보드 관리 도구가 복사에 반응해 형식을 덧붙이는 것도 자리 잡는 동안이면 시험의 내용으로 본다.
-    /// 글이 다르면 null (시험의 내용이 아니다 → 되돌리지 않는다). M6 G4 4라운드 이월 1.
+    /// 클립보드 관리 도구가 복사에 반응해 표시 형식을 덧붙이는 것은 자리 잡는 동안이면 시험의 내용으로 본다.
+    /// 글이 다르거나, 글 형식·표시 형식 밖의 형식(서식 있는 글, 그림 등)이 있으면 null: 그 사이 누가 같은 글을 서식째 복사했을 수 있다
+    /// (시험의 내용이 아니다 → 되돌리지 않는다). M6 G4 4라운드 이월 1, M7 G4 1라운드 b8.
+    /// 같은 글을 서식 없이 복사한 경우만은 구별하지 못한다: 그때 되돌리면 사용자의 같은 글이 시험 전 내용으로 바뀐다 (격리 세션만 막음).
     /// </summary>
     public static uint? Claim(string text)
     {
@@ -534,7 +550,13 @@ internal static class ClipboardText
             if (now != seq) { seq = now; stableSince = DateTime.UtcNow; continue; }
             if (DateTime.UtcNow - stableSince >= TimeSpan.FromMilliseconds(400)) break;
         }
-        bool ours = Sta(() => System.Windows.Forms.Clipboard.ContainsText() && System.Windows.Forms.Clipboard.GetText() == text);
+        bool ours = Sta(() =>
+        {
+            var formats = System.Windows.Forms.Clipboard.GetDataObject()?.GetFormats(autoConvert: false) ?? [];
+            LastFormats = string.Join(", ", formats);
+            return formats.All(f => TextFormats.Contains(f) || MarkerFormat(f))
+                && System.Windows.Forms.Clipboard.ContainsText() && System.Windows.Forms.Clipboard.GetText() == text;
+        });
         // 확인하는 사이에 바뀌었으면 누구의 것인지 모른다
         return ours && Sequence() == seq ? seq : null;
     }

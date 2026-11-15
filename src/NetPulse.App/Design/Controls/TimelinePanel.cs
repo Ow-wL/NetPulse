@@ -51,11 +51,15 @@ public sealed class TimelinePanel : UserControl
         {
             KeyDown += OnKey;
             PointerWheelChanged += OnWheel;
+            Tapped += (_, e) => { if (ActualWidth > 0) Picked?.Invoke(e.GetPosition(this).X / ActualWidth); };
         }
     }
 
     /// <summary>조작 요청 (화면이 보기 창을 바꾸고 다시 그린다).</summary>
     public event Action<TimelineCommand>? Command;
+
+    /// <summary>그래프를 누름: 폭에 대한 가로 위치 비율 (0~1). 기록 화면이 그 자리의 끊김 줄로 간다 (M7 설계 4.1).</summary>
+    public event Action<double>? Picked;
 
     /// <summary>열 수 = 그래프 폭 (픽셀). 화면이 <see cref="TimelineModel.Frame"/>에 넘긴다.</summary>
     public int Columns => Math.Max(1, (int)Math.Round(ActualWidth));

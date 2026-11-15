@@ -18,7 +18,7 @@ public sealed class M7ComparisonTests
 
     private sealed record Spec(int Minutes, IReadOnlyList<(int From, int Count)> Outages, int IntervalMs = 1000, int TimeoutMs = 800,
         IReadOnlyList<Target>? Targets = null, ExpectedConnection? Expected = ExpectedConnection.Any, DamageCounts? Damage = null,
-        RecordLifecycle Life = RecordLifecycle.Ended, string Id = "m");
+        RecordLifecycle Life = RecordLifecycle.Ended, string Id = "m", bool LocalDown = false, string? Broken = null);
 
     /// <summary>외부 둘이 함께 손실인 끊김을 넣은 기록 (공유기는 늘 응답).</summary>
     private static CompareSide Side(Spec s)
@@ -29,8 +29,8 @@ public sealed class M7ComparisonTests
         for (int r = 0; r < n; r++)
         {
             bool down = s.Outages.Any(o => r >= o.From && r < o.From + o.Count);
-            var results = targets.Select(t => t.Role == TargetRole.External && down
-                ? new TargetResult(t.Id, ProbeOutcome.Lost, null, null)
+            var results = targets.Select(t => t.Id == s.Broken ? new TargetResult(t.Id, ProbeOutcome.Error, null, null)
+                : (t.Role == TargetRole.External || s.LocalDown) && down ? new TargetResult(t.Id, ProbeOutcome.Lost, null, null)
                 : new TargetResult(t.Id, ProbeOutcome.Success, 10, null)).ToArray();
             long at = (long)r * s.IntervalMs;
             rounds.Add(new RoundData(r, at, at, W0.AddMilliseconds(at), 0, false, results, at + 50));
@@ -105,6 +105,20 @@ public sealed class M7ComparisonTests
         // 1분(60회차)뿐이면 유효 응답 100번 미만 → 억제
         var shortR = MeasurementComparison.Compare(Side(new Spec(1, [(10, 5)])), Side(new Spec(1, None)));
         Assert.Equal(Lower.None, shortR.Targets.Single(p => p.A.Target.Id == "a").LossRate);
+    }
+
+    [Fact]
+    public void ATargetWithNoValidAnswersIsNotCalledTheOneWithFewerLosses()
+    {
+        // A의 공유기는 모두 검사 오류(유효 응답 0), B의 공유기는 29초 연속 손실: "A가 더 적음"이 아니라 비교 안 함 (G4 M7 1라운드 a3)
+        var r = MeasurementComparison.Compare(Side(new Spec(20, None, Broken: "router")), Side(new Spec(20, [(300, 29)], LocalDown: true)));
+        var router = r.Targets.Single(p => p.A.Target.Id == "router");
+        Assert.Equal(0, router.A.Valid);
+        Assert.Equal(Lower.None, router.Consecutive);
+        Assert.Equal("유효한 응답이 100번보다 적습니다", router.ConsecutiveSuppressed);
+        Assert.Equal(Lower.None, router.LossRate);
+        // 외부 대상은 그대로 비교한다 (A 손실 없음, B 29초)
+        Assert.Equal(Lower.A, r.Targets.Single(p => p.A.Target.Id == "a").Consecutive);
     }
 
     [Fact]

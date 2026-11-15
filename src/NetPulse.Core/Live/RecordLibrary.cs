@@ -39,9 +39,12 @@ public sealed class RecordLibrary(Func<IReadOnlyList<string>> roots, bool holdAn
     private readonly List<(string Id, IReadOnlyList<string> Segments, IReadOnlyList<string> Notices)> externals = [];
     private string? runningId;
     private Task refresh = Task.CompletedTask;
-    private bool refreshAgain, workerRunning;
+    private bool refreshAgain, refreshing, workerRunning;
 
     public IReadOnlyList<LibraryItem> Items { get { lock (gate) return items; } }
+
+    /// <summary>시험: 갱신 루프가 끝내기로 정한 뒤, 작업이 완료되기 전 (그 틈에 온 요청을 재현).</summary>
+    internal Action? AfterLastPassForTest { get; set; }
     public bool Listed { get; private set; }
 
     /// <summary>목록·요약이 바뀜 (백그라운드 스레드).</summary>
@@ -59,7 +62,11 @@ public sealed class RecordLibrary(Func<IReadOnlyList<string>> roots, bool holdAn
         lock (gate)
         {
             runningId = running;
-            if (!refresh.IsCompleted) { refreshAgain = true; return refresh; }
+            // 돌고 있는지는 작업의 완료가 아니라 같은 잠금 안의 표시로 본다: 루프가 끝내기로 정한 뒤 작업이 완료되기 전에 온
+            // 요청이 합쳐지기만 하고 사라졌다 (G4 M7 1라운드 a4)
+            if (refreshing) { refreshAgain = true; return refresh; }
+            refreshing = true;
+            refreshAgain = false;
             refresh = Task.Run(RefreshLoop);
             return refresh;
         }
@@ -67,12 +74,22 @@ public sealed class RecordLibrary(Func<IReadOnlyList<string>> roots, bool holdAn
 
     private void RefreshLoop()
     {
-        while (true)
+        try
         {
-            string? running;
-            lock (gate) { running = runningId; refreshAgain = false; }
-            BuildList(running);
-            lock (gate) if (!refreshAgain) return;
+            while (true)
+            {
+                string? running;
+                lock (gate) { running = runningId; refreshAgain = false; }
+                BuildList(running);
+                bool done;
+                lock (gate) { done = !refreshAgain; if (done) refreshing = false; }
+                if (done) { AfterLastPassForTest?.Invoke(); return; }
+            }
+        }
+        catch
+        {
+            lock (gate) refreshing = false;
+            throw;
         }
     }
 
@@ -219,6 +236,12 @@ public sealed class RecordLibrary(Func<IReadOnlyList<string>> roots, bool holdAn
             pinned.UnionWith(keys);
             Trim();
         }
+    }
+
+    /// <summary>bench: 핀이 아닌 보유분을 모두 놓는다 ("캐시 없는 열기·비교" 구간을 그 조건에서 시작하려고, 설계 5절).</summary>
+    public void DropUnpinned()
+    {
+        lock (gate) held.RemoveAll(h => !pinned.Contains(h.Key));
     }
 
     /// <summary>알려진 위치에서 그 측정 ID의 항목 열쇠 (측정 화면 결과 카드 → 상세). 없으면 null.</summary>

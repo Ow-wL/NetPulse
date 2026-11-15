@@ -11,7 +11,7 @@ namespace NetPulse.UiTests;
 /// </summary>
 public sealed class KeyboardTests
 {
-    private const ushort Tab = 0x09, Enter = 0x0D, Escape = 0x1B, Space = 0x20, Down = 0x28, Shift = 0x10;
+    private const ushort Tab = 0x09, Enter = 0x0D, Escape = 0x1B, Space = 0x20, Up = 0x26, Down = 0x28, Shift = 0x10;
 
     /// <summary>Shift+Tab (뒤로). 보낼 때마다 전경 확인은 Press와 같다.</summary>
     private static void PressShiftTab(AppDriver app)
@@ -264,6 +264,104 @@ public sealed class KeyboardTests
         finally { AppDriver.DeleteUserData(userData); }
     }
 
+    [Fact]
+    public void ArrowsMoveThroughRecordRowsAndFocusComesBackPastTheFirstRows()
+    {
+        // 목록 위·아래 화살표로 줄 이동(설계 4.4), 9번째 줄 뒤(다음 프레임에 생기는 줄)를 열고 돌아와도 그 줄로 초점 (G4 M7 1라운드 b6·b10)
+        var userData = AppDriver.NewUserData();
+        M5Fixtures.Prepare(userData, "rec-many");
+        try
+        {
+            using var app = LaunchAny(userData, [.. M5Fixtures.Args("--demo steady --screen records"), "--freeze-motion"]);
+            app.WaitDiag(d => Sd(d).ValueKind == System.Text.Json.JsonValueKind.Object && Sd(d).TryGetProperty("listed", out var l) && l.GetBoolean()
+                && Sd(d).GetProperty("analyzing").GetInt32() == 0, b => b, "기록 목록");
+            TabTo(app, "records.row.0");
+            for (int i = 0; i < 10; i++) Press(app, Down);
+            app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == "records.row.10", "화살표로 11번째 줄");
+            Press(app, Up);
+            app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == "records.row.9", "위 화살표");
+            Press(app, Enter);
+            app.WaitDiag(d => Sd(d).TryGetProperty("detailComplete", out var c) && c.GetBoolean(), b => b, "상세");
+            Press(app, Escape);
+            app.WaitDiag(d => Sd(d).GetProperty("mode").GetString(), m => m == "List", "Esc → 목록");
+            app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == "records.row.9", "연 줄(10번째)로 초점 복귀");
+            Assert.Equal(0, app.Close());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
+    [Fact]
+    public void EpisodeRowKeepsFocusWhenItOpensAndCloses()
+    {
+        // 끊김 줄 Enter로 펼치고 다시 Enter로 접어도 초점은 그 줄 (줄은 아래 카드와 함께 다음 프레임에 다시 생긴다, G4 M7 1라운드 b6)
+        var userData = AppDriver.NewUserData();
+        M5Fixtures.Prepare(userData, "rec-mixed");
+        try
+        {
+            using var app = LaunchAny(userData, [.. M5Fixtures.Args("--demo steady --screen records"), "--freeze-motion"]);
+            app.WaitDiag(d => Sd(d).ValueKind == System.Text.Json.JsonValueKind.Object && Sd(d).TryGetProperty("listed", out var l) && l.GetBoolean()
+                && Sd(d).GetProperty("analyzing").GetInt32() == 0, b => b, "기록 목록");
+            TabTo(app, "records.row.0");
+            Press(app, Enter);
+            app.WaitDiag(d => Sd(d).TryGetProperty("detailComplete", out var c) && c.GetBoolean(), b => b, "상세");
+            TabTo(app, "records.episode.0", 80);
+            Press(app, Enter);
+            app.WaitDiag(d => Sd(d).GetProperty("detail").GetProperty("expanded").GetInt32(), n => n == 0, "펼침");
+            app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == "records.episode.0", "펼친 뒤 초점");
+            Press(app, Enter);
+            app.WaitDiag(d => Sd(d).GetProperty("detail").GetProperty("expanded").GetInt32(), n => n == -1, "접음");
+            app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == "records.episode.0", "접은 뒤 초점");
+            Assert.Equal(0, app.Close());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
+    [Fact]
+    public void ClickingAnOutageOnTheTimelineOpensThatEpisodeRow()
+    {
+        // 타임라인의 끊김 자리를 누르면 그 끊김 줄이 펼쳐지고 초점이 간다 (설계 4.1, G4 M7 1라운드 b10). 실제 마우스 입력이므로 전경 확인
+        var userData = AppDriver.NewUserData();
+        M5Fixtures.Prepare(userData, "rec-mixed");
+        try
+        {
+            using var app = LaunchAny(userData, [.. M5Fixtures.Args("--demo steady --screen records"), "--freeze-motion"]);
+            app.WaitDiag(d => Sd(d).ValueKind == System.Text.Json.JsonValueKind.Object && Sd(d).TryGetProperty("listed", out var l) && l.GetBoolean()
+                && Sd(d).GetProperty("analyzing").GetInt32() == 0, b => b, "기록 목록");
+            app.Invoke("records.row.0");
+            var d = app.WaitDiag(x => x, x => Sd(x).TryGetProperty("detailComplete", out var c) && c.GetBoolean(), "상세");
+            string id = Sd(d).GetProperty("detail").GetProperty("Id").GetString()!;
+            var record = NetPulse.Core.Records.RecordReader.Read(NetPulse.Core.Records.RecordReader.FindSegments(id, M5Fixtures.RecordRoots(userData)));
+            var analysis = NetPulse.Core.Analysis.MeasurementAnalysis.Analyze(record);
+            var e = analysis.Episodes[0];
+            long start = record.Rounds.First(r => r.Round >= e.FirstRound).AtMs, end = record.Rounds.Last(r => r.Round <= e.LastRound).AtMs;
+            var parts = Sd(d).GetProperty("detail").GetProperty("window").GetString()!.Trim('(', ')').Split(',')
+                .Select(p => long.Parse(p.Trim(), System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+            double fraction = ((start + end) / 2.0 - parts[0]) / (parts[1] - parts[0]);
+            ClickAt(app, "records.timeline", fraction, 0.6);
+            app.WaitDiag(x => Sd(x).GetProperty("detail").GetProperty("expanded").GetInt32(), n => n == 0, "누른 끊김 펼침");
+            app.WaitDiag(x => x.GetProperty("focused").ToString(), f => f == "records.episode.0", "그 끊김 줄로 초점");
+            Assert.Equal(0, app.Close());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
+    /// <summary>요소 안 (가로·세로 비율) 자리를 실제 마우스로 누른다. 보내기 직전 전경이 대상 앱인지 확인한다.</summary>
+    private static void ClickAt(AppDriver app, string automationId, double fx, double fy)
+    {
+        var r = app.Find(automationId).Current.BoundingRectangle;
+        int x = (int)Math.Round(r.Left + r.Width * fx), y = (int)Math.Round(r.Top + r.Height * fy);
+        var fg = Native.GetForegroundWindow();
+        Native.GetWindowThreadProcessId(fg, out uint pid);
+        if (pid != app.ProcessId) throw new InvalidOperationException("미완료(전경 아님): 마우스 입력을 보내지 않았습니다.");
+        int sw = Native.GetSystemMetrics(78), sh = Native.GetSystemMetrics(79), sx = Native.GetSystemMetrics(76), sy = Native.GetSystemMetrics(77);   // 가상 화면
+        int ax = (int)((x - sx) * 65535.0 / Math.Max(1, sw - 1)), ay = (int)((y - sy) * 65535.0 / Math.Max(1, sh - 1));
+        const uint MouseMove = 0x0001, LeftDown = 0x0002, LeftUp = 0x0004, Absolute = 0x8000, VirtualDesk = 0x4000;
+        Native.INPUT M(uint flags) => new() { type = 0, u = new Native.InputUnion { mi = new Native.MOUSEINPUT { dx = ax, dy = ay, dwFlags = flags | Absolute | VirtualDesk } } };
+        var inputs = new[] { M(MouseMove), M(LeftDown), M(LeftUp) };
+        if (Native.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Native.INPUT>()) != inputs.Length) throw new InvalidOperationException("마우스 입력을 보내지 못했습니다.");
+        Thread.Sleep(200);
+    }
+
     private static class Native
     {
         [StructLayout(LayoutKind.Sequential)]
@@ -280,5 +378,6 @@ public sealed class KeyboardTests
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
         [DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint n, INPUT[] inputs, int size);
+        [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
     }
 }

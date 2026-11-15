@@ -81,7 +81,8 @@ public partial class App : Application
         host = new MeasurementHost(world, options.UserData, new HostOptions { AppVersion = version, HoldStart = options.HoldStart });
         var recent = new RecentRecords(new RecordLibrary(() => world.RecordPaths, options.HoldAnalysis, options.HoldList));
         var memos = new RecordMemos(host.Notes, () => world.Now);
-        memos.Saved += host.MemoSavedElsewhere;   // 측정 화면에 남은 옛 초안을 버린다 (M7 구현 중 결정 4)
+        memos.Saving += host.MemoSavingElsewhere;   // 측정 화면에 남은 옛 초안을 버리고 넣은 옛 쓰기도 건너뛴다 (M7 구현 중 결정 4, G4 M7 1라운드 a1)
+        memos.Saved += host.MemoSavedElsewhere;
         var resources = new
         {
             fonts = File.Exists(Path.Combine(AppContext.BaseDirectory, "Fonts", "Pretendard-Bold.otf")),

@@ -28,5 +28,6 @@ records-compare-mismatch|rec-compare-mismatch|--demo steady --screen records|wai
 records-diagnoses-empty|rec-diag-empty|--demo steady --screen records|wait:screen=records;select:records.tabs.diagnoses;wait:diagnosesReady
 records-diagnoses|rec-diag|--demo steady --screen records|wait:screen=records;select:records.tabs.diagnoses;wait:diagnosesReady
 records-diagnosis-open|rec-diag|--demo steady --screen records|wait:screen=records;select:records.tabs.diagnoses;wait:diagnosesReady;invoke:records.diagnosis.0;wait:exists=records.diagnosis.head
+records-diagnosis-mismatch|rec-diag-mismatch|--demo steady --screen records|wait:screen=records;select:records.tabs.diagnoses;wait:diagnosesReady;invoke:records.diagnosis.0;wait:exists=records.diagnosis.mismatch
 records-external|rec-external|--demo steady --screen records --open-record {userData}\usb\picked|wait:screen=records;wait:detailReady
 measure-finished-link|profile-short|--demo steady --demo-speed 600 --start|wait:finished;wait:exists=measure.result.records
