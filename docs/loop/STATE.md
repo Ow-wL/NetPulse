@@ -7,7 +7,7 @@
 | 항목 | 값 |
 | --- | --- |
 | 마일스톤 | M7 기록 화면 |
-| 단계 | G4 7라운드(사용자 승인 예외) APPROVE, X = `b58f531` (DECISIONS "M7 G4 7라운드"). 다음: X에서 전체 게이트(사용자가 PC를 비우고 클립보드에 평범한 글을 둔 뒤) → 마감 |
+| 단계 | X = `b58f531`에서 게이트 통과 (DECISIONS "M7 게이트"). 다음: 마감(`close-milestone.ps1`, 푸시·PR) → 사용자 병합 |
 | 브랜치 | `loop/m7-records` (M6 PR 병합 뒤 `main`(`1c0ef7a`)을 병합) |
 | 설계 검토 라운드 | 2 / 2 (1라운드 REVISE 13건 → 2판, 2라운드 APPROVE + 구현 중 결정 7건) |
 | diff 리뷰 라운드 | 7 / 3 (4~7라운드는 사용자 승인 예외) (1라운드 `69ec52d` REVISE: 차단 2·중요 9·사소 2, 2라운드 `f458e15` REVISE: 차단 1·중요 2·사소 1, 3라운드 `7dffec3` REVISE: 차단 1·중요 1, 4라운드 `14a7a91` 사용자 승인 예외 REVISE: 중요 1·사소 2, 5라운드 `8eedde3` 사용자 승인 예외 APPROVE: 사소 1 이월, 6라운드 `e3494d4`(UI 시험 2차 수정) 사용자 승인 예외 REVISE: 차단 1·사소 1, 7라운드 `b58f531` 사용자 승인 예외 APPROVE: 중요 1·사소 1 이월) |
@@ -17,16 +17,17 @@
 
 **저장소 이전 (2026-11-14, `DECISIONS.md` "공개 저장소 이전")**: 공개 저장소 `Ow-wL/NetPulse`는 이력을 다시 쓴 새 저장소다. 아래 M0~M4 기록의 SHA·PR 번호는 옛 저장소(`Ow-wL/NetPulse-private`, 비공개) 기준이다.
 
-## M7 게이트 (G4 전, 2026-11-15)
+## M7 게이트 (승인 코드 X, 2026-11-16)
 
 | 항목 | 값 |
 | --- | --- |
-| 게이트 커밋 | `579833ab9323cc482e2ad78ba32f6abff25db2bc` (G4 승인 전이라 X 아님) |
-| G1·G2 | `build/build.ps1 -Gate` 통과: Core 377, Design 109, Platform 29 |
-| G3·G5 | `build/ui-test.ps1`: 배포본 UI 시험 528/528 (`Kind=Live` 제외). G5 통과, 필수 누락 0, 매트릭스 416 (M2 44) |
-| 기록 bench | enter·open·timeline·switch·compare 최대 31.5·36.7·21.2·21.4·27.7 ms (33 ms 초과 최대 2회, open), 최고 전용 메모리 254 MB |
-| 측정 bench | nav 최대 36.9 ms (33 ms 초과 1회), 그 밖 구간 26 ms 이하 |
-| manifest.json SHA-256 | `134B1D95DA896125B79B3949E209A3817E0EEB38CC62D33D960CE2CBC6F677F6` |
+| 승인받은 코드 커밋 X | `b58f53195252228afcfb9b66698d4647b3d0cffa` |
+| G1·G2 | `build/build.ps1 -Gate`: Core 388/388, Design 109/109, Platform 29/29, 미실행 0 |
+| G3·G5 | `build/ui-test.ps1`: 배포본 UI 시험 539/539 (`Kind=Live` 제외, 세 번째 실행. 앞의 두 번은 닫을 때 비정상 종료 1회·클립보드 형식으로 건너뜀, DECISIONS "M7 게이트"). G5 통과, 필수 누락 0, 매트릭스 420 (M2 44), M7 장면 29 |
+| 기록 bench | enter·open·timeline·switch·compare 최대 32.0·36.6·27.5·26.2·37.5 ms (33 ms 초과 open 1회·compare 1회), 분석 중 이동·다시 들어옴·메모 뒤 최대 20.1·16.3·10.0 ms, 최고 전용 메모리 274 MB |
+| 측정 bench | nav 최대 34.2 ms (33 ms 초과 1회), 그 밖 구간 24.2 ms 이하. 진단 구간 최대 22.0 ms |
+| G4 | `.loop/reviews/m7-g4-r7-answer.md` APPROVE (차단 0). 4~7라운드는 사용자 승인 예외 |
+| manifest.json SHA-256 | `48C0E9DB8C3B400111736F1BCCEA4722C56CC8CA3CCC7720A823C442C38EC37B` |
 
 ## 지난 마일스톤의 게이트 (M6)
 
@@ -136,11 +137,12 @@
 3. 사소: 관측 종류가 바뀌는 순간 상태 알약이 한 번 이전 종류로 그려지고, 외부 응답 없음 → 링크 끊김으로 바로 바뀌면 새 종류의 알림이 나오지 않는다 (`AppShell.Render`). 지금 장면에서 계산한 값으로 그리고 종류별 전환을 따로 추적한다.
 4. 중요(시험): `RoundItemsArriveWithTheirRouteEventsInRecordOrder`가 시작 직후 사본 커서를 잡아 0회차가 빠질 수 있다 → 커서를 0부터. `SessionLinkTests`의 `Rounds()`도 관측만 기다리므로 게시까지 기다리게 맞춘다 (G4 4라운드).
 
-## 미해결 지적 (M7 G4 5·7라운드, 차단 아님 → 다음 마일스톤)
+## 미해결 지적 (M7 G4 5·7라운드와 게이트, 차단 아님 → 다음 마일스톤)
 
 1. 사소: 기록 화면에서 메모 저장이 재시도 중일 때 목록으로 나갔다가 같은 상세로 돌아오고, 새 저장 없이 그 저장이 실패하면 다시 그릴 계기가 없어 "저장하는 중…"이 남을 수 있다 (`RecordsScreen.SaveMemoAsync` 실패 쪽은 `Here()`가 거짓이라 다시 그리지 않음). 오래된 요청의 편집 상태 변경은 막되, 지금 상세가 같은 출처·표시이고 더 새 저장이 없으면 보관된 마지막 상태를 다시 그린다. 시험: 기존 실패 fixture에 저장 중 목록 복귀·재진입을 끼운다.
 2. 중요 (7라운드): 기록 화면 메모 저장 성공 뒤 `RerenderKeepingFocus`보다 목록 갱신 알림(`RecordLibrary.Changed` → `Render`)의 일반 다시 그리기가 먼저 오면, 다른 칸(B)을 고치던 초점이 사라진다. 첫 다시 그리기 전에 초점을 잡고 갱신·다시 열기로 생기는 다시 그리기를 함께 보호한다. 성공 완료를 멈출 수 있는 시험(쓰기를 잠시 막았다 푸는 fixture 등)으로 확인한다.
 3. 사소 (7라운드): 저장 완료 때 초점이 그 칸에 있으면 상태 글로 스크롤하는데, 사용자가 휠로 다른 곳을 보고 있어도 끌어온다. 저장 시작 뒤 사용자 스크롤 이동을 기억해 완료 때는 하지 않는다.
+4. 게이트 관찰 (원인 미확정): 닫을 때 드물게 0xC000027B(combase `8001010e`). 닫기 단계(`StopAll`·`ui.Detach` 하위 단계·`Close` 전후·`Window.Closed`)에 스레드와 단계를 기록하고, 닫기를 시작할 때 기록 화면의 프레임 구독·큐를 직접 끊고, 줄이기 상태와 상관없이 모션을 모두 멈춘다. UI 자동화 쪽 원인(microsoft/microsoft-ui-xaml#11139) 여부는 닫기 요청 방식(`WindowPattern.Close`·`WM_CLOSE`)을 나눠 비교한다. 클립보드 시험의 보관 판정이 빈 값 형식(메모장의 `EnterpriseDataProtectionId`)을 막힘으로 보는 것도 검토한다.
 
 ## 미해결 지적 (M6 G4 4라운드, 차단 아님) → M7 UI 시험 1차에서 모두 반영
 
@@ -152,6 +154,6 @@
 
 ## 다음 할 일
 
-M7: X(`b58f531`)에서 `build/build.ps1 -Gate` + `build/ui-test.ps1` (사용자가 PC를 비우고 클립보드에 평범한 글을 둔 뒤, 약 35분) → `close-milestone.ps1 -Approved <X> -Base main -Screens` (PR은 사용자가 병합). M8은 설계 승인됨, 구현은 사용자 결정 뒤.
+M7: `close-milestone.ps1 -Approved b58f53195252228afcfb9b66698d4647b3d0cffa -Base main -Screens` (PR은 사용자가 병합). 게이트를 다시 돌릴 일이 있으면 클립보드에 `clip`으로 글만 넣은 뒤. M8은 설계 승인됨, 구현은 사용자 결정 뒤.
 - DNS 캐시 비우기: 사용자 확인 받음 (2026-11-14, 확인 대화상자 뒤 `ipconfig /flushdns` 고정 명령).
 - 옛 이력 브랜치(`loop/m0`~`m4`, 원격 `old-private`)를 `origin`에 푸시하지 않는다.
