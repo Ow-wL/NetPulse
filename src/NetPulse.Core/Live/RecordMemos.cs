@@ -15,14 +15,18 @@ public sealed record MemoSaveResult(EventWriteState State, bool Latest, bool Tru
 /// 이미 직렬 작업에 들어간 옛 초안 쓰기도 실행 때 건너뛴다 (G4 M7 1라운드 a1: 저장이 끝나기 전 창을 닫으면 옛 초안이 새 글을 덮었다).</item>
 /// <item>알림에는 노트 폴더가 함께 간다: 같은 ID의 다른 위치 복사본을 고쳐도 원본의 초안은 건드리지 않는다 (a2).</item>
 /// <item>화면을 떠난 뒤 실패한 글은 앱 실행 동안 보관해, 상세로 돌아오면 칸 오류 + 다시 저장.</item>
+/// <item>세대와 줄 순서는 <b>부른 순간</b> 정한다: 앞 요청의 알림이 늦어도 뒤 요청이 먼저 줄 서지 않고, 앞 요청이 먼저 끝나도 최신이 아니다
+/// (G4 M7 2라운드 1, 3라운드 2). 창을 닫을 때는 <see cref="DrainAsync"/>로 아직 쓰기 큐에 들어가기 전인 요청까지 기다린다 (3라운드 1).</item>
 /// </list>
 /// </summary>
 public sealed class RecordMemos(NotesWriter writer, Func<DateTimeOffset> now)
 {
     private readonly object gate = new();
-    /// <summary>세대 발급부터 쓰기 넣기까지를 요청 순서대로 (그 사이 알림 처리를 기다리므로 잠금 대신, G4 M7 2라운드 1).</summary>
-    private readonly SemaphoreSlim order = new(1, 1);
+    /// <summary>앞 요청이 쓰기를 넣으면 끝나는 작업 (부른 순서대로 이어 붙임, 세대 발급과 같은 잠금에서).</summary>
+    private Task queued = Task.CompletedTask;
     private long counter;
+    private int inFlight;
+    private TaskCompletionSource? idle;
     private readonly Dictionary<(string Key, string Mark), long> latest = [];
     private readonly Dictionary<(string Key, string Mark), string?> failed = [];
 
@@ -43,27 +47,69 @@ public sealed class RecordMemos(NotesWriter writer, Func<DateTimeOffset> now)
     {
         var (text, truncated) = SymptomMarks.Clean(memo);
         long generation;
-        var folder = NotesFolder(segments);
-        Task<EventWriteState>? write = null;
-        // 세대 발급 → 알림 → 쓰기 넣기를 한 요청씩: 앞 요청의 알림 처리가 늦어도 뒤 요청이 먼저 줄 서지 않는다
-        // (그랬으면 직렬 쓰기에 새 글 → 옛 글 순으로 들어가 옛 글이 남았다, G4 M7 2라운드 1). 쓰기 완료는 순서 밖에서 기다린다
-        await order.WaitAsync().ConfigureAwait(false);
+        Task previous;
+        var mine = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // 첫 await 전에, 한 잠금에서: 세대 발급(최신 판정은 부른 순서), 줄 순서 잡기, 진행 중 요청 세기 (G4 M7 3라운드 1·2)
+        lock (gate)
+        {
+            generation = ++counter;
+            latest[(key, mark)] = generation;
+            previous = queued;
+            queued = mine.Task;
+            inFlight++;
+        }
         try
+        {
+            var folder = NotesFolder(segments);
+            Task<EventWriteState>? write = null;
+            // 알림 → 쓰기 넣기를 부른 순서대로: 앞 요청의 알림 처리가 늦어도 뒤 요청이 먼저 줄 서지 않는다
+            // (그랬으면 직렬 쓰기에 새 글 → 옛 글 순으로 들어가 옛 글이 남았다, G4 M7 2라운드 1). 쓰기 완료는 순서 밖에서 기다린다
+            await previous.ConfigureAwait(false);
+            try
+            {
+                if (folder is not null)
+                {
+                    // 처리기는 기록 폴더를 찾느라 디스크를 읽을 수 있어 UI 밖에서 부른다. 끝난 뒤에 쓰기를 넣어야 세대 순서가 맞다.
+                    // 처리기가 실패해도 사용자가 저장한 글은 쓴다 (옛 초안을 못 버린 것보다 새 글을 잃는 쪽이 나쁘다)
+                    if (Saving is { } saving)
+                    {
+                        try { await Task.Run(() => saving(folder, measurementId, mark)).ConfigureAwait(false); }
+                        catch (Exception) { }
+                    }
+                    write = writer.WriteAsync(folder, measurementId, mark, markAtMs, now(), text);
+                }
+            }
+            finally { mine.TrySetResult(); }
+            var state = write is null ? EventWriteState.Lost : await write.ConfigureAwait(false);
+            return Finish(key, mark, generation, folder, measurementId, memo, truncated, text, state);
+        }
+        finally
         {
             lock (gate)
             {
-                generation = ++counter;
-                latest[(key, mark)] = generation;
-            }
-            if (folder is not null)
-            {
-                // 처리기는 기록 폴더를 찾느라 디스크를 읽을 수 있어 UI 밖에서 부른다. 끝난 뒤에 쓰기를 넣어야 세대 순서가 맞다
-                if (Saving is { } saving) await Task.Run(() => saving(folder, measurementId, mark)).ConfigureAwait(false);
-                write = writer.WriteAsync(folder, measurementId, mark, markAtMs, now(), text);
+                if (--inFlight == 0) { idle?.TrySetResult(); idle = null; }
             }
         }
-        finally { order.Release(); }
-        var state = write is null ? EventWriteState.Lost : await write.ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 창 닫기: 진행 중인 저장 요청(아직 쓰기 큐에 들어가기 전인 것 포함)이 끝나기를 최대 <paramref name="limit"/> 기다린다.
+    /// 다 끝났으면 참 (G4 M7 3라운드 1: 종료는 쓰기 큐만 기다려, 알림을 기다리던 요청은 놓쳤다).
+    /// </summary>
+    public async Task<bool> DrainAsync(TimeSpan limit)
+    {
+        Task t;
+        lock (gate)
+        {
+            if (inFlight == 0) return true;
+            idle ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            t = idle.Task;
+        }
+        return await Task.WhenAny(t, Task.Delay(limit)).ConfigureAwait(false) == t;
+    }
+
+    private MemoSaveResult Finish(string key, string mark, long generation, string? folder, string measurementId, string? memo, bool truncated, string? text, EventWriteState state)
+    {
         bool isLatest;
         lock (gate)
         {

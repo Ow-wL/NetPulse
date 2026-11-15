@@ -360,9 +360,13 @@ public sealed partial class AppShell : Window
         try
         {
             await diagnosisStop;   // 진단을 먼저 멈춘다: 억제 → 취소 → 최대 3초 (M6 설계 3.4)
-            var shutdown = host.ShutdownAsync();
+            // 기록 화면의 메모 저장은 쓰기 큐에 들어가기 전(저장 시작 알림·앞 요청 대기)일 수 있어 호스트 종료와 함께 따로 기다린다
+            // (호스트는 쓰기 큐만 기다린다, G4 M7 3라운드 1). 둘은 세대로 서로의 옛 글을 건너뛰므로 동시에 해도 된다
+            var memoWrites = memos.DrainAsync(Waits.CloseWrites);
+            var shutdown = Task.WhenAll(host.ShutdownAsync(), memoWrites);
             if (await Task.WhenAny(shutdown, Task.Delay(Waits.CloseWrites + Waits.CloseWrites + Waits.CloseWrites)) != shutdown)
                 log.Write("closeTimeout", new { state = host.Snapshot.State.ToString() });
+            if (memoWrites.IsCompleted && !memoWrites.Result) log.Write("memoCloseTimeout", new { });
             var left = host.UnsavedDrafts();
             if (left.Count > 0) log.Write("memoUnsaved", new { marks = left });   // 메모 글은 남기지 않는다
             await beforeClose();

@@ -67,7 +67,7 @@ public sealed class M7MemoTests : IDisposable
         var first = memos.SaveAsync("known:x", [folder], Id, "k1", 10_000, "첫째");
         var second = memos.SaveAsync("known:x", [folder], Id, "k1", 10_000, "둘째");
         var results = await Task.WhenAll(first, second);
-        Assert.False(results[0].Latest);   // 오래된 완료는 화면에 반영하지 않는다
+        Assert.False(results[0].Latest);   // 오래된 완료는 화면에 반영하지 않는다 (세대는 부른 순간 정하므로 실행 순서와 무관)
         Assert.True(results[1].Latest);
         Assert.Equal("둘째", MemoOf(folder));   // 직렬 작업이라 마지막 요청이 마지막 줄
     }
@@ -98,6 +98,76 @@ public sealed class M7MemoTests : IDisposable
         Assert.False(results[0].Latest);
         Assert.True(results[1].Latest);
         Assert.Equal("B 새 글", MemoOf(folder));
+    }
+
+    [Fact]
+    public async Task AnEarlierRequestThatFinishesWhileTheLaterOneWaitsIsNotLatest()
+    {
+        // A의 쓰기가 끝날 때 B는 아직 저장 시작 알림에 멈춰 있다: B를 이미 불렀으므로 A는 최신이 아니다 (G4 M7 3라운드 2)
+        var folder = Folder();
+        var memos = New(out _);
+        var bEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+        memos.Saving += (_, _, _) =>
+        {
+            if (Interlocked.Increment(ref calls) != 2) return;
+            bEntered.SetResult();
+            release.Task.Wait(TestContext.Current.CancellationToken);
+        };
+        var a = memos.SaveAsync("known:x", [folder], Id, "k1", 10_000, "A 옛 글");
+        var b = memos.SaveAsync("known:x", [folder], Id, "k1", 10_000, "B 새 글");
+        var first = await a.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        await bEntered.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        Assert.False(b.IsCompleted);
+        Assert.Equal(EventWriteState.Saved, first.State);
+        Assert.False(first.Latest);
+        release.SetResult();
+        Assert.True((await b).Latest);
+        Assert.Equal("B 새 글", MemoOf(folder));
+    }
+
+    [Fact]
+    public async Task ClosingWaitsForSavesThatHaveNotReachedTheWriteQueueYet()
+    {
+        // A의 저장 시작 알림이 멈춰 있고 B는 그 뒤에 줄 섰다: 쓰기 큐는 비어 있어도 닫기 대기는 끝나지 않는다 (G4 M7 3라운드 1)
+        var folder = Folder();
+        var writer = new NotesWriter { RetryDelays = [TimeSpan.FromMilliseconds(10)] };
+        var memos = New(out _, writer);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+        memos.Saving += (_, _, _) =>
+        {
+            if (Interlocked.Increment(ref calls) != 1) return;
+            entered.SetResult();
+            release.Task.Wait(TestContext.Current.CancellationToken);
+        };
+        Assert.True(await memos.DrainAsync(TimeSpan.Zero));   // 아무것도 없으면 바로
+        var a = memos.SaveAsync("known:x", [folder], Id, "k1", 10_000, "A 옛 글");
+        var b = memos.SaveAsync("known:x", [folder], Id, "k1", 10_000, "B 새 글");
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        Assert.True(await writer.DrainAsync(TimeSpan.Zero));   // 호스트가 보던 쓰기 큐는 비어 있다
+        Assert.False(await memos.DrainAsync(TimeSpan.FromMilliseconds(50)));   // 한도 안에 끝나지 않으면 거짓
+        var drain = memos.DrainAsync(TimeSpan.FromSeconds(10));
+        Assert.False(drain.IsCompleted);
+        release.SetResult();
+        Assert.True(await drain);
+        Assert.True(a.IsCompleted && b.IsCompleted);   // 닫기 대기가 끝났으면 두 요청 모두 끝났다
+        Assert.Equal("B 새 글", MemoOf(folder));
+    }
+
+    [Fact]
+    public async Task AFailingSavingHandlerStillWritesTheMemo()
+    {
+        var folder = Folder();
+        var memos = New(out var saved);
+        memos.Saving += (_, _, _) => throw new InvalidOperationException("처리기 실패");
+        var r = await memos.SaveAsync("known:x", [folder], Id, "k1", 10_000, "그래도 쓴다");
+        Assert.Equal((EventWriteState.Saved, true), (r.State, r.Latest));
+        Assert.Equal("그래도 쓴다", MemoOf(folder));
+        Assert.True(await memos.DrainAsync(TimeSpan.Zero));
+        Assert.Single(saved);
     }
 
     [Fact]
