@@ -7,10 +7,10 @@
 | 항목 | 값 |
 | --- | --- |
 | 마일스톤 | M7 기록 화면 |
-| 단계 | G4 5라운드 APPROVE(`8eedde3`) 뒤 기록 화면 UI 시험 2차에서 메모 표시 회귀를 찾아 고침 (DECISIONS "M7 UI 시험 2차"). X가 바뀌어 다음: 이 수정만 보는 G4 6라운드(사용자 승인 필요) → 새 X에서 전체 게이트(클립보드에 평범한 글을 둔 뒤) → 마감 |
+| 단계 | G4 6라운드(사용자 승인 예외) REVISE 2건 반영 (DECISIONS "M7 G4 6라운드"). 다음: G4 7라운드(사용자 승인 필요) → 새 X에서 전체 게이트(클립보드에 평범한 글을 둔 뒤) → 마감 |
 | 브랜치 | `loop/m7-records` (M6 PR 병합 뒤 `main`(`1c0ef7a`)을 병합) |
 | 설계 검토 라운드 | 2 / 2 (1라운드 REVISE 13건 → 2판, 2라운드 APPROVE + 구현 중 결정 7건) |
-| diff 리뷰 라운드 | 5 / 3 (4·5라운드는 사용자 승인 예외) (1라운드 `69ec52d` REVISE: 차단 2·중요 9·사소 2, 2라운드 `f458e15` REVISE: 차단 1·중요 2·사소 1, 3라운드 `7dffec3` REVISE: 차단 1·중요 1, 4라운드 `14a7a91` 사용자 승인 예외 REVISE: 중요 1·사소 2, 5라운드 `8eedde3` 사용자 승인 예외 APPROVE: 사소 1 이월) |
+| diff 리뷰 라운드 | 6 / 3 (4~6라운드는 사용자 승인 예외) (1라운드 `69ec52d` REVISE: 차단 2·중요 9·사소 2, 2라운드 `f458e15` REVISE: 차단 1·중요 2·사소 1, 3라운드 `7dffec3` REVISE: 차단 1·중요 1, 4라운드 `14a7a91` 사용자 승인 예외 REVISE: 중요 1·사소 2, 5라운드 `8eedde3` 사용자 승인 예외 APPROVE: 사소 1 이월, 6라운드 `e3494d4`(UI 시험 2차 수정) 사용자 승인 예외 REVISE: 차단 1·사소 1) |
 | 누적 실패 | 0 / 8 |
 | PR | 없음 (G4 승인 뒤 마감 스크립트가 만든다) |
 | M6 | 끝: PR Ow-wL/NetPulse#2 사용자 병합 (`1c0ef7a`) |
@@ -150,6 +150,6 @@
 
 ## 다음 할 일
 
-M7: UI 시험 2차 수정만 보는 G4 6라운드(사용자 승인 필요) → 새 X에서 `build/build.ps1 -Gate` + `build/ui-test.ps1` (사용자가 PC를 비우고 클립보드에 평범한 글을 둔 뒤, 약 35분) → `close-milestone.ps1 -Approved <X> -Base main -Screens` (PR은 사용자가 병합). M8은 설계 승인됨, 구현은 사용자 결정 뒤.
+M7: 6라운드 수정만 보는 G4 7라운드(사용자 승인 필요) → 새 X에서 `build/build.ps1 -Gate` + `build/ui-test.ps1` (사용자가 PC를 비우고 클립보드에 평범한 글을 둔 뒤, 약 35분) → `close-milestone.ps1 -Approved <X> -Base main -Screens` (PR은 사용자가 병합). M8은 설계 승인됨, 구현은 사용자 결정 뒤.
 - DNS 캐시 비우기: 사용자 확인 받음 (2026-11-14, 확인 대화상자 뒤 `ipconfig /flushdns` 고정 명령).
 - 옛 이력 브랜치(`loop/m0`~`m4`, 원격 `old-private`)를 `origin`에 푸시하지 않는다.

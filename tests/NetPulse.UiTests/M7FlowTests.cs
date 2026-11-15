@@ -228,8 +228,9 @@ public sealed class M7FlowTests
             app.WaitDiag(d => Sd(d).GetProperty("memoState").EnumerateArray().Select(v => v.GetString()).ToArray(), s => s.Contains("저장하지 못했습니다"), "저장 실패");
             // 상태 기록과 오류 줄 그리기는 같은 프레임이 아닐 수 있다 (M7 UI 시험 1차: 한 번 먼저 읽어 실패)
             AppDriver.WaitFor(() => app.Exists("records.mark.0.text.error"), e => e, "메모 오류 줄");
-            // 다시 그린 뒤에도 그 칸에 초점 (사이드바로 가서 화면이 맨 위로 올라가면 오류가 안 보인다, M7 UI 시험 2차)
-            app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == "records.mark.0.text", "실패 뒤 메모 칸 초점");
+            // 초점은 사용자가 누른 저장 단추에 그대로 (다시 그리면 사이드바로 가서 화면이 맨 위로 올라가 오류가 안 보였다, M7 UI 시험 2차.
+            // 실패는 그 칸에만 반영하고 초점을 옮기지 않는다, G4 M7 6라운드 1)
+            app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == "records.mark.0.save", "실패 뒤 초점이 저장 단추에 남음");
             Assert.Equal("못 쓴 메모", ((System.Windows.Automation.ValuePattern)app.Find("records.mark.0.text").GetCurrentPattern(System.Windows.Automation.ValuePattern.Pattern)).Current.Value);
             Assert.Equal(0, app.Close());
         }
@@ -261,6 +262,41 @@ public sealed class M7FlowTests
             AppDriver.WaitFor(() => app.Exists("records.mark.0.state") ? app.Text("records.mark.0.state") : "", s => s == "저장하는 중…", "저장하는 중 표시");
             AppDriver.WaitFor(() => app.Exists("records.mark.0.text.error"), e => e, "저장 실패 줄", TimeSpan.FromSeconds(20));
             Assert.Equal("펼쳐도 남는 초안", Value());
+            Assert.Equal(0, app.Close());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
+    [Fact]
+    public void AnEarlierMemoFailingWhileEditingAnotherLeavesFocusAndTextThere()
+    {
+        // 메모 A가 재시도하는 동안 메모 B를 고치는 중 A가 실패해도, 초점과 B의 글은 B에 남고 A에는 오류만 (G4 M7 6라운드 1:
+        // 실패 때 다시 그리며 A로 초점을 가져가 B에 치던 글이 A로 갈 수 있었다)
+        var userData = AppDriver.NewUserData();
+        try
+        {
+            using var app = Open(userData, "rec-two-memos-blocked", "--demo steady --screen records");
+            WaitAnalyzed(app);
+            app.Invoke("records.row.0");
+            WaitDetail(app);
+            string Value(string id) => ((System.Windows.Automation.ValuePattern)app.Find(id).GetCurrentPattern(System.Windows.Automation.ValuePattern.Pattern)).Current.Value;
+            string Focused() => app.WaitDiag(d => d.GetProperty("focused").ToString(), _ => true, "초점");
+            app.Invoke("records.mark.0.edit");
+            AppDriver.WaitFor(() => app.Exists("records.mark.0.text"), e => e, "메모 A 칸");
+            app.SetText("records.mark.0.text", "A 저장 실패할 글");
+            app.Invoke("records.mark.0.save");
+            AppDriver.WaitFor(() => app.Exists("records.mark.0.state") ? app.Text("records.mark.0.state") : "", s => s == "저장하는 중…", "A 저장하는 중");
+            app.Invoke("records.mark.1.edit");
+            AppDriver.WaitFor(() => app.Exists("records.mark.1.text"), e => e, "메모 B 칸");
+            app.Find("records.mark.1.text").SetFocus();
+            app.SetText("records.mark.1.text", "B 쓰는 중");
+            app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == "records.mark.1.text", "B 칸 초점");
+            Assert.False(app.Exists("records.mark.0.text.error"));   // 아직 재시도 중이어야 이 시험이 그 경우를 본다
+            AppDriver.WaitFor(() => app.Exists("records.mark.0.text.error"), e => e, "A 저장 실패 줄", TimeSpan.FromSeconds(20));
+            Assert.Equal("records.mark.1.text", Focused());
+            Assert.Equal("B 쓰는 중", Value("records.mark.1.text"));
+            Assert.Equal("A 저장 실패할 글", Value("records.mark.0.text"));
+            Assert.Equal("저장하지 못했습니다", app.Text("records.mark.0.state"));
             Assert.Equal(0, app.Close());
         }
         finally { AppDriver.DeleteUserData(userData); }

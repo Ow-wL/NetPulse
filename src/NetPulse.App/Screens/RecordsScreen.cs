@@ -42,6 +42,7 @@ public sealed class RecordsScreen : Screen
     private readonly List<string> editing = [];
     private readonly Dictionary<string, string> memoDrafts = [];
     private readonly Dictionary<string, TextBlock> memoStateText = [];
+    private readonly Dictionary<string, (StackPanel Row, GlassTextBox Box)> memoEditors = [];   // 지금 그려진 고치는 칸 (표시별): 실패를 다시 그리지 않고 그 칸에만 (G4 M7 6라운드 1)
     private string? focusMark;
     private readonly Dictionary<(string Key, string Mark), int> memoSaveSeq = [];   // (기록 출처, 표시)별 마지막 저장 요청 번호 (G4 M7 4라운드 1)
     private int memoSaveCounter;
@@ -1019,6 +1020,7 @@ public sealed class RecordsScreen : Screen
     {
         var stack = new StackPanel { Spacing = Space.S2 };
         memoStateText.Clear();
+        memoEditors.Clear();
         var marks = SymptomMarks.FromEvents(r.Events, r.NoteLines).Marks;
         if (marks.Count == 0)
         {
@@ -1055,6 +1057,7 @@ public sealed class RecordsScreen : Screen
                 var state = Named($"records.mark.{i}.state", st ?? "", Typography.Caption, Ui.Brushes.Muted);
                 state.Visibility = st is null ? Visibility.Collapsed : Visibility.Visible;
                 memoStateText[m.Mark] = state;
+                memoEditors[m.Mark] = (row, box);
                 row.Children.Add(state);
                 // 막 연 칸에만 초점 (다시 그릴 때마다 초점을 가져가면 끊김 줄을 펼칠 때 초점을 빼앗는다).
                 // 초점만 주면 글 상자까지만 내려가 그 아래 오류 글·저장 단추·상태 글이 잘렸다: 칸 전체가 보이게 한다 (M7 UI 시험 2차)
@@ -1092,7 +1095,11 @@ public sealed class RecordsScreen : Screen
     /// 상태 글: 값을 (기록 출처, 표시)로 남기고, <paramref name="show"/>(그 요청의 상세가 아직 열려 있음)일 때만 지금 칸의 글을 바꾼다
     /// (다시 그리지 않음). 떠난 상세의 늦은 완료가 다른 기록의 같은 표시 칸을 바꾸지 않게 (G4 M7 2라운드 3).
     /// </summary>
-    private void SetMemoState(string key, string mark, string text, bool show)
+    /// <param name="reveal">
+    /// 그 글이 보이게 스크롤 (방금 누른 저장 단추 아래라 화면 밖일 수 있다, M7 UI 시험 2차: 150%에서 "저장하는 중…"이 잘림).
+    /// 사용자가 방금 그 칸에서 누른 저장 시작, 또는 초점이 아직 그 칸에 있을 때만: 늦게 온 완료가 다른 곳에 있는 사용자를 끌어오지 않게 (G4 M7 6라운드 2)
+    /// </param>
+    private void SetMemoState(string key, string mark, string text, bool show, bool reveal = false)
     {
         memoState[(key, mark)] = text;
         if (show && memoStateText.TryGetValue(mark, out var t))
@@ -1100,12 +1107,36 @@ public sealed class RecordsScreen : Screen
             t.Text = Fonts.KeepAll(text);
             AutomationProperties.SetName(t, text);
             t.Visibility = Visibility.Visible;
-            // 방금 누른 저장 단추 아래라 화면 밖일 수 있다 (M7 UI 시험 2차: 150%에서 "저장하는 중…"이 잘림).
-            // 막 보이게 한 글은 아직 배치 전이라 배치 뒤에 부른다
-            var shown = t;
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => shown.StartBringIntoView());
+            if (reveal)
+            {
+                // 막 보이게 한 글은 아직 배치 전이라 배치 뒤에. 그 사이 다시 그려 떨어진 글은 하지 않는다
+                var shown = t;
+                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { if (shown.IsLoaded) shown.StartBringIntoView(); });
+            }
         }
         Context.QueueDiag();
+    }
+
+    /// <summary>지금 초점이 <paramref name="root"/> 안에 있는지.</summary>
+    private bool FocusWithin(DependencyObject root)
+    {
+        if (XamlRoot is not { } xr) return false;
+        for (var o = Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(xr) as DependencyObject; o is not null; o = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(o))
+            if (ReferenceEquals(o, root)) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// 다시 그려도 초점을 같은 자동화 ID의 새 요소로 돌려준다 (다시 그리면 요소가 바뀌어 초점이 사이드바로 가고 맨 위로 올라갔다).
+    /// 다른 칸을 고치던 중 앞 메모의 저장이 끝나 다시 그려도 그 칸에 남는다 (G4 M7 6라운드 1).
+    /// </summary>
+    private void RerenderKeepingFocus()
+    {
+        string? id = null;
+        if (XamlRoot is { } xr && Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(xr) is UIElement f && FocusWithin(content))
+            id = AutomationProperties.GetAutomationId(f);
+        Rerender();
+        if (!string.IsNullOrEmpty(id)) FocusLater(id, mode);
     }
 
     private async Task SaveMemoAsync(SymptomMark mark, string text)
@@ -1120,27 +1151,33 @@ public sealed class RecordsScreen : Screen
         int seq = ++memoSaveCounter;
         memoSaveSeq[(key, mark.Mark)] = seq;
         bool Mine() => memoSaveSeq.GetValueOrDefault((key, mark.Mark)) == seq;
-        SetMemoState(key, mark.Mark, "저장하는 중…", Here());
+        SetMemoState(key, mark.Mark, "저장하는 중…", Here(), reveal: true);
         var result = await Context.Memos.SaveAsync(key, item.Entry.Segments, d.Record.Header!.Id, mark.Mark, mark.AtMs, text);
         if (Context.IsClosing()) return;
         if (!result.Latest || !Mine()) return;   // 더 새 요청이 있다: 오래된 완료는 반영하지 않는다
         if (result.State == EventWriteState.Saved)
         {
-            SetMemoState(key, mark.Mark, result.Truncated ? "저장했습니다 (200자에서 잘라 저장)" : "저장했습니다", Here());
+            SetMemoState(key, mark.Mark, result.Truncated ? "저장했습니다 (200자에서 잘라 저장)" : "저장했습니다", Here(),
+                reveal: memoEditors.TryGetValue(mark.Mark, out var done) && FocusWithin(done.Row));
             // 저장하는 동안 더 고친 글이 있으면 칸과 초안을 남긴다
             if (Here() && (!memoDrafts.TryGetValue(mark.Mark, out var now) || now == text)) { editing.Remove(mark.Mark); memoDrafts.Remove(mark.Mark); }
             await Context.Records.RefreshAsync(Context.Host.RunningId);
             if (!Here() || !Mine()) return;
             var reopened = await Context.Records.OpenAsync(key);
-            DispatcherQueue.TryEnqueue(() => { if (Here() && Mine() && reopened is not null) { detail = reopened; Rerender(); } });
+            DispatcherQueue.TryEnqueue(() => { if (Here() && Mine() && reopened is not null) { detail = reopened; RerenderKeepingFocus(); } });
         }
         else
         {
             memoState[(key, mark.Mark)] = "저장하지 못했습니다";
-            // 칸 오류 + 초안 유지 (초안은 memoDrafts에 그대로). 다시 그리면 글 상자가 바뀌어 초점이 사이드바로 가고 맨 위로 올라가
-            // 오류가 보이지 않았다: 그 칸에 초점을 돌려준다 (M7 UI 시험 2차, 1라운드 b1 "막 연 칸에만 초점"에서 빠짐)
-            if (Here()) { focusMark = mark.Mark; Rerender(); }
-            else Context.Toasts.Show(ToastKind.Error, "메모를 저장하지 못했습니다", "그 기록을 다시 열면 다시 저장할 수 있습니다.");
+            // 다시 그리지 않고 그 칸에만 오류 (초안은 memoDrafts에 그대로): 다시 그리면 다른 칸을 고치거나 끊김 줄로 간 사용자의
+            // 초점·스크롤을 빼앗았다 (G4 M7 6라운드 1. 그 전에는 초점이 사이드바로 가 오류가 안 보였다, M7 UI 시험 2차).
+            // 초점이 그 칸에 있을 때만 오류가 보이게 스크롤한다
+            if (Here() && editing.Contains(mark.Mark) && memoEditors.TryGetValue(mark.Mark, out var ed))
+            {
+                ed.Box.SetError("저장하지 못했습니다. 다시 저장해 보세요.");
+                SetMemoState(key, mark.Mark, "저장하지 못했습니다", true, reveal: FocusWithin(ed.Row));
+            }
+            else Context.Toasts.Show(ToastKind.Error, "메모를 저장하지 못했습니다", Here() ? "메모 고치기를 누르면 저장하지 못한 글로 다시 저장할 수 있습니다." : "그 기록을 다시 열면 다시 저장할 수 있습니다.");
         }
         Context.QueueDiag();
     }
