@@ -1,9 +1,10 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using NetPulse.App.Design;
 using NetPulse.App.Design.Controls;
 using NetPulse.Core.Analysis;
+using NetPulse.Core.Diagnostics;
 using NetPulse.Core.Live;
 using NetPulse.Core.Presentation;
 using NetPulse.Core.Records;
@@ -18,6 +19,15 @@ namespace NetPulse.App.Screens;
 public sealed class HomeScreen : Screen
 {
     private readonly RepresentativeCache reps = new();
+
+    /// <summary>
+    /// 숨어 있는 동안에도 대표값 캐시를 회차마다 이어 둔다 (M5 이월 2): 숨은 화면은 그리지 않아, 긴 측정 뒤 첫 홈 이동에서
+    /// 4만여 회차를 한 번에 계산하느라 한 프레임이 예산(50 ms)을 넘었다. 이어 붙이기만이라 회차마다 비용은 작다.
+    /// </summary>
+    public void Warm(HostSnapshot s)
+    {
+        if (s.Header is { } h && s.Rounds.Count > 0) reps.Update(s.Rounds, h.Targets);
+    }
     private readonly PageHeader header;
     private readonly StackPanel chips = new() { Orientation = Orientation.Horizontal, Spacing = Space.S2 };
     private readonly GradeRing ring;
@@ -28,7 +38,10 @@ public sealed class HomeScreen : Screen
     private readonly PathMapPanel map;
     private readonly TimelinePanel timeline;
     private readonly CardBody chartBody, recentBody;
-    private readonly GroupPanel heroCard, mapCard, chartCard, recentCard;
+    private readonly GroupPanel heroCard, mapCard, chartCard, recentCard, diagCard;
+    private readonly Grid side = new() { RowSpacing = Space.S5 };
+    private readonly CardBody diagBody;
+    private long diagVersion = -1;
     private readonly FrameworkElement chartEmpty;
     private readonly StackPanel recentList = new() { Spacing = Space.S1 };
     private string recentState = "";
@@ -122,15 +135,24 @@ public sealed class HomeScreen : Screen
         var all = new GlassButton(Ui, ButtonKind.Ghost, "home.recent.all", "전체 보기");
         all.Click += (_, _) => Context.Navigate("records", null);
         (recentCard, recentBody) = ScreenParts.Card(Ui, "home.recent", "최근 측정", null, all);
+        // 빠른 진단 카드 (M6 설계 4.3): 오른쪽 열에서 최근 측정 위 (한 열이면 최근 측정 위)
+        var openDiag = new GlassButton(Ui, ButtonKind.Ghost, "home.diagnosis.open", "진단 열기");
+        openDiag.Click += (_, _) => Context.Navigate("diagnose", null);
+        (diagCard, diagBody) = ScreenParts.Card(Ui, "home.diagnosis", "빠른 진단", null, openDiag);
+        side.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        side.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        side.Children.Add(diagCard);
         Grid.SetRow(recentCard, 1);
-        Grid.SetColumn(recentCard, 1);
-        grid.Children.Add(recentCard);
+        side.Children.Add(recentCard);
+        Grid.SetRow(side, 1);
+        Grid.SetColumn(side, 1);
+        grid.Children.Add(side);
         // 최근 측정이 바뀌면 큰 카드(지난 측정)도 함께 다시 그린다
         // 보이는 화면만 그린다 (화면은 숨겨 두므로 부모 유무로는 알 수 없다). 닫는 중이면 요소를 건드리지 않는다
         Context.Recent.Changed += () => DispatcherQueue.TryEnqueue(() => { if (!Context.IsClosing() && Visibility == Visibility.Visible) Render(Context.Host.Snapshot); });
     }
 
-    public override IReadOnlyList<UIElement> Parts => [header, heroCard, mapCard, chartCard, recentCard];
+    public override IReadOnlyList<UIElement> Parts => [header, heroCard, mapCard, chartCard, diagCard, recentCard];
 
     private bool? twoColumns;
 
@@ -147,13 +169,13 @@ public sealed class HomeScreen : Screen
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            Place(heroCard, 0, 0); Place(mapCard, 0, 1); Place(chartCard, 1, 0); Place(recentCard, 1, 1);
+            Place(heroCard, 0, 0); Place(mapCard, 0, 1); Place(chartCard, 1, 0); Place(side, 1, 1);
         }
         else
         {
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             for (int i = 0; i < 4; i++) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            Place(heroCard, 0, 0); Place(mapCard, 1, 0); Place(chartCard, 2, 0); Place(recentCard, 3, 0);
+            Place(heroCard, 0, 0); Place(mapCard, 1, 0); Place(chartCard, 2, 0); Place(side, 3, 0);
         }
     }
 
@@ -183,6 +205,35 @@ public sealed class HomeScreen : Screen
         }
         else chartBody.Set(chartEmpty, "empty");
         RenderProfile.Time("home.recent", RenderRecent);
+        RenderDiagnosis();
+    }
+
+    /// <summary>빠른 진단 카드: 이번 실행의 마지막 결과, 아니면 진단 기록의 최근 결과, 없으면 시작 안내.</summary>
+    private void RenderDiagnosis()
+    {
+        var d = Context.Diagnosis.Snapshot;
+        if (d.Version == diagVersion) return;
+        diagVersion = d.Version;
+        var now = Context.Now;
+        (int Conclusion, DateTimeOffset At)? latest = d.Last is { } l ? (l.Result.Main.Number, l.Result.EndedAt) : d.Recent is { } r ? (r.Conclusion, r.StartedAt) : null;
+        if (d.Operation != DiagnosisOperation.None)
+        {
+            diagBody.Set(ScreenParts.Message(Ui, "home.diagnosis.running", Icons.Diagnose, Ui.Brushes.Accent, "진단 중", "진단 화면에서 진행을 볼 수 있습니다."), "running");
+            return;
+        }
+        if (latest is not { } x)
+        {
+            var go = new GlassButton(Ui, ButtonKind.Secondary, "home.diagnosis.start", "진단 시작", Icons.Play);
+            go.Click += (_, _) => { Context.Diagnosis.StartDiagnosis(); Context.Navigate("diagnose", null); };
+            var empty = new StackPanel { Spacing = Space.S3 };
+            empty.Children.Add(ScreenParts.Message(Ui, "home.diagnosis.empty", Icons.Diagnose, Ui.Brushes.Muted, "아직 진단하지 않았습니다", "빠른 진단으로 지금 연결을 검사해 보세요."));
+            empty.Children.Add(go);
+            diagBody.Set(empty, "empty");
+            return;
+        }
+        var (head, weight) = DiagnosisTexts.Head(x.Conclusion);
+        var (icon, brush) = DiagnosisLook.Weight(Ui, weight);
+        diagBody.Set(ScreenParts.Message(Ui, "home.diagnosis.last", icon, brush, head, "마지막 진단 · " + LiveSummary.When(x.At, now)), "normal");
     }
 
     private void RenderChips(HostSnapshot s)

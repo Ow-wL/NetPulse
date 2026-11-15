@@ -74,6 +74,19 @@ internal static class M5Fixtures
         File.WriteAllText(Path.Combine(folder, "measurement.json"), "{\"format\":\"netpulse.measurement\",");
     }
 
+    /// <summary>지난 진단 기록 하나 (결론 6: 외부 TCP·DNS·HTTPS 실패). 제품의 기록 형식 그대로 Core로 만든다.</summary>
+    public static void MakeDiagnosisRecord(string userData)
+    {
+        var scenario = Load("diag-outside");
+        var tb = new DemoTimeBase(DemoNow.AddMinutes(-30), 1);
+        tb.Freeze(TimeSpan.FromSeconds(10));
+        var world = new DemoWorld(scenario, tb);
+        var settings = NetPulse.Core.Demo.DemoDiagnosticProbes.Settings(scenario);
+        var result = NetPulse.Core.Diagnostics.QuickDiagnosis.RunAsync(new NetPulse.Core.Demo.DemoDiagnosticProbes(world), settings, () => DemoNow.AddMinutes(-30))
+            .GetAwaiter().GetResult();
+        new DiagnosisStore(Path.Combine(userData, "diagnoses")).Save(result, "test", null);
+    }
+
     /// <summary>손상된 측정 구성 파일 (첫 실행이 "따로 보관했습니다"를 알린다).</summary>
     public static void BreakProfile(string userData)
     {
@@ -91,6 +104,11 @@ internal static class M5Fixtures
             case "records3": MakeRecentThree(userData); break;
             case "recorderror": MakeRecentThree(userData); MakeBrokenRecord(userData); break;
             case "unreadable": BreakProfile(userData); break;
+            case "diagrecord": SaveProfile(userData, "steady", TimeSpan.FromMinutes(60)); MakeDiagnosisRecord(userData); break;
+            case "diagblock":
+                SaveProfile(userData, "steady", TimeSpan.FromMinutes(60));
+                File.WriteAllText(Path.Combine(userData, "diagnoses"), "막음");   // 진단 기록 폴더 자리에 파일 → 저장 실패
+                break;
             default: throw new ArgumentException("알 수 없는 준비: " + prep);
         }
     }

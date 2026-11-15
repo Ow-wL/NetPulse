@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.IO;
 using System.Text.Json;
 using NetPulse.Design;
@@ -6,7 +6,7 @@ using NetPulse.Design.Tokens;
 
 namespace NetPulse.UiTests;
 
-/// <summary>M5 G5 자동 검사 (설계 5절, 7.4): 측정 화면 bench, 움직임 줄이기, 홈 실측 대비.</summary>
+/// <summary>M5 G5 자동 검사 (설계 5절, 7.4): 측정 화면 bench(M6 진단 구간 포함), 움직임 줄이기, 홈 실측 대비.</summary>
 public sealed class M5G5Tests
 {
     private static string G5Dir { get { var d = Path.Combine(AppDriver.OutputDirectory, "g5"); Directory.CreateDirectory(d); return d; } }
@@ -39,6 +39,10 @@ public sealed class M5G5Tests
         Assert.True(result is not null, "bench 측정이 두 번 모두 무효 (표본 부족)");
         var b = result!.Value;
         Record("bench-measure", b);
+        // M6 진단 구간은 같은 bench 실행 끝에 붙는다 (설계 5절). 따로 묶어 G5 필수 결과로 남기고, 아래 같은 기준으로 판정한다
+        var diagSegments = b.GetProperty("segments").EnumerateArray().Where(s => s.GetProperty("Segment").GetString()!.StartsWith("diag-", StringComparison.Ordinal)).ToArray();
+        Record("bench-diagnose", new { segments = diagSegments, navSteps = b.GetProperty("navSteps").EnumerateArray().Where(n => n.TryGetProperty("segment", out _)).ToArray() });
+        Assert.Equal(["diag-enter", "diag-run", "diag-reenter"], diagSegments.Select(s => s.GetProperty("Segment").GetString()));
         var problems = new List<string>();
         foreach (var s in b.GetProperty("segments").EnumerateArray())
         {
@@ -50,7 +54,7 @@ public sealed class M5G5Tests
         }
         double analysisP95 = b.GetProperty("analysis").GetProperty("p95Ms").GetDouble();
         if (analysisP95 > 500) problems.Add($"잠정 분석 95백분위 {analysisP95:0} ms > 500");
-        long mb = b.GetProperty("privateMb").GetInt64();
+        long mb = Math.Max(b.GetProperty("privateMb").GetInt64(), b.TryGetProperty("peakPrivateMb", out var peak) ? peak.GetInt64() : 0);   // 실행 중 최고치까지
         if (mb > 400) problems.Add($"전용 메모리 {mb} MB > 400");
         Assert.True(problems.Count == 0, string.Join("\n", problems));
     }

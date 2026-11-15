@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Input;
@@ -51,7 +51,8 @@ public sealed partial class AppShell
             loadStatus = host.LoadStatus.ToString(),
             recent = new { listed = recent.Listed, items = recent.Items.Select(i => new { i.Entry.Id, i.Analyzing, grade = i.Grade?.ToString(), i.Outages, i.Error, life = i.Entry.Lifecycle.ToString() }) },
             screenDiag = screens.Current?.Diag(),
-            outage = lastOutage,
+            outage = observation.Current != NetPulse.Core.Presentation.ObservationKind.None,
+            observation = observation.Current.ToString(),
             theme = mode.Theme.ToString().ToLowerInvariant(),
             material = mode.Material.ToString().ToLowerInvariant(),
             glassAcrylic = ui.Glass.IsAcrylic,
@@ -97,6 +98,12 @@ public sealed partial class AppShell
     /// </summary>
     private async void RunBench()
     {
+        // 실행 중 최고 전용 메모리 (강제 수집 뒤 값만으로는 최고치를 모른다, G4 1라운드 b 마무리 말)
+        long peakMb = 0;
+        var sampler = DispatcherQueue.CreateTimer();
+        sampler.Interval = BenchTokens.MemorySample;
+        sampler.Tick += (_, _) => peakMb = Math.Max(peakMb, PrivateMb());
+        sampler.Start();
         try
         {
             if (screens.CurrentId != "measure") Navigate("measure", null);
@@ -148,6 +155,27 @@ public sealed partial class AppShell
                     navSteps.Add(new { to, maxMs = ui.Pacer.SegmentMaxFrom(at) });
                 }
             });
+            // 진단 구간 (M6 설계 5절): 첫 진입 → 진단 한 번(진행 → 결과) → 홈 ↔ 진단 6번
+            await Segment("diag-enter", async () => { Navigate("diagnose", null); await Task.Delay(BenchTokens.DiagEnter); });
+            await Segment("diag-run", async () =>
+            {
+                (screens.Get("diagnose") as DiagnoseScreen)?.Start();
+                var limit = DateTime.UtcNow + BenchTokens.DiagRunLimit;
+                while (DateTime.UtcNow < limit && !(diagnosis.Snapshot is { Operation: Core.Live.DiagnosisOperation.None, Last: not null }))
+                    await Task.Delay(MotionTokens.Fast);
+                await Task.Delay(BenchTokens.DiagSettle);
+            });
+            await Segment("diag-reenter", async () =>
+            {
+                for (int i = 0; i < BenchTokens.DiagReenterCount; i++)
+                {
+                    int at = ui.Pacer.SegmentSamples;
+                    string to = i % 2 == 0 ? "home" : "diagnose";
+                    Navigate(to, null);
+                    await Task.Delay(BenchTokens.NavStep);
+                    navSteps.Add(new { to, maxMs = ui.Pacer.SegmentMaxFrom(at), segment = "diag-reenter" });
+                }
+            });
             host.Changed -= Sample;
             var durations = analyses.Values.OrderBy(v => v).ToArray();
             double P95(double[] v) => v.Length == 0 ? 0 : v[Math.Min(v.Length - 1, (int)Math.Ceiling(v.Length * 0.95) - 1)];
@@ -158,10 +186,13 @@ public sealed partial class AppShell
             {
                 kind = "measure", segments, profile, navSteps, rounds = host.Snapshot.Rounds.Count,
                 analysis = new { samples = durations.Length, p95Ms = P95(durations), maxMs = durations.LastOrDefault() },
-                baselineMs = ui.Pacer.Baseline, privateMb,
+                baselineMs = ui.Pacer.Baseline, privateMb, peakPrivateMb = Math.Max(peakMb, privateMb),
             });
         }
         catch (Exception ex) { log.Write("bench", new { kind = "measure", error = ex.GetType().Name, message = ex.Message }); }
+        sampler.Stop();
         BeginClose();
     }
+
+    private static long PrivateMb() => System.Diagnostics.Process.GetCurrentProcess().PrivateMemorySize64 / (1024 * 1024);
 }

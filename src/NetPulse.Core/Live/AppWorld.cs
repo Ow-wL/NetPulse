@@ -24,6 +24,9 @@ public interface IAppWorld
 
     /// <summary>측정 하나를 시작한다 (측정마다 새 시계). 실패하면 <see cref="SessionStartException"/>.</summary>
     MeasurementSession StartSession(Profile profile, string appVersion);
+
+    /// <summary>빠른 진단·사이트 점검·보조 도구 (M6 설계 3.2·3.3).</summary>
+    DiagnosisWorld Diagnostics { get; }
 }
 
 /// <summary>데모 세계 (M5 설계 3.4). 기록은 사용자 폴더의 records와 대체 위치(임시 폴더 아래 demo).</summary>
@@ -43,6 +46,10 @@ public sealed class DemoAppWorld : IAppWorld
     }
 
     public DemoWorld World => world;
+
+    private DiagnosisWorld? diagnostics;
+    public DiagnosisWorld Diagnostics => diagnostics ??= new DiagnosisWorld(new DemoDiagnosticProbes(world),
+        DemoDiagnosticProbes.Settings(world.Scenario), new DemoSystemActions(world.Scenario));
     public string Kind => "demo:" + world.Scenario.Name;
     public DateTimeOffset Now => world.TimeBase.Now;
     public IReadOnlyList<string> RecordPaths => [primary.Path!, fallback.Path!];

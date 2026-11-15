@@ -16,6 +16,11 @@ public sealed class LiveAppWorld(string userData) : IAppWorld
     private readonly DiskRecordRoot primary = new(Path.Combine(userData, "records"), "primary");
     private readonly DiskRecordRoot fallback = DiskRecordRoot.Defaults().Fallback;
 
+    private DiagnosisWorld? diagnostics;
+
+    /// <summary>실제 검사기 (M4), 기본 진단 설정, 고정 명령 시스템 동작 (M6 설계 3.3).</summary>
+    public DiagnosisWorld Diagnostics => diagnostics ??= new DiagnosisWorld(new DiagnosticProbes(), new NetPulse.Core.Diagnostics.DiagnosisSettings(), new SystemActions());
+
     public string Kind => "live";
     public DateTimeOffset Now => DateTimeOffset.Now;
     public IReadOnlyList<string> RecordPaths => [primary.Path!, fallback.Path!];

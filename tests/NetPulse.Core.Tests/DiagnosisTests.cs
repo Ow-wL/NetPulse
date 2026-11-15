@@ -80,7 +80,8 @@ public sealed class DiagnosisTests
         Assert.Equal(CheckJudgment.Check, tcp.Judgment);
         Assert.Equal([TargetOutcome.Ok, TargetOutcome.Timeout], tcp.Targets.Select(t => t.Outcome));
         Assert.Equal(10, r.Main.Number);   // 일부만 성공 (2-6)
-        Assert.Contains("t2", r.Main.Found);
+        Assert.Contains("외부 TCP 443 대상 2", r.Main.Found);   // 슬롯 이름 대신 "대상 n" (M6 화면 검토)
+        Assert.DoesNotContain("t2", r.Main.Found);
     }
 
     [Fact]
@@ -210,7 +211,7 @@ public sealed class DiagnosisTests
         foreach (var forbidden in new[] { "192.0.2.254", "1.1.1.1", "8.8.8.8", "microsoft", "google", "msftconnecttest", "ProbeError", "dns-" })
             Assert.DoesNotContain(forbidden, text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("결론:", text);
-        Assert.Contains("t1", text);
+        Assert.Contains("대상 1", text);
     }
 
     [Fact]

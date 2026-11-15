@@ -1,4 +1,4 @@
-namespace NetPulse.Design.Tokens;
+﻿namespace NetPulse.Design.Tokens;
 
 /// <summary>3차 베지어 곡선의 두 제어점.</summary>
 public readonly record struct Easing(double X1, double Y1, double X2, double Y2);
@@ -76,4 +76,12 @@ public static class BenchTokens
     public static readonly TimeSpan PanStep = TimeSpan.FromSeconds(1);
     public static readonly TimeSpan NavStep = TimeSpan.FromMilliseconds(1500);
     public const int PanCount = 10, NavCount = 6;
+
+    // 진단 구간 (M6 설계 5절): 첫 진입 뒤 머무름, 진단 한 번의 제한, 결과 뒤 머무름, 홈 ↔ 진단 6번
+    public static readonly TimeSpan DiagEnter = TimeSpan.FromSeconds(3);
+    public static readonly TimeSpan DiagRunLimit = TimeSpan.FromSeconds(15);
+    public static readonly TimeSpan DiagSettle = TimeSpan.FromSeconds(2);
+    public const int DiagReenterCount = 6;
+    /// <summary>bench의 메모리 표본 간격</summary>
+    public static readonly TimeSpan MemorySample = TimeSpan.FromMilliseconds(500);
 }

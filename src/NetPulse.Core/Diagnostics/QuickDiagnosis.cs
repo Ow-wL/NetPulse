@@ -88,37 +88,51 @@ public sealed record DiagnosisResult(
 /// <summary>빠른 진단 (F1, M4 설계 C). 검사 조율과 판정·결론은 여기, 실제 검사는 검사기.</summary>
 public static class QuickDiagnosis
 {
-    public static async Task<DiagnosisResult> RunAsync(IDiagnosticProbes probes, DiagnosisSettings settings, Func<DateTimeOffset> now, CancellationToken ct = default)
+    /// <param name="progress">검사 하나가 끝날 때마다(제한시간·오류 포함) 그 결과를 알린다 (M6 설계 3.1). 판정·결론·반환값은 그대로</param>
+    public static async Task<DiagnosisResult> RunAsync(IDiagnosticProbes probes, DiagnosisSettings settings, Func<DateTimeOffset> now, CancellationToken ct = default,
+        IProgress<CheckResult>? progress = null)
     {
         var started = now();
+        async Task<CheckResult> Report(Task<CheckResult> check)
+        {
+            var r = await check.ConfigureAwait(false);
+            progress?.Report(r);
+            return r;
+        }
         var adapterTask = Single(CheckId.Adapter, settings.AdapterTimeout, c => probes.AdapterAsync(c), ct);
-        var tcp = Pair(CheckId.Tcp, settings.TcpTimeout, settings.TcpTargets.Take(2).Select(a => (Func<CancellationToken, Task<ProbeOutcomeResult>>)(c => probes.TcpAsync(a, settings.TcpPort, c))).ToArray(), ct);
-        var dns = Pair(CheckId.Dns, settings.DnsTimeout, settings.Domains.Take(2).Select(d => (Func<CancellationToken, Task<ProbeOutcomeResult>>)(c => probes.DnsAsync(d, c))).ToArray(), ct);
-        var https = Pair(CheckId.Https, settings.HttpsTimeout, settings.Domains.Take(2).Select(d => (Func<CancellationToken, Task<ProbeOutcomeResult>>)(c => probes.HttpsAsync(d, c))).ToArray(), ct);
+        var tcp = Report(Pair(CheckId.Tcp, settings.TcpTimeout, settings.TcpTargets.Take(2).Select(a => (Func<CancellationToken, Task<ProbeOutcomeResult>>)(c => probes.TcpAsync(a, settings.TcpPort, c))).ToArray(), ct));
+        var dns = Report(Pair(CheckId.Dns, settings.DnsTimeout, settings.Domains.Take(2).Select(d => (Func<CancellationToken, Task<ProbeOutcomeResult>>)(c => probes.DnsAsync(d, c))).ToArray(), ct));
+        var https = Report(Pair(CheckId.Https, settings.HttpsTimeout, settings.Domains.Take(2).Select(d => (Func<CancellationToken, Task<ProbeOutcomeResult>>)(c => probes.HttpsAsync(d, c))).ToArray(), ct));
         var portalTask = Single(CheckId.Portal, settings.PortalTimeout, c => probes.PortalAsync(settings.PortalUri, settings.PortalExpected, c), ct);
         var linkTask = Single(CheckId.Link, settings.LinkTimeout, c => probes.LinkAsync(c), ct);
+        var portal = Report(Judged(portalTask, r => JudgePortal(r.Value, r.State, r.Elapsed, r.Code)));
+        var link = Report(Judged(linkTask, r => JudgeLink(r.Value, r.State, r.Elapsed, r.Code)));
 
-        var (adapterFacts, adapterState, adapterElapsed, adapterCode) = await adapterTask.ConfigureAwait(false);
-        var adapter = JudgeAdapter(adapterFacts, adapterState, adapterElapsed, adapterCode);
+        var adapterRaw = await adapterTask.ConfigureAwait(false);
+        var adapter = JudgeAdapter(adapterRaw.Value, adapterRaw.State, adapterRaw.Elapsed, adapterRaw.Code);
+        progress?.Report(adapter);
         CheckResult gateway;
-        if (adapterFacts?.Gateway is { } gw)
+        if (adapterRaw.Value?.Gateway is { } gw)
         {
             var (ping, state, elapsed, code) = await Single(CheckId.Gateway, settings.GatewayTimeout, c => probes.PingAsync(gw, c), ct).ConfigureAwait(false);
             gateway = JudgeGateway(ping, state, elapsed, code);
         }
         else gateway = new CheckResult(CheckId.Gateway, CheckJudgment.Unmeasured, false, RunState.NotRun,
-            adapterFacts is null ? "adapter-unmeasured" : "no-gateway", [], TimeSpan.Zero, new Dictionary<string, string>());
+            adapterRaw.Value is null ? "adapter-unmeasured" : "no-gateway", [], TimeSpan.Zero, new Dictionary<string, string>());
+        progress?.Report(gateway);
 
-        var (portal, portalState, portalElapsed, portalCode) = await portalTask.ConfigureAwait(false);
-        var (link, linkState, linkElapsed, linkCode) = await linkTask.ConfigureAwait(false);
         var checks = new List<CheckResult>
         {
             adapter, gateway, await tcp.ConfigureAwait(false), await dns.ConfigureAwait(false), await https.ConfigureAwait(false),
-            JudgePortal(portal, portalState, portalElapsed, portalCode), JudgeLink(link, linkState, linkElapsed, linkCode),
+            await portal.ConfigureAwait(false), await link.ConfigureAwait(false),
         };
         var (main, also, notes) = Conclude(checks);
         return new DiagnosisResult(started, now(), checks, main, also, notes);
     }
+
+    private static async Task<CheckResult> Judged<T>(Task<(T? Value, RunState State, TimeSpan Elapsed, string? Code)> raw,
+        Func<(T? Value, RunState State, TimeSpan Elapsed, string? Code), CheckResult> judge) where T : class =>
+        judge(await raw.ConfigureAwait(false));
 
     // ---------------- 제한시간 걸기 ----------------
 
@@ -273,9 +287,10 @@ public static class QuickDiagnosis
                 "인터넷은 되지만 예외가 관측됐습니다 (공유기 무응답 또는 로그인 확인 응답).", [])),
             (10, new[] { CheckId.Tcp, CheckId.Dns, CheckId.Https }.Any(id => Is(id, CheckJudgment.Check))
                 && !new[] { CheckId.Tcp, CheckId.Dns, CheckId.Https }.Any(id => Is(id, CheckJudgment.Fail)), () => new(10,
-                "일부만 성공했습니다: " + string.Join(", ", new[] { CheckId.Tcp, CheckId.Dns, CheckId.Https }.Where(id => Is(id, CheckJudgment.Check))
-                    .Select(id => CheckName(id) + " " + string.Join("·", C(id).Targets.Where(t => t.Outcome != TargetOutcome.Ok).Select(t => t.Slot))))
-                + "이(가) 안 됐습니다.", ["그 대상만의 문제일 수 있습니다. 다시 검사해 보세요."])),
+                // 슬롯 이름(t1) 대신 "대상 n", 조사 "이(가)" 없이 (M6 화면 검토)
+                "일부만 성공했습니다. 안 된 대상: " + string.Join(", ", new[] { CheckId.Tcp, CheckId.Dns, CheckId.Https }.Where(id => Is(id, CheckJudgment.Check))
+                    .Select(id => CheckName(id) + " " + string.Join("·", C(id).Targets.Where(t => t.Outcome != TargetOutcome.Ok).Select(t => SlotLabel(t.Slot)))))
+                + ".", ["그 대상만의 문제일 수 있습니다. 다시 검사해 보세요."])),
             (11, Is(CheckId.Adapter, CheckJudgment.Normal) && Is(CheckId.Tcp, CheckJudgment.Normal) && Is(CheckId.Dns, CheckJudgment.Normal)
                 && Is(CheckId.Https, CheckJudgment.Normal), () => new(11, "기본 연결은 정상입니다.", ["간헐적으로 끊긴다면 실시간 측정으로 기록하세요."])),
         };
@@ -294,6 +309,10 @@ public static class QuickDiagnosis
         foreach (var c in checks.Where(c => c.PartlyUnconfirmed)) notes.Add("partly-unconfirmed:" + c.Id.ToString().ToLowerInvariant());
         return (main, also, notes);
     }
+
+    /// <summary>대상 슬롯("t1")의 사람이 읽는 이름("대상 1").</summary>
+    public static string SlotLabel(string slot) =>
+        slot.Length > 1 && slot[0] == 't' && int.TryParse(slot.AsSpan(1), out int n) ? "대상 " + n : slot;
 
     public static string CheckName(CheckId id) => id switch
     {
@@ -323,7 +342,7 @@ public static class QuickDiagnosis
         {
             sb.Append("- ").Append(CheckName(c.Id)).Append(": ").Append(JudgmentName(c.Judgment));
             if (c.PartlyUnconfirmed) sb.Append(" (일부 미확인)");
-            if (c.Targets.Count > 1) sb.Append(" [").Append(string.Join(", ", c.Targets.Select(t => t.Slot + " " + OutcomeName(t.Outcome)))).Append(']');
+            if (c.Targets.Count > 1) sb.Append(" [").Append(string.Join(", ", c.Targets.Select(t => SlotLabel(t.Slot) + " " + OutcomeName(t.Outcome)))).Append(']');
             sb.AppendLine();
         }
         sb.Append("결론: ").AppendLine(r.Main.Found);

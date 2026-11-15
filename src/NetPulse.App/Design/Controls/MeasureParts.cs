@@ -60,9 +60,16 @@ public sealed class GlassTextBox : GroupPanel
         AutomationProperties.SetName(Box, label);
         stack.Children.Add(Box);
         error = Fonts.Wrapped("", Typography.Caption, ui.Brushes.Ink);
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S1, Visibility = Visibility.Collapsed };
-        row.Children.Add(Icons.Make(Icons.Alert, ui.Brushes.Bad, Size.IconS));
+        // 오류 글은 입력 칸 폭 안에서 줄을 바꾼다 (가로 StackPanel이면 폭 제한 없이 늘어 옆 단추를 밀어냈다)
+        var row = new Grid { ColumnSpacing = Space.S1, Visibility = Visibility.Collapsed };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var alert = Icons.Make(Icons.Alert, ui.Brushes.Bad, Size.IconS);
+        alert.VerticalAlignment = VerticalAlignment.Top;
+        row.Children.Add(alert);
+        Grid.SetColumn(error, 1);
         row.Children.Add(error);
+        if (!double.IsNaN(width)) stack.Width = width;
         AutomationProperties.SetAutomationId(row, automationId + ".error");
         errorRow = row;
         stack.Children.Add(row);

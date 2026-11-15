@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "name": "diag-ipv4",
+  "seed": 11,
+  "durationRounds": 3600,
+  "startAt": "2026-11-13T13:20:00+09:00",
+  "targets": [
+    {
+      "id": "gateway",
+      "role": "local",
+      "address": "192.0.2.1",
+      "name": "공유기"
+    },
+    {
+      "id": "ext-a",
+      "role": "external",
+      "address": "198.51.100.10",
+      "name": "예시 통신사 A",
+      "provider": "예시 통신사 A"
+    },
+    {
+      "id": "ext-b",
+      "role": "external",
+      "address": "203.0.113.20",
+      "name": "예시 통신사 B",
+      "provider": "예시 통신사 B"
+    }
+  ],
+  "segments": [
+    {
+      "from": 0,
+      "to": 3600,
+      "target": "gateway",
+      "rtt": {
+        "base": 2,
+        "jitter": 1
+      }
+    },
+    {
+      "from": 0,
+      "to": 3600,
+      "target": "ext-a",
+      "rtt": {
+        "base": 18,
+        "jitter": 6
+      }
+    },
+    {
+      "from": 0,
+      "to": 3600,
+      "target": "ext-b",
+      "rtt": {
+        "base": 24,
+        "jitter": 8
+      }
+    }
+  ],
+  "diagnosis": {
+    "gateway": "ok",
+    "tcp": [
+      "fail",
+      "fail"
+    ],
+    "dns": [
+      "ok",
+      "ok"
+    ],
+    "https": [
+      "ok",
+      "ok"
+    ],
+    "link": {
+      "now": "up",
+      "log": "supported",
+      "recentDown": false
+    },
+    "site": {
+      "shop.example": {
+        "dns": "ok",
+        "https": "ok"
+      },
+      "down.example": {
+        "dns": "ok",
+        "https": "fail"
+      },
+      "slow.example": {
+        "dns": "ok",
+        "https": "timeout"
+      }
+    }
+  }
+}

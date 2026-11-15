@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -33,6 +33,9 @@ public sealed class Scenario
 
     /// <summary>선택 (M5): 입력 경계의 고장 주입 (탐지 늦음·실패, 저장 실패, 절전 공백).</summary>
     public ScenarioFaults? Faults { get; init; }
+
+    /// <summary>선택 (M6): 데모 진단 검사기의 덮어쓰기 (M6 설계 3.2). 없는 필드는 시간축 규칙을 따른다.</summary>
+    public ScenarioDiagnosis? Diagnosis { get; init; }
 
     /// <summary>그 회차에 데모 링크가 내려가 있는지.</summary>
     public bool LinkDownAt(long round) => Links?.Any(l => round >= l.From && round < l.To) ?? false;
@@ -110,6 +113,16 @@ public sealed class Scenario
             if ((f.SuspendAt is null) != (f.SuspendSeconds is null)) throw new ScenarioException("faults.suspendAt과 suspendSeconds는 함께 적어야 합니다.");
             if (f.SuspendAt is < 1 || f.SuspendSeconds is < 1) throw new ScenarioException("faults.suspendAt과 suspendSeconds는 1 이상입니다.");
         }
+        if (Diagnosis is { } d) d.Validate();
+    }
+
+    /// <summary>데모에 쓸 수 있는 도메인 (문서용): *.example, *.test, example.com·net·org와 그 하위 (M6 설계 3.2).</summary>
+    public static bool IsDocumentationDomain(string host)
+    {
+        var h = host.Trim().TrimEnd('.').ToLowerInvariant();
+        return h.EndsWith(".example", StringComparison.Ordinal) || h.EndsWith(".test", StringComparison.Ordinal)
+            || h is "example.com" or "example.net" or "example.org"
+            || h.EndsWith(".example.com", StringComparison.Ordinal) || h.EndsWith(".example.net", StringComparison.Ordinal) || h.EndsWith(".example.org", StringComparison.Ordinal);
     }
 
     internal static bool IsDocumentationAddress(IPAddress address)
@@ -178,3 +191,95 @@ public sealed class ScenarioRtt
 }
 
 public sealed class ScenarioException(string message, Exception? inner = null) : Exception(message, inner);
+
+/// <summary>데모 진단 덮어쓰기 (M6 설계 3.2). 결과 값은 ok, fail, error, timeout.</summary>
+public sealed class ScenarioDiagnosis
+{
+    public ScenarioDiagAdapter? Adapter { get; init; }
+    public string? Gateway { get; init; }
+    public IReadOnlyList<string>? Tcp { get; init; }
+    public IReadOnlyList<string>? Dns { get; init; }
+    public IReadOnlyList<string>? Https { get; init; }
+    public ScenarioDiagPortal? Portal { get; init; }
+    public ScenarioDiagLink? Link { get; init; }
+    /// <summary>사이트 점검 도메인 → 결과 (문서용 도메인만).</summary>
+    public IReadOnlyDictionary<string, ScenarioDiagSite>? Site { get; init; }
+    /// <summary>DNS 캐시 비우기의 데모 결과 (ok, fail, timeout). 없으면 ok.</summary>
+    public string? FlushDns { get; init; }
+    /// <summary>검사별 지연 ms (adapter, gateway, tcp, dns, https, portal, link, site, flushDns): 진행 장면용.</summary>
+    public IReadOnlyDictionary<string, int>? DelayMs { get; init; }
+
+    internal static readonly string[] Outcomes = ["ok", "fail", "error", "timeout"];
+    private static readonly string[] DelayKeys = ["adapter", "gateway", "tcp", "dns", "https", "portal", "link", "site", "flushDns"];
+
+    internal void Validate()
+    {
+        void Outcome(string? v, string where)
+        {
+            if (v is not null && !Outcomes.Contains(v)) throw new ScenarioException($"diagnosis.{where}: ok, fail, error, timeout 중 하나입니다.");
+        }
+        void Pair(IReadOnlyList<string>? v, string where)
+        {
+            if (v is null) return;
+            if (v.Count is < 1 or > 2) throw new ScenarioException($"diagnosis.{where}: 대상 1~2개입니다.");
+            foreach (var x in v) Outcome(x, where);
+        }
+        Outcome(Gateway, "gateway");
+        Pair(Tcp, "tcp");
+        Pair(Dns, "dns");
+        Pair(Https, "https");
+        if (FlushDns is not (null or "ok" or "fail" or "timeout")) throw new ScenarioException("diagnosis.flushDns: ok, fail, timeout 중 하나입니다.");
+        if (Portal is { } p && (p.Status is { } st && (st < 100 || st > 599))) throw new ScenarioException("diagnosis.portal.status: 100~599입니다.");
+        if (Portal is { } p2) Outcome(p2.Outcome, "portal.outcome");
+        if (Link is { } l)
+        {
+            if (l.Now is not (null or "up" or "down" or "unknown")) throw new ScenarioException("diagnosis.link.now: up, down, unknown 중 하나입니다.");
+            if (l.Log is not (null or "supported" or "unsupported" or "denied")) throw new ScenarioException("diagnosis.link.log: supported, unsupported, denied 중 하나입니다.");
+        }
+        foreach (var (domain, site) in Site ?? new Dictionary<string, ScenarioDiagSite>())
+        {
+            if (!Scenario.IsDocumentationDomain(domain)) throw new ScenarioException($"diagnosis.site: 데모에는 문서용 도메인만 쓸 수 있습니다: {domain}");
+            Outcome(site.Dns, "site.dns");
+            Outcome(site.Https, "site.https");
+        }
+        foreach (var (key, ms) in DelayMs ?? new Dictionary<string, int>())
+        {
+            if (!DelayKeys.Contains(key)) throw new ScenarioException($"diagnosis.delayMs: 모르는 검사입니다: {key}");
+            if (ms is < 0 or > 30_000) throw new ScenarioException($"diagnosis.delayMs.{key}: 0~30000입니다.");
+        }
+    }
+}
+
+/// <summary>어댑터 덮어쓰기. 적지 않은 필드(null)는 시간축 규칙 값 그대로 (M6 설계 3.2, G4 1라운드 a3).</summary>
+public sealed class ScenarioDiagAdapter
+{
+    public bool? Up { get; init; }
+    public bool? Ipv4 { get; init; }
+    public bool? Apipa { get; init; }
+    public bool? Gateway { get; init; }
+    public bool? Dns { get; init; }
+    /// <summary>false면 경로를 못 찾음 (활성 어댑터 수는 Up이면 1, 아니면 0).</summary>
+    public bool? Route { get; init; }
+}
+
+public sealed class ScenarioDiagPortal
+{
+    /// <summary>요청 결과 (ok면 Status·Body로 판정). 기본 ok.</summary>
+    public string? Outcome { get; init; }
+    public int? Status { get; init; } = 200;
+    public bool Body { get; init; } = true;
+}
+
+/// <summary>링크 덮어쓰기. 적지 않은 필드(null)는 시간축 규칙 값 그대로.</summary>
+public sealed class ScenarioDiagLink
+{
+    public string? Now { get; init; }
+    public string? Log { get; init; }
+    public bool? RecentDown { get; init; }
+}
+
+public sealed class ScenarioDiagSite
+{
+    public string? Dns { get; init; }
+    public string? Https { get; init; }
+}

@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Automation;
 
@@ -164,6 +164,71 @@ public sealed class KeyboardTests
         app.WaitDiag(d => d.GetProperty("dialogOpen").GetBoolean(), o => !o, "Esc → 닫힘");
         app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == "dialog.open", "연 버튼으로 초점 복귀");
         Assert.Equal(0, app.Close());
+    }
+
+    private const ushort Period = 0xBE;
+
+    private static System.Text.Json.JsonElement Sd(System.Text.Json.JsonElement d) => d.GetProperty("screenDiag");
+
+    /// <summary>키 하나씩 글자를 친다 (영문 소문자·마침표만).</summary>
+    private static void TypeText(AppDriver app, string text)
+    {
+        foreach (var ch in text) Press(app, ch == '.' ? Period : (ushort)char.ToUpperInvariant(ch));
+    }
+
+    private static void TabTo(AppDriver app, string id, int limit = 60)
+    {
+        for (int i = 0; i < limit && Focused(app) != id; i++) Press(app, Tab);
+        Assert.Equal(id, Focused(app));
+    }
+
+    [Fact]
+    public void KeyboardAloneDiagnosesExpandsChecksASiteAndFlushes()
+    {
+        // M6 설계 7.2-9·4.5: 시작 Enter, 검사 카드 Space로 펼침, 사이트 점검 입력·Enter, DNS 대화상자 초점은 취소·닫으면 누른 단추로
+        var userData = AppDriver.NewUserData();
+        M5Fixtures.Prepare(userData, "profile");
+        try
+        {
+            using var app = LaunchAny(userData, [.. M5Fixtures.Args("--demo tests:diag-dns --screen diagnose"), "--freeze-motion"]);
+            app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "diagnose", "진단 화면");
+            TabTo(app, "diagnose.start");
+            Press(app, Enter);
+            app.WaitDiag(d => (Sd(d).GetProperty("operation").GetString(), Sd(d).GetProperty("conclusion").ValueKind), x => x == ("None", System.Text.Json.JsonValueKind.Number), "진단 끝 (Enter)");
+            Assert.Equal(3, Sd(app.Diag()).GetProperty("conclusion").GetInt32());
+            Assert.Equal("diagnose.start", Focused(app));   // 실행 중 꺼졌던 시작 단추로 초점이 돌아온다
+
+            TabTo(app, "diagnose.check.dns.toggle");
+            Press(app, Space);
+            app.WaitDiag(d => Sd(d).GetProperty("expanded").EnumerateArray().Select(e => e.GetString()).ToArray(), e => e.Contains("Dns"), "DNS 카드 펼침 (Space)");
+            Press(app, Space);
+            app.WaitDiag(d => Sd(d).GetProperty("expanded").GetArrayLength(), n => n == 0, "다시 접힘");
+
+            TabTo(app, "diagnose.site.input");
+            TypeText(app, "shop.example");
+            Press(app, Enter);
+            app.WaitDiag(d => M5Fixtures.Str(Sd(d), "site", "dns"), s => s.Length > 0, "사이트 점검 (Enter)");
+            Assert.Equal("Normal", M5Fixtures.Str(Sd(app.Diag()), "site", "https"));
+
+            TabTo(app, "diagnose.flush");
+            Press(app, Enter);
+            app.WaitDiag(d => d.GetProperty("dialogOpen").GetBoolean(), o => o, "대화상자 (Enter)");
+            Assert.Equal("dialog.cancel", Focused(app));   // 시스템을 바꾸는 확인이라 초점은 취소
+            Press(app, Enter);
+            app.WaitDiag(d => d.GetProperty("dialogOpen").GetBoolean(), o => !o, "취소");
+            app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == "diagnose.flush", "누른 단추로 초점 복귀");
+            Assert.Equal(0, Sd(app.Diag()).GetProperty("actions").EnumerateArray().Count(a => a.GetString() == "flushDns"));
+
+            Press(app, Enter);
+            app.WaitDiag(d => d.GetProperty("dialogOpen").GetBoolean(), o => o, "다시 열림");
+            PressShiftTab(app);
+            Assert.Equal("dialog.confirm", Focused(app));
+            Press(app, Enter);
+            app.WaitDiag(d => M5Fixtures.Str(Sd(d), "flushResult"), s => s == "ok", "비우고 다시 진단");
+            Assert.Equal(1, Sd(app.Diag()).GetProperty("actions").EnumerateArray().Count(a => a.GetString() == "flushDns"));
+            Assert.Equal(0, app.Close());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
     }
 
     private static class Native

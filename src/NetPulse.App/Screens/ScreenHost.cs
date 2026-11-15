@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using NetPulse.App.Design;
 using NetPulse.App.Design.Controls;
@@ -12,6 +12,8 @@ public sealed class ScreenContext
 {
     public required Ui Ui { get; init; }
     public required MeasurementHost Host { get; init; }
+    /// <summary>진단 수명 (M6).</summary>
+    public required DiagnosisHost Diagnosis { get; init; }
     public required RecentRecords Recent { get; init; }
     public required ToastHost Toasts { get; init; }
     public required DialogHost Dialog { get; init; }
@@ -76,6 +78,9 @@ public sealed class ScreenHost : Grid
     public string? CurrentId => Current?.Id;
 
     public void Register(string id, Func<Screen> create) => factories[id] = create;
+
+    /// <summary>이미 만든 화면 (없으면 null, 만들지 않는다).</summary>
+    public Screen? Prepared(string id) => screens.GetValueOrDefault(id);
 
     public Screen Get(string id)
     {
