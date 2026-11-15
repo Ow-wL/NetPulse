@@ -20,6 +20,8 @@ public sealed record MemoSaveResult(EventWriteState State, bool Latest, bool Tru
 public sealed class RecordMemos(NotesWriter writer, Func<DateTimeOffset> now)
 {
     private readonly object gate = new();
+    /// <summary>세대 발급부터 쓰기 넣기까지를 요청 순서대로 (그 사이 알림 처리를 기다리므로 잠금 대신, G4 M7 2라운드 1).</summary>
+    private readonly SemaphoreSlim order = new(1, 1);
     private long counter;
     private readonly Dictionary<(string Key, string Mark), long> latest = [];
     private readonly Dictionary<(string Key, string Mark), string?> failed = [];
@@ -41,20 +43,27 @@ public sealed class RecordMemos(NotesWriter writer, Func<DateTimeOffset> now)
     {
         var (text, truncated) = SymptomMarks.Clean(memo);
         long generation;
-        lock (gate)
-        {
-            generation = ++counter;
-            latest[(key, mark)] = generation;
-        }
         var folder = NotesFolder(segments);
-        EventWriteState state;
-        if (folder is null) state = EventWriteState.Lost;
-        else
+        Task<EventWriteState>? write = null;
+        // 세대 발급 → 알림 → 쓰기 넣기를 한 요청씩: 앞 요청의 알림 처리가 늦어도 뒤 요청이 먼저 줄 서지 않는다
+        // (그랬으면 직렬 쓰기에 새 글 → 옛 글 순으로 들어가 옛 글이 남았다, G4 M7 2라운드 1). 쓰기 완료는 순서 밖에서 기다린다
+        await order.WaitAsync().ConfigureAwait(false);
+        try
         {
-            // 처리기는 기록 폴더를 찾느라 디스크를 읽을 수 있어 UI 밖에서 부른다. 끝난 뒤에 쓰기를 넣어야 세대 순서가 맞다
-            if (Saving is { } saving) await Task.Run(() => saving(folder, measurementId, mark)).ConfigureAwait(false);
-            state = await writer.WriteAsync(folder, measurementId, mark, markAtMs, now(), text).ConfigureAwait(false);
+            lock (gate)
+            {
+                generation = ++counter;
+                latest[(key, mark)] = generation;
+            }
+            if (folder is not null)
+            {
+                // 처리기는 기록 폴더를 찾느라 디스크를 읽을 수 있어 UI 밖에서 부른다. 끝난 뒤에 쓰기를 넣어야 세대 순서가 맞다
+                if (Saving is { } saving) await Task.Run(() => saving(folder, measurementId, mark)).ConfigureAwait(false);
+                write = writer.WriteAsync(folder, measurementId, mark, markAtMs, now(), text);
+            }
         }
+        finally { order.Release(); }
+        var state = write is null ? EventWriteState.Lost : await write.ConfigureAwait(false);
         bool isLatest;
         lock (gate)
         {

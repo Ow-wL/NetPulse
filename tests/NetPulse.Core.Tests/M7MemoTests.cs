@@ -73,6 +73,34 @@ public sealed class M7MemoTests : IDisposable
     }
 
     [Fact]
+    public async Task ASlowSavingHandlerDoesNotLetTheLaterRequestQueueFirst()
+    {
+        // 앱처럼 저장 시작 알림을 구독한 채: 앞 요청 A의 알림 처리가 멈춘 동안 B를 저장해도 B가 A보다 먼저 줄 서지 않아
+        // 파일에는 B가 마지막으로 남는다 (G4 M7 2라운드 1)
+        var folder = Folder();
+        var memos = New(out _);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+        memos.Saving += (_, _, _) =>
+        {
+            if (Interlocked.Increment(ref calls) != 1) return;
+            entered.SetResult();
+            release.Task.Wait(TestContext.Current.CancellationToken);
+        };
+        var a = memos.SaveAsync("known:x", [folder], Id, "k1", 10_000, "A 옛 글");
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        var b = memos.SaveAsync("known:x", [folder], Id, "k1", 10_000, "B 새 글");
+        await Task.Delay(200, TestContext.Current.CancellationToken);
+        Assert.False(b.IsCompleted);   // A가 줄 서기 전에는 B도 줄 서지 않는다
+        release.SetResult();
+        var results = await Task.WhenAll(a, b);
+        Assert.False(results[0].Latest);
+        Assert.True(results[1].Latest);
+        Assert.Equal("B 새 글", MemoOf(folder));
+    }
+
+    [Fact]
     public async Task FailureKeepsTheTextForLaterAndNotesGoToTheSummarySegment()
     {
         var memos = New(out var saved);

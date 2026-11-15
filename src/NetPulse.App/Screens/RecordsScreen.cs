@@ -43,7 +43,7 @@ public sealed class RecordsScreen : Screen
     private readonly Dictionary<string, string> memoDrafts = [];
     private readonly Dictionary<string, TextBlock> memoStateText = [];
     private string? focusMark;
-    private readonly Dictionary<string, string> memoState = [];
+    private readonly Dictionary<(string Key, string Mark), string> memoState = [];   // (기록 출처, 표시): 같은 표시 ID의 다른 출처와 섞이지 않게 (G4 M7 2라운드 3)
     // 열기·비교 요청 세대: 모드를 바꾸거나 새로 열 때마다 올라간다. 비동기 완료는 자기 세대일 때만 반영한다 (b4)
     private int requestGen;
     private bool syncingTabs;
@@ -135,7 +135,8 @@ public sealed class RecordsScreen : Screen
 
     private async Task OpenWhenListedAsync(string key)
     {
-        int req = requestGen;
+        // 열기를 요청한 순간 새 세대: 두 번 열면 마지막 것만 상세로 (G4 M7 2라운드 2)
+        int req = ++requestGen;
         await Context.Records.RefreshAsync(Context.Host.RunningId);
         DispatcherQueue.TryEnqueue(() => { if (!Context.IsClosing() && req == requestGen) OpenDetail(key, null); });
     }
@@ -263,13 +264,16 @@ public sealed class RecordsScreen : Screen
     /// 줄이 나눠 그려진 뒤에 초점을 준다: 프레임 조각 큐 맨 뒤에 넣어(앞선 줄 만들기가 먼저 끝남) 찾고, 아직 없거나 받지 못하면
     /// 몇 프레임 더 해 본다 (b6: 목록 9번째 줄 뒤·끊김 줄은 다음 프레임에 생겨 초점 복귀가 빠졌다).
     /// </summary>
-    private void FocusLater(string id, Mode expected, int tries = 10)
+    private void FocusLater(string id, Mode expected) => FocusLater(id, expected, requestGen, detailKey, 10);
+
+    /// <param name="gen">예약할 때의 요청 세대, <paramref name="key"/>는 그때의 상세: 그 사이 다른 기록을 열었으면 하지 않는다 (G4 M7 2라운드 4)</param>
+    private void FocusLater(string id, Mode expected, int gen, string? key, int tries)
     {
         OnePerFrame(() =>
         {
-            if (mode != expected) return;
+            if (mode != expected || gen != requestGen || (expected == Mode.Detail && key != detailKey)) return;
             if (FindRow(id) is { } c && c.Focus(FocusState.Programmatic)) return;
-            if (tries > 1) FocusLater(id, expected, tries - 1);
+            if (tries > 1) FocusLater(id, expected, gen, key, tries - 1);
         });
     }
 
@@ -1045,7 +1049,7 @@ public sealed class RecordsScreen : Screen
                 row.Children.Add(box);
                 row.Children.Add(buttons);
                 // 상태 글 자리는 늘 둔다: 저장을 시작하면 다시 그리지 않고 이 글만 바꾼다 (b9: "저장하는 중…"이 화면에 나오지 않았다)
-                string? st = memoState.GetValueOrDefault(m.Mark);
+                string? st = memoState.GetValueOrDefault((detailKey!, m.Mark));
                 var state = Named($"records.mark.{i}.state", st ?? "", Typography.Caption, Ui.Brushes.Muted);
                 state.Visibility = st is null ? Visibility.Collapsed : Visibility.Visible;
                 memoStateText[m.Mark] = state;
@@ -1069,18 +1073,21 @@ public sealed class RecordsScreen : Screen
                     edit.Click += (_, _) => { if (!editing.Contains(mark.Mark)) editing.Add(mark.Mark); focusMark = mark.Mark; Rerender(); };
                     row.Children.Add(edit);
                 }
-                if (memoState.GetValueOrDefault(m.Mark) is { } st) row.Children.Add(Named($"records.mark.{i}.state", st, Typography.Caption, Ui.Brushes.Muted));
+                if (memoState.GetValueOrDefault((detailKey!, m.Mark)) is { } st) row.Children.Add(Named($"records.mark.{i}.state", st, Typography.Caption, Ui.Brushes.Muted));
             }
             stack.Children.Add(row);
         }
         return stack;
     }
 
-    /// <summary>상태 글: 값을 남기고, 지금 칸이 있으면 그 글만 바꾼다 (다시 그리지 않음).</summary>
-    private void SetMemoState(string mark, string text)
+    /// <summary>
+    /// 상태 글: 값을 (기록 출처, 표시)로 남기고, <paramref name="show"/>(그 요청의 상세가 아직 열려 있음)일 때만 지금 칸의 글을 바꾼다
+    /// (다시 그리지 않음). 떠난 상세의 늦은 완료가 다른 기록의 같은 표시 칸을 바꾸지 않게 (G4 M7 2라운드 3).
+    /// </summary>
+    private void SetMemoState(string key, string mark, string text, bool show)
     {
-        memoState[mark] = text;
-        if (memoStateText.TryGetValue(mark, out var t))
+        memoState[(key, mark)] = text;
+        if (show && memoStateText.TryGetValue(mark, out var t))
         {
             t.Text = Fonts.KeepAll(text);
             AutomationProperties.SetName(t, text);
@@ -1096,13 +1103,13 @@ public sealed class RecordsScreen : Screen
         if (item is null) return;
         int req = requestGen;   // 이 상세를 떠나거나 다른 기록을 열면 바뀐다 (b4)
         bool Here() => !Context.IsClosing() && req == requestGen && detailKey == key && mode == Mode.Detail;
-        SetMemoState(mark.Mark, "저장하는 중…");
+        SetMemoState(key, mark.Mark, "저장하는 중…", Here());
         var result = await Context.Memos.SaveAsync(key, item.Entry.Segments, d.Record.Header!.Id, mark.Mark, mark.AtMs, text);
         if (Context.IsClosing()) return;
         if (!result.Latest) return;   // 더 새 요청이 있다: 오래된 완료는 반영하지 않는다
         if (result.State == EventWriteState.Saved)
         {
-            SetMemoState(mark.Mark, result.Truncated ? "저장했습니다 (200자에서 잘라 저장)" : "저장했습니다");
+            SetMemoState(key, mark.Mark, result.Truncated ? "저장했습니다 (200자에서 잘라 저장)" : "저장했습니다", Here());
             // 저장하는 동안 더 고친 글이 있으면 칸과 초안을 남긴다
             if (Here() && (!memoDrafts.TryGetValue(mark.Mark, out var now) || now == text)) { editing.Remove(mark.Mark); memoDrafts.Remove(mark.Mark); }
             await Context.Records.RefreshAsync(Context.Host.RunningId);
@@ -1112,7 +1119,7 @@ public sealed class RecordsScreen : Screen
         }
         else
         {
-            memoState[mark.Mark] = "저장하지 못했습니다";
+            memoState[(key, mark.Mark)] = "저장하지 못했습니다";
             if (Here()) Rerender();   // 칸 오류 + 초안 유지 (초안은 memoDrafts에 그대로)
             else Context.Toasts.Show(ToastKind.Error, "메모를 저장하지 못했습니다", "그 기록을 다시 열면 다시 저장할 수 있습니다.");
         }
