@@ -37,6 +37,11 @@ public sealed class RecordMemos(NotesWriter writer, Func<DateTimeOffset> now)
     public event Action<string, string, string>? Saved;
 
     /// <summary>
+    /// <see cref="Saving"/> 처리기가 던짐 (저장은 계속한다). 진단 기록용: 예외만 넘기고 메모 글·경로는 넘기지 않는다 (G4 M7 4라운드 3).
+    /// </summary>
+    public event Action<Exception>? SavingFailed;
+
+    /// <summary>
     /// 그 기록의 노트 폴더: 요약이 있는 조각 (없으면 마지막 조각). 측정 호스트와 같은 규칙.
     /// </summary>
     public static string? NotesFolder(IReadOnlyList<string> segments) =>
@@ -60,13 +65,15 @@ public sealed class RecordMemos(NotesWriter writer, Func<DateTimeOffset> now)
         }
         try
         {
-            var folder = NotesFolder(segments);
+            string? folder = null;
             Task<EventWriteState>? write = null;
             // 알림 → 쓰기 넣기를 부른 순서대로: 앞 요청의 알림 처리가 늦어도 뒤 요청이 먼저 줄 서지 않는다
             // (그랬으면 직렬 쓰기에 새 글 → 옛 글 순으로 들어가 옛 글이 남았다, G4 M7 2라운드 1). 쓰기 완료는 순서 밖에서 기다린다
             await previous.ConfigureAwait(false);
             try
             {
+                // 폴더 찾기도 순서를 푸는 finally 안에서: 여기서 던져도 뒤 요청이 영원히 기다리지 않는다 (G4 M7 4라운드 2)
+                folder = NotesFolder(segments);
                 if (folder is not null)
                 {
                     // 처리기는 기록 폴더를 찾느라 디스크를 읽을 수 있어 UI 밖에서 부른다. 끝난 뒤에 쓰기를 넣어야 세대 순서가 맞다.
@@ -74,7 +81,7 @@ public sealed class RecordMemos(NotesWriter writer, Func<DateTimeOffset> now)
                     if (Saving is { } saving)
                     {
                         try { await Task.Run(() => saving(folder, measurementId, mark)).ConfigureAwait(false); }
-                        catch (Exception) { }
+                        catch (Exception ex) { SavingFailed?.Invoke(ex); }
                     }
                     write = writer.WriteAsync(folder, measurementId, mark, markAtMs, now(), text);
                 }
@@ -121,6 +128,9 @@ public sealed class RecordMemos(NotesWriter writer, Func<DateTimeOffset> now)
             }
         }
         if (state == EventWriteState.Saved) Saved?.Invoke(folder!, measurementId, mark);
+        // 처리기가 도는 동안 더 새 요청이 들어왔을 수 있다: 돌려줄 최신 여부는 마지막에 다시 본다 (G4 M7 4라운드 1).
+        // 화면은 이것과 별도로 자기 요청 번호를 확인한다 (결과를 받은 뒤 화면에 반영하기까지의 틈)
+        if (isLatest) lock (gate) isLatest = latest.GetValueOrDefault((key, mark)) == generation;
         return new MemoSaveResult(state, isLatest, truncated, text);
     }
 

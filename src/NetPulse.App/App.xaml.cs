@@ -83,6 +83,7 @@ public partial class App : Application
         var memos = new RecordMemos(host.Notes, () => world.Now);
         memos.Saving += host.MemoSavingElsewhere;   // 측정 화면에 남은 옛 초안을 버리고 넣은 옛 쓰기도 건너뛴다 (M7 구현 중 결정 4, G4 M7 1라운드 a1)
         memos.Saved += host.MemoSavedElsewhere;
+        memos.SavingFailed += ex => log?.Write("memoSavingFailed", new { type = ex.GetType().Name });   // 예외 종류만 (글·경로 없음, G4 M7 4라운드 3)
         var resources = new
         {
             fonts = File.Exists(Path.Combine(AppContext.BaseDirectory, "Fonts", "Pretendard-Bold.otf")),

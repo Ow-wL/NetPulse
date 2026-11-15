@@ -158,16 +158,65 @@ public sealed class M7MemoTests : IDisposable
     }
 
     [Fact]
-    public async Task AFailingSavingHandlerStillWritesTheMemo()
+    public async Task AFailingSavingHandlerStillWritesTheMemoAndReportsTheFailure()
     {
         var folder = Folder();
         var memos = New(out var saved);
+        var failures = new List<Exception>();
+        memos.SavingFailed += ex => { lock (failures) failures.Add(ex); };
         memos.Saving += (_, _, _) => throw new InvalidOperationException("처리기 실패");
         var r = await memos.SaveAsync("known:x", [folder], Id, "k1", 10_000, "그래도 쓴다");
         Assert.Equal((EventWriteState.Saved, true), (r.State, r.Latest));
         Assert.Equal("그래도 쓴다", MemoOf(folder));
         Assert.True(await memos.DrainAsync(TimeSpan.Zero));
         Assert.Single(saved);
+        Assert.IsType<InvalidOperationException>(Assert.Single(failures));   // 숨기지 않고 진단 기록으로 (G4 M7 4라운드 3)
+    }
+
+    [Fact]
+    public async Task ARequestMadeWhileTheEarlierSavedHandlerRunsMakesTheEarlierOneNotLatest()
+    {
+        // A가 최신을 판정한 뒤 저장 완료 알림 처리 중에 B를 부르면, A는 최신이 아닌 채로 끝난다 (G4 M7 4라운드 1).
+        // 옛 코드(알림 전에 판정한 값을 그대로 돌려줌)에서는 A가 최신으로 끝난다
+        var folder = Folder();
+        var memos = New(out _);
+        var inSaved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+        memos.Saved += (_, _, _) =>
+        {
+            if (Interlocked.Increment(ref calls) != 1) return;
+            inSaved.SetResult();
+            release.Task.Wait(TestContext.Current.CancellationToken);
+        };
+        var a = memos.SaveAsync("known:x", [folder], Id, "k1", 10_000, "A 옛 글");
+        await inSaved.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        var b = memos.SaveAsync("known:x", [folder], Id, "k1", 10_000, "B 새 글");
+        release.SetResult();
+        Assert.False((await a).Latest);
+        Assert.True((await b).Latest);
+        Assert.Equal("B 새 글", MemoOf(folder));
+    }
+
+    [Fact]
+    public async Task ARequestThatThrowsBeforeItsWriteDoesNotBlockTheNextOne()
+    {
+        // 순서를 잡은 뒤 폴더를 찾다 던져도 순서를 풀어, 뒤 요청과 닫기 대기가 끝난다 (G4 M7 4라운드 2)
+        var folder = Folder();
+        var memos = New(out _);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => memos.SaveAsync("known:x", new ThrowingList(), Id, "k1", 10_000, "못 감"));
+        var r = await memos.SaveAsync("known:x", [folder], Id, "k1", 10_000, "뒤 요청").WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        Assert.Equal((EventWriteState.Saved, true), (r.State, r.Latest));
+        Assert.True(await memos.DrainAsync(TimeSpan.Zero));
+    }
+
+    /// <summary>읽으면 던지는 조각 목록 (폴더 찾기에서 예외를 내기 위함).</summary>
+    private sealed class ThrowingList : IReadOnlyList<string>
+    {
+        public string this[int index] => throw new InvalidOperationException("조각 목록 읽기 실패");
+        public int Count => throw new InvalidOperationException("조각 목록 읽기 실패");
+        public IEnumerator<string> GetEnumerator() => throw new InvalidOperationException("조각 목록 읽기 실패");
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     [Fact]

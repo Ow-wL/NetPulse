@@ -43,6 +43,8 @@ public sealed class RecordsScreen : Screen
     private readonly Dictionary<string, string> memoDrafts = [];
     private readonly Dictionary<string, TextBlock> memoStateText = [];
     private string? focusMark;
+    private readonly Dictionary<(string Key, string Mark), int> memoSaveSeq = [];   // (기록 출처, 표시)별 마지막 저장 요청 번호 (G4 M7 4라운드 1)
+    private int memoSaveCounter;
     private readonly Dictionary<(string Key, string Mark), string> memoState = [];   // (기록 출처, 표시): 같은 표시 ID의 다른 출처와 섞이지 않게 (G4 M7 2라운드 3)
     // 열기·비교 요청 세대: 모드를 바꾸거나 새로 열 때마다 올라간다. 비동기 완료는 자기 세대일 때만 반영한다 (b4)
     private int requestGen;
@@ -1103,19 +1105,24 @@ public sealed class RecordsScreen : Screen
         if (item is null) return;
         int req = requestGen;   // 이 상세를 떠나거나 다른 기록을 열면 바뀐다 (b4)
         bool Here() => !Context.IsClosing() && req == requestGen && detailKey == key && mode == Mode.Detail;
+        // 화면 스레드에서 부르기 전에 번호를 받고, 완료·다시 열기·큐 작업마다 아직 마지막 요청인지 본다:
+        // 저장 쪽 최신 판정과 화면에 반영하는 순간 사이에 다음 저장을 눌러도 앞 완료가 "저장했습니다"를 띄우지 않게 (G4 M7 4라운드 1)
+        int seq = ++memoSaveCounter;
+        memoSaveSeq[(key, mark.Mark)] = seq;
+        bool Mine() => memoSaveSeq.GetValueOrDefault((key, mark.Mark)) == seq;
         SetMemoState(key, mark.Mark, "저장하는 중…", Here());
         var result = await Context.Memos.SaveAsync(key, item.Entry.Segments, d.Record.Header!.Id, mark.Mark, mark.AtMs, text);
         if (Context.IsClosing()) return;
-        if (!result.Latest) return;   // 더 새 요청이 있다: 오래된 완료는 반영하지 않는다
+        if (!result.Latest || !Mine()) return;   // 더 새 요청이 있다: 오래된 완료는 반영하지 않는다
         if (result.State == EventWriteState.Saved)
         {
             SetMemoState(key, mark.Mark, result.Truncated ? "저장했습니다 (200자에서 잘라 저장)" : "저장했습니다", Here());
             // 저장하는 동안 더 고친 글이 있으면 칸과 초안을 남긴다
             if (Here() && (!memoDrafts.TryGetValue(mark.Mark, out var now) || now == text)) { editing.Remove(mark.Mark); memoDrafts.Remove(mark.Mark); }
             await Context.Records.RefreshAsync(Context.Host.RunningId);
-            if (!Here()) return;
+            if (!Here() || !Mine()) return;
             var reopened = await Context.Records.OpenAsync(key);
-            DispatcherQueue.TryEnqueue(() => { if (Here() && reopened is not null) { detail = reopened; Rerender(); } });
+            DispatcherQueue.TryEnqueue(() => { if (Here() && Mine() && reopened is not null) { detail = reopened; Rerender(); } });
         }
         else
         {
