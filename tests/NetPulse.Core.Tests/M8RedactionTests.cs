@@ -165,6 +165,13 @@ public sealed class M8RedactionTests
     [InlineData("\"\\\\nas\\logs\\report,Alice Smith.txt\"", "Alice")]
     [InlineData(@"D:\logs\report;Alice Smith.txt 확인", "Alice")]
     [InlineData(@"\\nas\logs\report,Alice Smith.txt", "Alice")]
+    // G4 M8 4라운드 a1·a2: 번호 안의 날짜 꼴, 날짜가 아닌 숫자 마디, 이름 안 "쉼표·세미콜론 + 공백", 이름 안 작은따옴표
+    [InlineData("010-2026-11-13", "010-2026")]
+    [InlineData("0800-12-34-56", "12-34")]
+    [InlineData(@"D:\logs\report, Alice Smith.txt", "Alice")]
+    [InlineData(@"\\nas\logs\report; Alice Smith.txt", "Alice")]
+    [InlineData(@"D:\Home\O'Brien\x.txt", "Brien")]
+    [InlineData(@"'D:\Home\O'Brien\x.txt' 확인", "Brien")]
     public void MemoPatternsCatchValuesNextToKoreanTextAndPathsWithSpaces(string memo, string leaked)
     {
         var d = Build(Typical(memo), new ReportOptions(IncludeMemos: true));
@@ -192,6 +199,8 @@ public sealed class M8RedactionTests
     [InlineData("2026-11-13 09:00 2026-11-14 09:00")]
     [InlineData("2026-01-05 08:00~2026-01-05 09:30 0.5초")]
     [InlineData("2026/11/13 09:00:15 2026.11.14 10:00")]
+    // G4 M8 4라운드 a3: 메모에 사용자 영역 문자가 있어도 시각·날짜를 지킨다
+    [InlineData("13:20:05 2026-11-13\uE000")]
     public void ClockTimesAndDatesStayInMemos(string memo)
     {
         var text = Build(Typical(memo), new ReportOptions(IncludeMemos: true)).Fields().Single(f => f.Field == "mark.memo").Value;
@@ -207,6 +216,16 @@ public sealed class M8RedactionTests
     {
         var text = Build(Typical(memo), new ReportOptions(IncludeMemos: true)).Fields().Single(f => f.Field == "mark.memo").Value;
         Assert.Equal(expected, text);
+    }
+
+    [Fact]
+    public void AVersionHoldingAFullWidthIdentityIsDropped()
+    {
+        // G4 M8 3라운드 a3: 사업자 이름 "１．０"(전각)은 숫자 버전 "1.0"과 같은 값으로 본다
+        var rec = Typical();
+        var h = rec.Header!;
+        rec = rec with { Header = h with { AppVersion = "1.0+X", Targets = h.Targets.Select(t => t.Id == "isp-a1" ? t with { Provider = "１．０" } : t).ToArray() } };
+        Assert.Equal("NetPulse 알 수 없음", Build(rec).Fields().Single(f => f.Field == "condition.appVersion").Value);
     }
 
     // ---------------- a4: 앱 버전 ----------------

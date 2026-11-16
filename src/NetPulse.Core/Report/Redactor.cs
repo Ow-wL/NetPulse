@@ -103,18 +103,17 @@ public sealed partial class Redactor
     [GeneratedRegex(@"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")]
     private static partial Regex EmailPattern();
 
-    // 따옴표로 둘러싼 경로는 닫는 따옴표까지 통째로 (이름에 쉼표·세미콜론이 있어도, G4 M8 3라운드 a2)
-    [GeneratedRegex(@"""(?:\\\\|[A-Za-z]:[\\/])[^""\r\n]*""|'(?:\\\\|[A-Za-z]:[\\/])[^'\r\n]*'")]
+    // 큰따옴표로 둘러싼 경로는 닫는 따옴표까지 (Windows 이름에는 큰따옴표가 들 수 없다). 작은따옴표는 이름에 들 수 있어("O'Brien") 경계로 쓰지 않는다
+    [GeneratedRegex(@"""(?:\\\\|[A-Za-z]:[\\/])[^""\r\n]*""")]
     private static partial Regex QuotedPathPattern();
 
-    // 경로는 이름에 공백·괄호·대괄호가 들 수 있어 (사용자 폴더 "Hong Gil-Dong", "Shared (Sales)", "Hong[work]") 그 줄의 마지막 경로 구분자까지
-    // 통째로 가리고 (G4 M8 2라운드 a1), 마지막 이름은 따옴표·꺾쇠나 줄 끝, 또는 뒤에 공백이 오는 쉼표·세미콜론까지 가린다
-    // ("report;Alice Smith.txt"는 이름 안의 세미콜론, "a.txt; 다음 글"은 끝, G4 M8 3라운드 a2).
-    // 경로 뒤의 같은 줄 글이 함께 가려질 수 있다 (덜 가리는 것보다 낫다)
-    [GeneratedRegex(@"\\\\(?:[^\r\n""<>]*[\\/])?(?:[^\\/,;""'<>\r\n]|[,;](?![\s,;]|$))*")]
+    // 따옴표 없는 경로는 이름에 공백·괄호·대괄호·쉼표·세미콜론·작은따옴표가 모두 들 수 있어 어디서 끝나는지 알 수 없다.
+    // 그래서 줄 끝(또는 이름에 들 수 없는 큰따옴표·꺾쇠)까지 통째로 가린다 (G4 M8 1~4라운드 a1·a2: 구분 기호로 끝을 정하면 늘 이름 일부가 남았다).
+    // 경로 뒤의 같은 줄 글이 함께 가려진다 — 덜 가리는 것보다 낫다
+    [GeneratedRegex(@"\\\\[^\r\n""<>]*")]
     private static partial Regex UncPattern();
 
-    [GeneratedRegex(@"(?<![A-Za-z0-9])[A-Za-z]:[\\/](?:[^\r\n""<>]*[\\/])?(?:[^\\/,;""'<>\r\n]|[,;](?![\s,;]|$))*")]
+    [GeneratedRegex(@"(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\r\n""<>]*")]
     private static partial Regex DrivePattern();
 
     [GeneratedRegex(@"(?<![0-9A-Fa-f:\-])[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(?:\1[0-9A-Fa-f]{2}){4}(?![0-9A-Fa-f])|(?<![0-9A-Fa-f.])[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}(?![0-9A-Fa-f])")]
@@ -137,26 +136,28 @@ public sealed partial class Redactor
     [GeneratedRegex(@"(?<![\d])(?:\+\d|0)(?:[ .\-]?\d){8,14}(?![\d])")]
     private static partial Regex PhonePattern();
 
-    // 시각(13:20, 13:20:05)과 날짜(2026-11-13, 2026.11.13, 2026/11/13): 전화번호 패턴이 이들을 이어 붙여 가리지 않게 (G4 M8 2라운드 a2)
-    [GeneratedRegex(@"(?<![\d:])\d{1,2}:\d{2}(?::\d{2})?(?![\d])|(?<![\d])\d{4}([-./])\d{1,2}\1\d{1,2}(?![\d])")]
+    // 지킬 시각(13:20, 13:20:05)과 날짜(2026-11-13, 2026.11.13, 2026/11/13): 값이 시각·날짜로 맞고, 앞뒤가 숫자·구분 기호로 이어지지 않는
+    // 홀로 선 토큰만 (G4 M8 2라운드 a2). 더 긴 숫자 줄의 일부("010-2026-11-13", "0800-12-34-56")는 지키지 않는다 (G4 M8 4라운드 a1)
+    [GeneratedRegex(@"(?<![\d:.\-/+])(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?![\d]|[:.\-/]\d)|(?<![\d.\-/+])\d{4}([-./])(?:0?[1-9]|1[0-2])\1(?:0?[1-9]|[12]\d|3[01])(?![\d]|[:.\-/]\d)")]
     private static partial Regex DateTimePattern();
 
-    private const char ShieldBase = '\uE100', ShieldEnd = '\uF8FF';
-
-    /// <summary>시각·날짜를 사용자 영역 문자 하나씩으로 감싸 두고 전화번호를 가린 뒤 되돌린다 (메모에 사용자 영역 문자가 있으면 감싸지 않음).</summary>
+    /// <summary>
+    /// 전화번호 가림. 지킬 시각·날짜의 글자를 같은 길이의 숫자 아닌 글자로 바꾼 사본에서 전화번호 위치를 찾고, 그 위치만 원문에서 가린다
+    /// (원문을 바꿔 끼우지 않아 메모에 어떤 글자가 있어도 같다, G4 M8 4라운드 a3).
+    /// </summary>
     private static string MaskPhones(string s)
     {
-        if (s.Any(c => c is >= '\uE000' and <= '\uF8FF')) return PhonePattern().Replace(s, ReportTexts.Masked);
-        var kept = new List<string>();
-        var shielded = DateTimePattern().Replace(s, m =>
+        var copy = s.ToCharArray();
+        foreach (Match m in DateTimePattern().Matches(s))
+            for (int k = m.Index; k < m.Index + m.Length; k++) copy[k] = 'x';
+        var sb = new StringBuilder(s.Length);
+        int last = 0;
+        foreach (Match m in PhonePattern().Matches(new string(copy)))
         {
-            if (ShieldBase + kept.Count > ShieldEnd) return m.Value;
-            kept.Add(m.Value);
-            return ((char)(ShieldBase + kept.Count - 1)).ToString();
-        });
-        shielded = PhonePattern().Replace(shielded, ReportTexts.Masked);
-        var sb = new StringBuilder(shielded.Length);
-        foreach (var c in shielded) sb.Append(c >= ShieldBase && c - ShieldBase < kept.Count ? kept[c - ShieldBase] : c.ToString());
+            sb.Append(s, last, m.Index - last).Append(ReportTexts.Masked);
+            last = m.Index + m.Length;
+        }
+        sb.Append(s, last, s.Length - last);
         return sb.ToString();
     }
 

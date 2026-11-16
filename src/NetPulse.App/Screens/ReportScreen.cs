@@ -568,11 +568,18 @@ public sealed class ReportScreen : Screen
         bool slow = Context.Options.ReportFail == "slow";
         // 시험: 임시 파일에 절반을 쓴 뒤 멈춰 있는다 (쓰는 중 닫기, G4 M8 2라운드 b1)
         // hold: 취소되면 곧 풀림. hold-long: 취소를 무시하고 닫기의 공통 한도보다 오래 멈춤 (닫기가 한도 없이 정리를 기다리는지 시험)
+        // 멈춘 곳에 닿으면 진단을 UI 스레드에 다시 게시한다 (내보내기 시작의 진단 게시가 먼저 끝났어도 시험이 신호를 받게, G4 M8 4라운드 b)
         exportHolding = false;
+        var ui = DispatcherQueue;
+        void Reached()
+        {
+            exportHolding = true;
+            ui.TryEnqueue(() => Context.QueueDiag());
+        }
         Action<CancellationToken>? hold = Context.Options.ReportFail switch
         {
-            "hold" => t => { exportHolding = true; t.WaitHandle.WaitOne(Waits.ReportSlowTest); },
-            "hold-long" => _ => { exportHolding = true; Thread.Sleep(Waits.ReportHoldPastClose); },
+            "hold" => t => { Reached(); t.WaitHandle.WaitOne(Waits.ReportSlowTest); },
+            "hold-long" => _ => { Reached(); Thread.Sleep(Waits.ReportHoldPastClose); },
             _ => null,
         };
         // 내보내기는 앱 종료 절차가 기다린다 (StopExportAsync): 취소를 보내면 쓰기 전이든 쓰는 중이든 멈추고 임시 파일을 지운다 (G4 M8 1·2라운드 b1)
