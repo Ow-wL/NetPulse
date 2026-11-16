@@ -156,4 +156,48 @@ public sealed class M8RequestFileTests : IDisposable
         var r = ReportFile.Write(path, "<p>x</p>", overwrite: false);
         Assert.Equal(ReportWriteError.Failed, r.Error);
     }
+
+    // ---------------- G4 1라운드 a2·a3 ----------------
+
+    [Fact]
+    public void TheSameRequestAgainBlocksExportUntilItCompletes()
+    {
+        var q = new ReportRequests();
+        var a = q.Begin("k", "s1", new ReportOptions());
+        Assert.True(q.Complete(a, Doc(a)));
+        var again = q.Begin("k", "s1", new ReportOptions());   // 같은 열쇠·도장·옵션
+        Assert.Equal(ReportState.Building, q.State);
+        Assert.Null(q.ForExport());
+        Assert.False(q.Complete(a, Doc(a)));
+        Assert.True(q.Complete(again, Doc(again)));
+        Assert.NotNull(q.ForExport());
+
+        // A → B → A로 빠르게 되돌려도 마지막 요청이 끝나기 전에는 내보내지 않는다
+        var b = q.Begin("k", "s1", new ReportOptions(EpisodeDetails: 1));
+        var back = q.Begin("k", "s1", new ReportOptions());
+        Assert.Null(q.ForExport());
+        Assert.False(q.Complete(b, Doc(b)));
+        Assert.True(q.Complete(back, Doc(back)));
+        Assert.NotNull(q.ForExport());
+    }
+
+    [Fact]
+    public void AStampChangeWhileBuildingRejectsTheOldCompletion()
+    {
+        var q = new ReportRequests();
+        var r = q.Begin("k", "s1", new ReportOptions());
+        Assert.True(q.StampChanged("k", "s2"));   // 처음 만드는 중 (게시 문서 없음)
+        Assert.False(q.Complete(r, Doc(r)));
+        Assert.Null(q.ForExport());
+        var fresh = q.Begin("k", "s2", new ReportOptions());
+        Assert.True(q.Complete(fresh, Doc(fresh)));
+        Assert.Equal(ReportState.Ready, q.State);
+
+        // 게시 문서가 있을 때 바뀌고, 그 뒤 옛 도장의 요청이 끝나도 게시하지 않는다
+        var old = q.Begin("k", "s2", new ReportOptions(EpisodeDetails: 2));
+        Assert.True(q.StampChanged("k", "s3"));
+        Assert.False(q.Complete(old, Doc(old)));
+        Assert.Equal(ReportState.Stale, q.State);
+        Assert.Null(q.ForExport());
+    }
 }

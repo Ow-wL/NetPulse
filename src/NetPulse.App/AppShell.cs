@@ -374,7 +374,9 @@ public sealed partial class AppShell : Window
             // 기록 화면의 메모 저장은 쓰기 큐에 들어가기 전(저장 시작 알림·앞 요청 대기)일 수 있어 호스트 종료와 함께 따로 기다린다
             // (호스트는 쓰기 큐만 기다린다, G4 M7 3라운드 1). 둘은 세대로 서로의 옛 글을 건너뛰므로 동시에 해도 된다
             var memoWrites = memos.DrainAsync(Waits.CloseWrites);
-            var shutdown = Task.WhenAll(host.ShutdownAsync(), memoWrites);
+            // 리포트 내보내기도 기다린다: 쓰는 중 프로세스가 끝나면 (가리지 않은) 임시 파일이 남을 수 있다 (G4 M8 1라운드 b1)
+            var reportStop = screens.Prepared("report") is ReportScreen report ? report.StopExportAsync() : Task.CompletedTask;
+            var shutdown = Task.WhenAll(host.ShutdownAsync(), memoWrites, reportStop);
             if (await Task.WhenAny(shutdown, Task.Delay(Waits.CloseWrites + Waits.CloseWrites + Waits.CloseWrites)) != shutdown)
                 log.Write("closeTimeout", new { state = host.Snapshot.State.ToString() });
             if (memoWrites.IsCompleted && !memoWrites.Result) log.Write("memoCloseTimeout", new { });

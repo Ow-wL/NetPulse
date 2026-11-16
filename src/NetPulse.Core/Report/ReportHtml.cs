@@ -168,9 +168,18 @@ svg.timeline { width: 100%; height: auto; font-family: "Segoe UI", "Malgun Gothi
 
     // ---------------- 검사 (시험과 내보내기 전 확인이 같이 쓴다) ----------------
 
-    private static readonly HashSet<string> BannedElements = new(StringComparer.OrdinalIgnoreCase)
+    /// <summary>허용 목록 (G4 M8 1라운드 a6): 이 문서가 쓰는 요소·속성만. 그 밖은 모두 문제.</summary>
+    private static readonly HashSet<string> AllowedElements = new(StringComparer.Ordinal)
     {
-        "script", "link", "iframe", "object", "embed", "img", "image", "foreignObject", "base", "frame", "frameset", "audio", "video", "source", "use",
+        "html", "head", "meta", "title", "style", "body", "main", "header", "section", "h1", "h2", "h3", "p", "span", "dl", "div", "dt", "dd",
+        "table", "caption", "thead", "tbody", "tr", "th", "td", "figure", "svg", "desc", "defs", "pattern", "rect", "line", "circle", "polyline", "text",
+    };
+
+    private static readonly HashSet<string> AllowedAttributes = new(StringComparer.Ordinal)
+    {
+        "lang", "charset", "name", "content", "class", "id", "role", "scope", "colspan", "data-field", "aria-labelledby", "aria-label", "xmlns",
+        "viewBox", "width", "height", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "fill", "stroke", "stroke-width", "stroke-dasharray", "points",
+        "patternUnits", "patternTransform", "text-anchor",
     };
 
     private static XmlReader Reader(string html) => XmlReader.Create(new StringReader(html), new XmlReaderSettings
@@ -194,7 +203,7 @@ svg.timeline { width: 100%; height: auto; font-family: "Segoe UI", "Malgun Gothi
                 switch (r.NodeType)
                 {
                     case XmlNodeType.Element:
-                        if (BannedElements.Contains(r.LocalName)) problems.Add("요소 " + r.LocalName);
+                        if (!AllowedElements.Contains(r.LocalName)) problems.Add("요소 " + r.LocalName);
                         inStyle = r.LocalName == "style" && !r.IsEmptyElement;
                         if (r.MoveToFirstAttribute())
                         {
@@ -202,6 +211,7 @@ svg.timeline { width: 100%; height: auto; font-family: "Segoe UI", "Malgun Gothi
                             {
                                 string name = r.Name, value = r.Value;
                                 string local = r.LocalName.ToLowerInvariant();
+                                if (!AllowedAttributes.Contains(r.LocalName)) problems.Add("허용하지 않는 속성 " + name);
                                 if (local.StartsWith("on", StringComparison.Ordinal)) problems.Add("이벤트 속성 " + name);
                                 if (local is "href" or "src" or "action" or "formaction" or "srcset" or "poster" or "data" && !value.StartsWith('#'))
                                     problems.Add("외부 참조 속성 " + name);
@@ -233,6 +243,7 @@ svg.timeline { width: 100%; height: auto; font-family: "Segoe UI", "Malgun Gothi
     private static void CheckCss(string css, List<string> problems)
     {
         if (css.Contains("@import", StringComparison.OrdinalIgnoreCase)) problems.Add("CSS @import");
+        if (css.Contains('\\')) problems.Add("CSS 이스케이프");   // \75 rl( 같은 꼴로 url(을 숨길 수 있다
         int i = 0;
         while ((i = css.IndexOf("url(", i, StringComparison.OrdinalIgnoreCase)) >= 0)
         {

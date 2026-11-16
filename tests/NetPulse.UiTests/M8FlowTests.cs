@@ -105,6 +105,7 @@ public sealed class M8FlowTests
                 Assert.Equal(0, app.Close());
             }
             M7Fixtures.AddMark(userData, id, 95_000, Memo);
+            SaveDiagnosisDuring(userData, id);
             using (var app = Launch(userData, "--demo", "outage-long", "--screen", "records", "--report-out", outDir))
             {
                 app.WaitDiag(d => Has(d, "rows") && Sd(d).GetProperty("analyzing").GetInt32() == 0 && Sd(d).GetProperty("rows").GetArrayLength() > 0, b => b, "기록 목록");
@@ -129,6 +130,10 @@ public sealed class M8FlowTests
                 Assert.Empty(ReportHtml.Verify(html));
                 // 미리 보기 글 순서 = 파일 글 순서 (공백을 빼고 이어 붙여 비교: 조각 경계의 공백만 다를 수 있음)
                 Assert.Equal(Squash(ReportHtml.BodyTexts(html)), Squash(PreviewTexts(app)));
+                // 표는 행 이름으로 읽힌다 (설계 4.3): 첫 끊김 줄의 이름에 열 이름과 값이 함께
+                var rowNames = app.Window.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, "report.table.row"))
+                    .Cast<AutomationElement>().Select(e => e.Current.Name).ToArray();
+                Assert.Contains(rowNames, n => n.StartsWith("번호 1, 시작 ", StringComparison.Ordinal) && n.Contains(", 판정 ", StringComparison.Ordinal));
                 Assert.Equal(0, app.Close());
 
                 var (record, a) = Reanalyze(userData, id);
@@ -162,11 +167,83 @@ public sealed class M8FlowTests
                 var marks = SymptomMarks.FromEvents(record.Events, record.NoteLines).Marks.OrderBy(m => m.AtMs).ToArray();
                 Assert.Equal(marks.Select(m => Clock(m.Wall)), Values(fields, "mark.time"));
                 Assert.Equal(marks.Select(m => m.Memo ?? "메모 없음"), Values(fields, "mark.memo"));
+                // 요약 (설계 7.2-1): 시작·끝 시각, 최장 끊김 — 시험이 기록 값에서 직접 만든 글
+                string Full(DateTimeOffset w) => w.ToOffset(TimeSpan.FromMinutes(h.UtcOffsetMinutes)).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
+                    + " (UTC" + (h.UtcOffsetMinutes < 0 ? "-" : "+") + TimeSpan.FromMinutes(Math.Abs(h.UtcOffsetMinutes)).ToString(@"hh\:mm", CultureInfo.InvariantCulture) + ")";
+                Assert.Equal([Full(h.StartedAt)], Values(fields, "summary.start"));
+                Assert.Equal([Full(record.Summary.EndedAt)], Values(fields, "summary.end"));
+                var longest = a.Episodes.OrderByDescending(e => e.MinDurationMs).ThenBy(e => e.FirstRound).First();
+                Assert.Equal([RecordView.Duration(longest)], Values(fields, "summary.longest"));
+                // 끊김: 길이 범위·판정·후보 (하위 구간이 하나인 끊김)
+                Assert.Equal(a.Episodes.Select(RecordView.Duration), Values(fields, "episode.duration"));
+                Assert.Equal(a.Episodes.Select(e => e.Parts.Count > 1 ? "하위 구간마다 아래 줄에" : RecordView.CandidateText(e.Parts[0].Candidate)), Values(fields, "episode.candidate"));
+                // 대상별 평균·최대 지연
+                Assert.Equal(stats.Select(s => s.AvgRttMs is double v ? PathMapModel.Ms(v) : "값 없음"), Values(fields, "target.avg"));
+                Assert.Equal(stats.Select(s => s.MaxRttMs is double v ? PathMapModel.Ms(v) : "값 없음"), Values(fields, "target.max"));
+                // 링크 근거: 네 상태 이름 (기획서 6.2 R2)
+                string LinkName(NetPulse.Core.Evidence.LinkDisplay x) => x switch
+                {
+                    NetPulse.Core.Evidence.LinkDisplay.Down => "끊김 관측", NetPulse.Core.Evidence.LinkDisplay.Denied => "접근 거부",
+                    NetPulse.Core.Evidence.LinkDisplay.ObservedNone => "관측했으나 이벤트 없음", _ => "수집 미지원",
+                };
+                Assert.Equal(a.Links.Summaries.Select(x => LinkName(x.Display)), Values(fields, "link.state"));
+                // 경로 유형: 대상마다 첫 경로 이벤트의 유형
+                string RouteName(string? kind, bool ok) => !ok ? "경로 없음" : kind switch { "wired" => "유선", "wireless" => "Wi‑Fi", null => "알 수 없음", _ => "기타" };
+                var firstRoutes = targets.Select(t => record.Events.FirstOrDefault(e => (string?)e["type"] == "route" && (string?)e["target"] == t.Id)).ToArray();
+                Assert.Equal(firstRoutes.Select(e => e is null ? "기록 없음" : RouteName((string?)e["kind"], (string?)e["status"] == "ok")), Values(fields, "route.start"));
+                // 측정 조건: 방식·포트·예상 연결·기록 상태
+                Assert.Equal(targets.Select(t => t.Method.Kind == NetPulse.Core.Targets.ProbeMethodKind.Icmp ? "Ping" : "TCP"), Values(fields, "condition.target.method"));
+                Assert.Equal(targets.Select(t => t.Method.Kind == NetPulse.Core.Targets.ProbeMethodKind.Tcp ? t.Method.Port.ToString(CultureInfo.InvariantCulture) : "없음"), Values(fields, "condition.target.port"));
+                Assert.Equal([h.Expected switch { NetPulse.Core.Targets.ExpectedConnection.Wired => "유선", NetPulse.Core.Targets.ExpectedConnection.Wireless => "Wi‑Fi", NetPulse.Core.Targets.ExpectedConnection.Any => "상관없음", _ => "기록 없음" }],
+                    Values(fields, "condition.expected"));
+                Assert.Equal([record.Damage.Total == 0 && record.Damage.DamagedEvents == 0 && record.MissingSegments.Count == 0 && record.MissingNotice is null ? "손상 없음" : "알림"],
+                    Values(fields, "condition.damage").Select(v => v.StartsWith("알림", StringComparison.Ordinal) ? "알림" : v));
+                // 저장 진단: 결론 머리말과 검사 일곱의 이름·판정 (저장된 기록을 다시 읽어)
+                var stored = new NetPulse.Core.Live.DiagnosisStore(Path.Combine(userData, "diagnoses")).List().Items.Select(x => x.Stored).Single(x => x.MeasurementId == id);
+                Assert.Equal([NetPulse.Core.Diagnostics.DiagnosisTexts.Head(stored.MainConclusion).Head], Values(fields, "diagnosis.head"));
+                Assert.Equal(stored.Checks.Select(c => NetPulse.Core.Diagnostics.QuickDiagnosis.CheckName(c.Id)), Values(fields, "diagnosis.check.name"));
+                Assert.Equal(stored.Checks.Select(c => NetPulse.Core.Diagnostics.QuickDiagnosis.JudgmentName(c.Judgment) + (c.PartlyUnconfirmed ? " (일부 미확인)" : "")), Values(fields, "diagnosis.check.judgment"));
                 // 가린 리포트: 원본 식별 값 없음
                 foreach (var v in Strong(record)) Assert.False(html.Contains(v, StringComparison.OrdinalIgnoreCase), "남은 값: " + v);
                 NoNamesInRecordFields(record, fields);
                 Record("flow-report", new { id, episodes = a.Episodes.Count, fields = fields.Count, bytes = new FileInfo(file).Length });
             }
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
+    /// <summary>측정 중에 한 진단 기록 하나 (데모 진단을 돌려 그 측정 ID로 저장, 시각은 측정 안).</summary>
+    private static void SaveDiagnosisDuring(string userData, string measurementId)
+    {
+        var scenario = M5Fixtures.Load("diag-outside");
+        var at = M5Fixtures.DemoNow.AddMinutes(-1);
+        var tb = new NetPulse.Core.Demo.DemoTimeBase(at, 1);
+        tb.Freeze(TimeSpan.FromSeconds(10));
+        var world = new NetPulse.Core.Demo.DemoWorld(scenario, tb);
+        var settings = NetPulse.Core.Demo.DemoDiagnosticProbes.Settings(scenario);
+        var result = NetPulse.Core.Diagnostics.QuickDiagnosis.RunAsync(new NetPulse.Core.Demo.DemoDiagnosticProbes(world), settings, () => at).GetAwaiter().GetResult();
+        var save = new NetPulse.Core.Live.DiagnosisStore(Path.Combine(userData, "diagnoses")).Save(result, "test", measurementId);
+        Assert.Null(save.Error);
+    }
+
+    // ---------------- 닫기 (G4 M8 1라운드 b1) ----------------
+
+    [Fact]
+    public void ClosingDuringAnExportLeavesNoTempFile()
+    {
+        var userData = AppDriver.NewUserData();
+        var outDir = OutDir("close");
+        try
+        {
+            M5Fixtures.SaveProfile(userData, "outage-long");
+            M5Fixtures.MakeRecord(userData, "outage-long", M5Fixtures.DemoNow.AddHours(-2), 3);
+            using var app = Launch(userData, "--screen", "report", "--report-out", outDir, "--report-fail", "slow");
+            WaitReady(app);
+            app.Invoke("report.export");
+            app.WaitDiag(d => Sd(d).GetProperty("exporting").GetBoolean(), b => b, "내보내는 중");
+            Assert.Equal(0, app.Close());
+            Assert.Empty(Directory.GetFiles(outDir));   // 임시 파일도 결과 파일도 없음 (쓰기 전에 취소)
+            Assert.Contains(app.ReadLog(), e => e.GetProperty("kind").GetString() == "reportExportCancelled");
         }
         finally { AppDriver.DeleteUserData(userData); }
     }

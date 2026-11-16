@@ -450,7 +450,7 @@ public static class ReportBuilder
                 new("예상 연결", ReportRun.Gen(ReportTexts.Expected(header.Expected)), "condition.expected"),
                 new("계획한 길이", ReportRun.Gen(TimelineModel.Seconds(header.PlannedMs)), "condition.planned"),
                 new("기록 상태", ReportRun.Gen(damage.Count == 0 ? "손상 없음" : $"알림 {damage.Count}건"), "condition.damage"),
-                new("측정한 앱", ReportRun.Gen("NetPulse " + header.AppVersion), "condition.appVersion"),
+                new("측정한 앱", ReportRun.Gen("NetPulse " + SafeVersion(header.AppVersion)), "condition.appVersion"),
                 new("분석기 버전", ReportRun.Gen(a.AnalyzerVersion.ToString(CultureInfo.InvariantCulture)), "condition.analyzer"),
                 new("리포트를 만든 앱", ReportRun.Gen("NetPulse " + input.AppVersion), "condition.reportApp"),
                 new("만든 시각", ReportRun.Gen(ReportTexts.DateTime(input.CreatedAt, header.UtcOffsetMinutes)), "condition.created"),
@@ -458,6 +458,15 @@ public static class ReportBuilder
             ]));
             foreach (var n in damage) blocks.Add(new ReportParagraph(n, ParagraphKind.Warning));
             return blocks;
+        }
+
+        /// <summary>
+        /// 기록의 앱 버전은 기록에서 온 글이다: 숫자·영문·점·더하기·빼기 32자까지이고 원본 식별 값을 담지 않을 때만 쓰고, 아니면 "알 수 없음" (G4 M8 1라운드 a4).
+        /// </summary>
+        private string SafeVersion(string v)
+        {
+            bool shape = v.Length is > 0 and <= 32 && v.All(c => c is (>= '0' and <= '9') or (>= 'a' and <= 'z') or (>= 'A' and <= 'Z') or '.' or '+' or '-');
+            return shape && !red.Identities.Any(i => i.Value.Length >= 2 && Redactor.Contains(v, i.Value)) ? v : "알 수 없음";
         }
 
         private static IReadOnlyList<ReportRun> Cols(params string[] names) => names.Select(ReportRun.Gen).ToArray();

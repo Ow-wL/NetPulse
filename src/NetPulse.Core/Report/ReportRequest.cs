@@ -32,7 +32,9 @@ public sealed class ReportRequests
     private int number;
     private ReportRequest? latest;
     private ReportDocument? published;
+    private int publishedNumber;
     private bool stale;
+    private readonly Dictionary<string, string> knownStamp = [];   // 열쇠별 마지막으로 알려진 도장 (만드는 중 바뀐 것도 기억, G4 M8 1라운드 a3)
     private object? failure;
 
     /// <summary>상태가 바뀜 (아무 스레드).</summary>
@@ -53,7 +55,8 @@ public sealed class ReportRequests
             {
                 if (latest is null) return ReportState.Idle;
                 if (failure is not null) return ReportState.Failed;
-                if (published is null || !Matches(published, latest)) return ReportState.Building;
+                if (stale) return ReportState.Stale;   // 도장이 바뀜: 다시 만들 때까지 (만드는 중보다 먼저 알린다)
+                if (published is null || publishedNumber != latest.Number || !Matches(published, latest)) return ReportState.Building;
                 return stale ? ReportState.Stale : ReportState.Ready;
             }
         }
@@ -74,6 +77,7 @@ public sealed class ReportRequests
             latest = r;
             failure = null;
             stale = false;
+            knownStamp[key] = stamp;
         }
         Changed?.Invoke();
         return r;
@@ -85,7 +89,10 @@ public sealed class ReportRequests
         lock (gate)
         {
             if (latest is null || r.Number != latest.Number) return false;
+            // 만드는 동안 그 기록의 도장이 바뀌었으면 게시하지 않는다 (오래된 기록으로 만든 문서)
+            if (knownStamp.TryGetValue(r.Key, out var now) && now != r.Stamp) { stale = true; return false; }
             published = d;
+            publishedNumber = r.Number;
             stale = false;
             failure = null;
         }
@@ -110,7 +117,11 @@ public sealed class ReportRequests
     {
         lock (gate)
         {
-            if (published is null || published.SourceKey != key || published.Stamp == stamp || stale) return false;
+            knownStamp[key] = stamp;
+            bool latestChanged = latest is { } l && l.Key == key && l.Stamp != stamp;
+            bool publishedChanged = published is { } p && p.SourceKey == key && p.Stamp != stamp;
+            if (!latestChanged && !publishedChanged) return false;
+            if (stale) return false;
             stale = true;
         }
         Changed?.Invoke();
@@ -122,7 +133,8 @@ public sealed class ReportRequests
     {
         lock (gate)
         {
-            if (latest is null || failure is not null || stale || published is null || !Matches(published, latest)) return null;
+            // 같은 조건으로 다시 요청해도 그 요청이 끝나기 전에는 앞 문서를 내보내지 않는다 (요청 번호로, G4 M8 1라운드 a2)
+            if (latest is null || failure is not null || stale || published is null || publishedNumber != latest.Number || !Matches(published, latest)) return null;
             return published;
         }
     }

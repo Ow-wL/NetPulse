@@ -96,26 +96,33 @@ public sealed partial class Redactor
 
     // ---------------- 메모 ----------------
 
-    [GeneratedRegex(@"\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s/?#""'<>]+")]
+    // 경계는 \b 대신 ASCII 글자 기준 (한국어는 \w라서 "링크https://"·"192.0.2.23에"에서 \b가 성립하지 않았다, G4 M8 1라운드 a1)
+    [GeneratedRegex(@"(?<![A-Za-z0-9+.\-])[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s/?#""'<>]+")]
     private static partial Regex UrlPattern();
 
     [GeneratedRegex(@"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")]
     private static partial Regex EmailPattern();
 
-    [GeneratedRegex(@"\\\\[^\s\\]+(\\[^\s]*)?")]
+    // 경로는 공백이 든 이름(사용자 폴더 "Hong Gil-Dong")이 있어 공백에서 끊지 않고 구분 기호(쉼표·세미콜론·따옴표·괄호)나 메모 끝까지 가린다.
+    // 경로 뒤의 같은 마디 글이 함께 가려질 수 있다 (덜 가리는 것보다 낫다)
+    [GeneratedRegex(@"\\\\[^,;""'<>()\[\]]+")]
     private static partial Regex UncPattern();
 
-    [GeneratedRegex(@"\b[A-Za-z]:[\\/][^\s]*")]
+    [GeneratedRegex(@"(?<![A-Za-z0-9])[A-Za-z]:[\\/][^,;""'<>()\[\]]*")]
     private static partial Regex DrivePattern();
 
-    [GeneratedRegex(@"\b[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(?:\1[0-9A-Fa-f]{2}){4}\b|\b[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\b")]
+    [GeneratedRegex(@"(?<![0-9A-Fa-f:\-])[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(?:\1[0-9A-Fa-f]{2}){4}(?![0-9A-Fa-f])|(?<![0-9A-Fa-f.])[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}(?![0-9A-Fa-f])")]
     private static partial Regex MacPattern();
 
+    // IPv4가 든 IPv6 (::ffff:198.51.100.77): IPv6 패턴이 IPv4 앞에서 끊기지 않게 먼저 통째로
+    [GeneratedRegex(@"(?<![0-9A-Za-z:])(?:[0-9A-Fa-f]{0,4}:){2,6}\d{1,3}(?:\.\d{1,3}){3}(?![0-9])")]
+    private static partial Regex Ipv6With4Pattern();
+
     // IPv6: 콜론 셋 이상이거나 "::" (시각 13:20:05는 콜론 둘이라 걸리지 않음)
-    [GeneratedRegex(@"(?<![0-9A-Za-z:])(?:[0-9A-Fa-f]{0,4}:){3,7}[0-9A-Fa-f]{0,4}(?:%\w+)?(?![0-9A-Za-z:])|(?<![0-9A-Za-z:])[0-9A-Fa-f]{0,4}::(?:[0-9A-Fa-f]{1,4}:?){0,6}(?:%\w+)?(?![0-9A-Za-z:])")]
+    [GeneratedRegex(@"(?<![0-9A-Za-z:])(?:[0-9A-Fa-f]{0,4}:){3,7}[0-9A-Fa-f]{0,4}(?:%[0-9A-Za-z]+)?(?![0-9A-Za-z:.])|(?<![0-9A-Za-z:])[0-9A-Fa-f]{0,4}::(?:[0-9A-Fa-f]{1,4}:?){0,6}(?:%[0-9A-Za-z]+)?(?![0-9A-Za-z:.])")]
     private static partial Regex Ipv6Pattern();
 
-    [GeneratedRegex(@"\b\d{1,3}(?:\.\d{1,3}){3}\b")]
+    [GeneratedRegex(@"(?<![0-9.])\d{1,3}(?:\.\d{1,3}){3}(?![0-9]|\.[0-9])")]
     private static partial Regex Ipv4Pattern();
 
     // 전화번호 꼴: +나 0으로 시작해 숫자 9~15개가 공백·점·줄표로만 이어진 것 (날짜 "2026-11-13 13시"는 2로 시작해 걸리지 않음)
@@ -131,6 +138,7 @@ public sealed partial class Redactor
         s = UncPattern().Replace(s, ReportTexts.Masked);
         s = DrivePattern().Replace(s, ReportTexts.Masked);
         s = MacPattern().Replace(s, ReportTexts.Masked);
+        s = Ipv6With4Pattern().Replace(s, ReportTexts.Masked);
         s = Ipv6Pattern().Replace(s, m => m.Value.Count(c => c == ':') >= 2 ? ReportTexts.Masked : m.Value);
         s = Ipv4Pattern().Replace(s, ReportTexts.Masked);
         s = PhonePattern().Replace(s, ReportTexts.Masked);

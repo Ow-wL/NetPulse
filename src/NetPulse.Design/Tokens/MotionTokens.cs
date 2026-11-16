@@ -35,6 +35,8 @@ public static class FrameBudget
 {
     /// <summary>나눠 그리기(M8 리포트 미리 보기)가 한 프레임에 쓰는 시간</summary>
     public static readonly TimeSpan PieceSlice = TimeSpan.FromMilliseconds(3);
+    /// <summary>리포트 미리 보기의 표를 이만큼 줄씩 나눠 붙인다 (M8 bench)</summary>
+    public const int ReportRowsPerPiece = 10;
 
     /// <summary>"멈칫"으로 세는 간격 (ms)</summary>
     public const double Hitch = 33;

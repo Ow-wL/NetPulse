@@ -129,7 +129,8 @@ public sealed class ReportScreen : Screen
         Grid.SetRow(scroll, 1);
         Children.Add(scroll);
 
-        requests.Changed += () => DispatcherQueue.TryEnqueue(() => { if (!Context.IsClosing()) Rerender(); });
+        // 숨은 화면은 다시 그리지 않는다 (들어올 때 Entered가 그린다, G4 M8 1라운드 b5)
+        requests.Changed += () => DispatcherQueue.TryEnqueue(() => { if (!Context.IsClosing() && Visibility == Visibility.Visible) Rerender(); });
         // 들어온 적이 없으면 목록 변화에 반응하지 않는다: 시작 직후 미리 만든 화면이 기록을 읽어 문서를 만들지 않게 (들어올 때 Entered가 한다)
         Context.Records.Changed += () => DispatcherQueue.TryEnqueue(() => { if (!Context.IsClosing() && entered && Visibility == Visibility.Visible) OnLibraryChanged(); });
         Ui.Effects.Changed += (_, _) => { if (Visibility == Visibility.Visible) Rerender(); };
@@ -152,6 +153,11 @@ public sealed class ReportScreen : Screen
     public override void Entered()
     {
         entered = true;
+        if (pausedDraw is { } resume)
+        {
+            pausedDraw = null;
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += resume;
+        }
         _ = Context.Records.RefreshAsync(Context.Host.RunningId);
         OnLibraryChanged();
         Rerender();
@@ -233,7 +239,26 @@ public sealed class ReportScreen : Screen
         leakKinds = [];
         lastExport = null;
         var req = requests.Begin(key, item.Stamp, options);
-        _ = BuildAsync(req);
+        // 문서 만들기는 한 번에 하나 (설계 3.6 "백그라운드 하나"): 도는 동안 온 요청은 마지막 것만 기다린다 (G4 M8 1라운드 b6)
+        pendingBuild = req;
+        if (!buildRunning) _ = BuildLoopAsync();
+    }
+
+    private ReportRequest? pendingBuild;
+    private bool buildRunning;
+
+    private async Task BuildLoopAsync()
+    {
+        buildRunning = true;
+        try
+        {
+            while (pendingBuild is { } r)
+            {
+                pendingBuild = null;
+                await BuildAsync(r);
+            }
+        }
+        finally { buildRunning = false; }
     }
 
     private async Task BuildAsync(ReportRequest req)
@@ -422,6 +447,7 @@ public sealed class ReportScreen : Screen
     {
         drawn = null;
         drawGen++;
+        pausedDraw = null;
         drawnSections = 0;
         drawComplete = false;
         if (paperStack.Children.Count == 0) return;
@@ -444,6 +470,8 @@ public sealed class ReportScreen : Screen
     /// <summary>
     /// 문서를 종이 면에 그린다. 같은 문서·같은 색이면 다시 만들지 않는다. 절마다 한 차례씩 (큰 문서를 한 프레임에 만들지 않게).
     /// </summary>
+    private EventHandler<object>? pausedDraw;
+
     private void Draw(ReportDocument doc)
     {
         bool hc = Ui.Effects.Mode.HighContrast;
@@ -466,6 +494,14 @@ public sealed class ReportScreen : Screen
             if (gen != drawGen || Context.IsClosing())
             {
                 Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFrame;
+                if (ReferenceEquals(pausedDraw, (EventHandler<object>)OnFrame)) pausedDraw = null;
+                return;
+            }
+            if (Visibility != Visibility.Visible)
+            {
+                // 화면을 떠남: 숨은 종이 면을 계속 만들지 않는다. 들어오면 이어서 (G4 M8 1라운드 b5)
+                Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFrame;
+                pausedDraw = OnFrame;
                 return;
             }
             var watch = System.Diagnostics.Stopwatch.StartNew();
@@ -529,13 +565,27 @@ public sealed class ReportScreen : Screen
         Context.QueueDiag();
         var fault = Context.Options.ReportFail switch { "write" => ReportFault.Write, "move" => ReportFault.Move, "leak" => ReportFault.Leak, _ => ReportFault.None };
         bool slow = Context.Options.ReportFail == "slow";
-        var (rendered, written) = await Task.Run(async () =>
+        // 내보내기는 앱 종료 절차가 기다린다 (StopExportAsync): 쓰기 전이면 취소, 쓰는 중이면 끝(또는 실패 정리)까지 (G4 M8 1라운드 b1)
+        exportCts = new CancellationTokenSource();
+        var token = exportCts.Token;
+        var work = Task.Run(async () =>
         {
             var r = ReportExport.Render(doc, fault == ReportFault.Leak ? ReportFault.Leak : ReportFault.None);
             if (!r.Ok) return (r, (ReportWriteResult?)null);
-            if (slow) await Task.Delay(Waits.ReportSlowTest);
+            if (slow) await Task.Delay(Waits.ReportSlowTest, token);
+            token.ThrowIfCancellationRequested();
             return (r, ReportFile.Write(path, r.Html!, overwrite: true, fault is ReportFault.Write or ReportFault.Move ? fault : ReportFault.None));
-        });
+        }, token);
+        exportTask = work;
+        ReportExport.Rendered rendered;
+        ReportWriteResult? written;
+        try { (rendered, written) = await work; }
+        catch (OperationCanceledException)
+        {
+            exporting = false;
+            Context.Log.Write("reportExportCancelled", new { });
+            return;
+        }
         if (Context.IsClosing()) return;
         exporting = false;
         if (!rendered.Ok)
@@ -561,6 +611,17 @@ public sealed class ReportScreen : Screen
         {
             if (leakKinds.Count == 0 && exportButton.IsLoaded) exportButton.Focus(FocusState.Programmatic);
         });
+    }
+
+    private Task exportTask = Task.CompletedTask;
+    private CancellationTokenSource? exportCts;
+
+    /// <summary>앱을 닫을 때: 쓰기 전인 내보내기는 취소하고, 쓰는 중이면 끝날 때까지 (임시 파일이 남지 않게). 예외는 삼킨다.</summary>
+    public async Task StopExportAsync()
+    {
+        exportCts?.Cancel();
+        try { await exportTask; }
+        catch (OperationCanceledException) { }
     }
 
     private Task<bool> ConfirmUnmaskedAsync()

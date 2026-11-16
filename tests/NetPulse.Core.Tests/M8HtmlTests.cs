@@ -53,7 +53,7 @@ public sealed class M8HtmlTests
     public void TheReferenceCheckAllowsInternalPatternsAndUrlLikeUserText()
     {
         var html = "<!DOCTYPE html>\n<html><head><style>.a { fill: url(#np-gap); }</style></head><body><p>https://example.com/ src=\"x\" @import</p>"
-            + "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect fill=\"url(#np-none)\" /></svg><a href=\"#summary\">요약</a></body></html>";
+            + "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect fill=\"url(#np-none)\" /></svg></body></html>";
         Assert.Empty(ReportHtml.Verify(html));
     }
 
@@ -178,5 +178,33 @@ public sealed class M8HtmlTests
             Assert.Equal("0", Markup.Number(double.PositiveInfinity));
         }
         finally { CultureInfo.CurrentCulture = before; }
+    }
+
+    // ---------------- G4 1라운드 a5·a6 ----------------
+
+    [Fact]
+    public void SinglePointSegmentsAreDrawnAsDots()
+    {
+        // 외부 하나만 번갈아 손실: 열마다 성공·손실이 섞여 한 점짜리 구간이 생긴다
+        string alt = string.Concat(Enumerable.Range(0, 600).Select(i => i % 2 == 0 ? 'o' : 'x'));
+        var d = Build(Record(Rounds(Ok(600), alt, alt)));
+        var f = ((ReportFigure)d.Sections.Single(s => s.Id == "timeline").Blocks[0]).Figure;
+        var svg = Xml(ReportHtml.Write(d)).Descendants(Svg + "svg").Single();
+        int singles = f.Internet.Count(s => s.Count == 1) + f.Router.Count(s => s.Count == 1);
+        int dots = svg.Descendants(Svg + "circle").Count(e => ((string?)e.Attribute("class"))?.EndsWith("-dot", StringComparison.Ordinal) == true);
+        Assert.Equal(singles, dots);
+        int lines = svg.Descendants(Svg + "polyline").Count();
+        Assert.Equal(f.Internet.Count(s => s.Count > 1) + f.Router.Count(s => s.Count > 1), lines);
+    }
+
+    [Theory]
+    [InlineData("<meta http-equiv=\"refresh\" content=\"0;url=https://example.invalid/\" />", "허용하지 않는 속성 http-equiv")]
+    [InlineData("<style>.a { background: \\75 rl(https://example.invalid/a.png); }</style>", "CSS 이스케이프")]
+    [InlineData("<a href=\"#summary\">x</a>", "요소 a")]
+    [InlineData("<p onmouseover=\"x()\">x</p>", "허용하지 않는 속성 onmouseover")]
+    public void TheAllowListRejectsAnythingTheDocumentDoesNotUse(string body, string expected)
+    {
+        var html = "<!DOCTYPE html>\n<html><head><title>t</title></head><body>" + body + "</body></html>";
+        Assert.Contains(ReportHtml.Verify(html), p => p.StartsWith(expected, StringComparison.Ordinal));
     }
 }

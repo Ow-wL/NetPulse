@@ -192,6 +192,13 @@ public static class TimelineSvg
             foreach (var seg in series)
             {
                 if (seg.Count == 0) continue;
+                if (seg.Count == 1)
+                {
+                    // 한 점짜리 구간은 선이 보이지 않는다: 점으로 (G4 M8 1라운드 a5)
+                    sb.Append("<circle class=\"").Append(cls).Append("-dot\" cx=\"").Append(N(TimelineFigure.X(seg[0].Column))).Append("\" cy=\"").Append(N(f.Y(seg[0].ValueMs)))
+                        .Append("\" r=\"1.5\" fill=\"").Append(color).Append("\" />");
+                    continue;
+                }
                 sb.Append("<polyline class=\"").Append(cls).Append("\" fill=\"none\" stroke=\"").Append(color).Append("\" stroke-width=\"1.5\"");
                 if (dash is not null) sb.Append(" stroke-dasharray=\"").Append(dash).Append('"');
                 sb.Append(" points=\"");

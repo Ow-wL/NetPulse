@@ -112,7 +112,7 @@ public static class ReportParts
     }
 
     /// <summary>큰 표는 이만큼씩 나눠 붙인다 (한 프레임에 수백 줄을 만들지 않게, M8 bench).</summary>
-    public const int RowsPerPiece = 10;
+    private static int RowsPerPiece => FrameBudget.ReportRowsPerPiece;
 
     private static FrameworkElement Table(ReportTable t, ReportLook look)
     {
@@ -153,31 +153,37 @@ public static class ReportParts
         return g;
     }
 
-    /// <summary>몸통 줄 묶음 하나 (열 너비는 머리와 같은 비율이라 줄이 맞는다).</summary>
-    private static Grid Rows(ReportTable t, int from, int count, ReportLook look)
+    /// <summary>
+    /// 몸통 줄 묶음 하나 (열 너비는 머리와 같은 비율이라 줄이 맞는다). 줄마다 화면 읽기 이름이 있는 묶음:
+    /// "열 이름 값, 열 이름 값, …" (설계 4.3 "표는 행 이름으로", G4 M8 1라운드 b4).
+    /// </summary>
+    private static StackPanel Rows(ReportTable t, int from, int count, ReportLook look)
     {
         int columns = Math.Max(1, t.Columns.Count);
-        var grid = Columns(columns);
+        var stack = new StackPanel();
         for (int k = 0; k < count; k++)
         {
             var row = t.Rows[from + k];
-            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var name = row.Kind == RowKind.Note || row.Cells.Count == 1
+                ? row.Cells[0].Value.Text
+                : string.Join(", ", row.Cells.Select((c, i) => (i < t.Columns.Count ? t.Columns[i].Text + " " : "") + c.Value.Text));
+            var group = new GroupPanel("report.table.row", name);
+            for (int c = 0; c < columns; c++) group.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             var line = new Rectangle { Height = Size.Hairline, Fill = look.Edge, VerticalAlignment = VerticalAlignment.Top };
-            Grid.SetRow(line, k);
             Grid.SetColumnSpan(line, columns);
-            grid.Children.Add(line);
+            group.Children.Add(line);
             var brush = row.Kind == RowKind.Normal ? look.Ink : look.Muted;
             for (int c = 0; c < row.Cells.Count; c++)
             {
                 var cell = Fonts.Wrapped(row.Cells[c].Value.Text, Typography.Caption, brush);
                 cell.Padding = row.Kind == RowKind.Sub && c == 0 ? new Thickness(Space.S5, Space.S1, Space.S2, Space.S1) : CellPadding;
                 if (row.Kind == RowKind.Note) Grid.SetColumnSpan(cell, columns);
-                Grid.SetRow(cell, k);
                 Grid.SetColumn(cell, Math.Min(c, columns - 1));
-                grid.Children.Add(cell);
+                group.Children.Add(cell);
             }
+            stack.Children.Add(group);
         }
-        return grid;
+        return stack;
     }
 
     /// <summary>
@@ -218,6 +224,28 @@ public static class ReportParts
         }
     }
 
+    /// <summary>
+    /// 띠 모양 (G4 M8 1라운드 b3): 외부 모두 응답 없음 = 높이 전체, 일부 응답 없음 = 위쪽 얇은 띠, 링크 끊김 = 아래쪽 얇은 띠, 관측 공백 = 점선 테두리.
+    /// 고대비에서 빨강·노랑이 같은 시스템 색이 되어도 모양으로 구별한다. <paramref name="full"/>은 범례 견본의 높이.
+    /// </summary>
+    private static FrameworkElement BandShape(FigureBandKind kind, double width, ReportLook look, double? full = null)
+    {
+        double whole = full ?? TimelineFigure.PlotHeight;
+        double lane = full is null ? Size.TimelineLane : whole / 3;
+        var shape = kind switch
+        {
+            FigureBandKind.ExternalNone => new Rectangle { Width = width, Height = whole, Fill = look.Bad, Opacity = Emphasis.LossBand + Emphasis.LossBand },
+            FigureBandKind.PartialNone => new Rectangle { Width = width, Height = lane, Fill = look.Warn },
+            FigureBandKind.LinkDown => new Rectangle { Width = width, Height = lane, Fill = look.Link },
+            _ => new Rectangle { Width = width, Height = whole, Stroke = look.Muted, StrokeThickness = Size.Hairline, StrokeDashArray = new DoubleCollection { ChartStyle.DashOn, ChartStyle.DashOff } },
+        };
+        shape.VerticalAlignment = kind == FigureBandKind.LinkDown ? VerticalAlignment.Bottom : VerticalAlignment.Top;
+        return shape;
+    }
+
+    private static double BandTop(FigureBandKind kind) =>
+        kind == FigureBandKind.LinkDown ? TimelineFigure.PlotTop + TimelineFigure.PlotHeight - Size.TimelineLane : TimelineFigure.PlotTop;
+
     /// <summary>그림: 제목 → 설명 → 값 눈금 → 시각 눈금 → 범례 (SVG와 같은 글 순서). 960×300 화면을 폭에 맞춰 줄인다.</summary>
     public static FrameworkElement Figure(TimelineFigure f, ReportLook look)
     {
@@ -237,23 +265,19 @@ public static class ReportParts
             Place(new Line { X1 = 0, Y1 = 0, X2 = TimelineFigure.Columns, Y2 = 0, Stroke = look.Edge, StrokeThickness = Size.Hairline }, TimelineFigure.PlotLeft, f.Y(v));
         foreach (var b in f.Bands)
         {
-            bool link = b.Kind == FigureBandKind.LinkDown;
-            var (brush, opacity) = b.Kind switch
-            {
-                FigureBandKind.Gap => (look.Muted, Emphasis.Unconfirmed),
-                FigureBandKind.ExternalNone => (look.Bad, Emphasis.LossBand * 2),
-                FigureBandKind.PartialNone => (look.Warn, Emphasis.LossBand * 2),
-                _ => (look.Link, Emphasis.Full),
-            };
-            double h = link ? Size.TimelineLane : TimelineFigure.PlotHeight;
-            double y = link ? TimelineFigure.PlotTop + TimelineFigure.PlotHeight - Size.TimelineLane : TimelineFigure.PlotTop;
-            Place(new Rectangle { Width = b.ToColumn - b.FromColumn, Height = h, Fill = brush, Opacity = opacity }, TimelineFigure.Left(b.FromColumn), y);
+            Place(BandShape(b.Kind, b.ToColumn - b.FromColumn, look), TimelineFigure.Left(b.FromColumn), BandTop(b.Kind));
         }
         void Lines(IReadOnlyList<IReadOnlyList<FigurePoint>> series, Brush brush, bool dashed)
         {
             foreach (var seg in series)
             {
                 if (seg.Count == 0) continue;
+                if (seg.Count == 1)
+                {
+                    // 한 점짜리 구간은 점으로 (SVG와 같음, G4 M8 1라운드 a5)
+                    Place(new Ellipse { Width = Space.S1, Height = Space.S1, Fill = brush }, TimelineFigure.X(seg[0].Column) - Space.S0, f.Y(seg[0].ValueMs) - Space.S0);
+                    continue;
+                }
                 var line = new Polyline { Stroke = brush, StrokeThickness = ChartStyle.Line2 };
                 if (dashed) line.StrokeDashArray = new DoubleCollection { ChartStyle.DashOn, ChartStyle.DashOff };
                 foreach (var p in seg) line.Points.Add(new Point(TimelineFigure.X(p.Column), f.Y(p.ValueMs)));
@@ -279,12 +303,22 @@ public static class ReportParts
             t.TextAlignment = TimelineFigure.AtRightEdge(tick) ? TextAlignment.Right : TextAlignment.Center;
             Place(t, TimelineFigure.X(tick.Column) - (TimelineFigure.AtRightEdge(tick) ? t.Width : t.Width / 2), TimelineFigure.TickTextY - Space.S2);
         }
-        Brush[] swatches = [look.Accent, look.Muted, look.Bad, look.Warn, look.Link, look.Muted, look.Mark];
         for (int i = 0; i < TimelineFigure.LegendLabels.Length; i++)
         {
             double x = TimelineFigure.PlotLeft + i % TimelineFigure.LegendPerRow * TimelineFigure.LegendStep,
                 y = TimelineFigure.LegendY + i / TimelineFigure.LegendPerRow * TimelineFigure.LegendRowHeight;
-            Place(new Rectangle { Width = Space.S3, Height = Space.S3, Fill = swatches[i], Stroke = look.Edge, StrokeThickness = Size.Hairline }, x, y - Space.S3);
+            // 범례 견본도 띠와 같은 모양 (고대비에서 색이 같아져도 구별)
+            FrameworkElement swatch = i switch
+            {
+                2 => BandShape(FigureBandKind.ExternalNone, Space.S3, look, Space.S3),
+                3 => BandShape(FigureBandKind.PartialNone, Space.S3, look, Space.S3),
+                4 => BandShape(FigureBandKind.LinkDown, Space.S3, look, Space.S3),
+                5 => BandShape(FigureBandKind.Gap, Space.S3, look, Space.S3),
+                _ => new Rectangle { Width = Space.S3, Height = Space.S3, Fill = i switch { 0 => look.Accent, 1 => look.Muted, _ => look.Mark }, Stroke = look.Edge, StrokeThickness = Size.Hairline },
+            };
+            var box = new Grid { Width = Space.S3, Height = Space.S3 };
+            box.Children.Add(swatch);
+            Place(box, x, y - Space.S3);
             Place(Fonts.Text(TimelineFigure.LegendLabels[i], Typography.Caption, look.Ink), x + Space.S4, y - Space.S4);
         }
         stack.Children.Add(new Viewbox { Child = canvas, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.Both, HorizontalAlignment = HorizontalAlignment.Left });
