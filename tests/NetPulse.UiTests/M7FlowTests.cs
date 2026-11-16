@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 using NetPulse.Core.Analysis;
 using NetPulse.Core.Diagnostics;
@@ -31,7 +31,8 @@ public sealed class M7FlowTests
         app.WaitDiag(d => Sd(d).ValueKind == JsonValueKind.Object && Sd(d).TryGetProperty("listed", out var l) && l.GetBoolean() && Sd(d).GetProperty("analyzing").GetInt32() == 0, b => b, "기록 목록 분석");
 
     private static JsonElement WaitDetail(AppDriver app) =>
-        app.WaitDiag(d => d, d => Sd(d).ValueKind == JsonValueKind.Object && Sd(d).TryGetProperty("detail", out var x) && x.ValueKind == JsonValueKind.Object, "기록 상세");
+        app.WaitDiag(d => d, d => Sd(d).ValueKind == JsonValueKind.Object && Sd(d).TryGetProperty("detail", out var x) && x.ValueKind == JsonValueKind.Object
+            && Sd(d).TryGetProperty("detailComplete", out var c) && c.GetBoolean(), "기록 상세");
 
     private static (MeasurementRecord Record, AnalysisResult Analysis) Reanalyze(string userData, string id)
     {
@@ -137,8 +138,9 @@ public sealed class M7FlowTests
     public void EpisodeDetailCopiesExactlyAndMovesTheTimeline()
     {
         var saved = ClipboardText.Save();
-        if (saved.Blocked) Assert.Skip("미완료: 클립보드에 글이 아닌 내용이 있어 덮어쓰지 않았습니다.");
+        if (saved.Blocked) Assert.Skip("미완료: 클립보드에 그대로 되돌릴 수 없는 형식이 있어 덮어쓰지 않았습니다.");
         var userData = AppDriver.NewUserData();
+        uint? owned = null;   // 앱이 쓴 뒤 자리 잡은 클립보드 번호. null이면 시험의 내용이 아니다 → 되돌리지 않는다 (M6 G4 4라운드 이월 1)
         try
         {
             using var app = Open(userData, "rec-mixed", "--demo steady --screen records");
@@ -158,15 +160,19 @@ public sealed class M7FlowTests
             Assert.True(parts[0] <= start && start <= parts[1], $"보기 창 {window}에 구간 시작 {start}가 없다");
             Assert.Equal(0, Detail(app.Diag()).GetProperty("expanded").GetInt32());
 
+            var expected = RecordView.Copy(record.Header!, EpisodeDetail.For(record, analysis, episode));
+            // 보관한 뒤 다른 곳에서 클립보드를 바꿨으면 덮어쓰지 않고 미완료
+            if (ClipboardText.Sequence() != saved.Sequence) Assert.Skip("미완료: 시험 중 클립보드가 바뀌어 덮어쓰지 않았습니다.");
             app.Invoke("records.episode.0.copy");
             app.WaitDiag(x => M5Fixtures.Str(Sd(x), "copyState"), s => s.Length > 0, "복사");
-            var expected = RecordView.Copy(record.Header!, EpisodeDetail.For(record, analysis, episode));
+            owned = ClipboardText.Claim(expected);
+            Assert.True(owned is not null, "앱이 쓴 클립보드로 확인하지 못함 (형식: " + ClipboardText.LastFormats + ")");
             Assert.Equal(expected, ClipboardText.Read());
             Assert.Equal(0, app.Close());
         }
         finally
         {
-            ClipboardText.Restore(saved);
+            ClipboardText.Restore(saved, owned);
             AppDriver.DeleteUserData(userData);
         }
     }
@@ -220,8 +226,77 @@ public sealed class M7FlowTests
             app.SetText("records.mark.0.text", "못 쓴 메모");
             app.Invoke("records.mark.0.save");
             app.WaitDiag(d => Sd(d).GetProperty("memoState").EnumerateArray().Select(v => v.GetString()).ToArray(), s => s.Contains("저장하지 못했습니다"), "저장 실패");
-            Assert.True(app.Exists("records.mark.0.text.error"));
+            // 상태 기록과 오류 줄 그리기는 같은 프레임이 아닐 수 있다 (M7 UI 시험 1차: 한 번 먼저 읽어 실패)
+            AppDriver.WaitFor(() => app.Exists("records.mark.0.text.error"), e => e, "메모 오류 줄");
+            // 초점은 사용자가 누른 저장 단추에 그대로 (다시 그리면 사이드바로 가서 화면이 맨 위로 올라가 오류가 안 보였다, M7 UI 시험 2차.
+            // 실패는 그 칸에만 반영하고 초점을 옮기지 않는다, G4 M7 6라운드 1)
+            app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == "records.mark.0.save", "실패 뒤 초점이 저장 단추에 남음");
             Assert.Equal("못 쓴 메모", ((System.Windows.Automation.ValuePattern)app.Find("records.mark.0.text").GetCurrentPattern(System.Windows.Automation.ValuePattern.Pattern)).Current.Value);
+            Assert.Equal(0, app.Close());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
+    [Fact]
+    public void MemoDraftSurvivesExpandingAnEpisodeAndSavingShowsItsState()
+    {
+        // 같은 상세 안에서 끊김을 펼쳐도 입력한 글이 남고(설계 3.5), 저장을 누르면 "저장하는 중…"이 화면에 보인다 (G4 M7 1라운드 b1·b9)
+        var userData = AppDriver.NewUserData();
+        try
+        {
+            using var app = Open(userData, "rec-mixed-memo-blocked", "--demo steady --screen records");
+            WaitAnalyzed(app);
+            app.Invoke("records.row.0");
+            WaitDetail(app);
+            app.Invoke("records.mark.0.edit");
+            AppDriver.WaitFor(() => app.Exists("records.mark.0.text"), e => e, "메모 칸");
+            app.SetText("records.mark.0.text", "펼쳐도 남는 초안");
+            app.Invoke("records.episode.0");
+            AppDriver.WaitFor(() => app.Exists("records.episode.0.detail"), e => e, "구간 상세");
+            WaitDetail(app);
+            string Value() => ((System.Windows.Automation.ValuePattern)app.Find("records.mark.0.text").GetCurrentPattern(System.Windows.Automation.ValuePattern.Pattern)).Current.Value;
+            AppDriver.WaitFor(() => app.Exists("records.mark.0.text"), e => e, "다시 그린 메모 칸");
+            Assert.Equal("펼쳐도 남는 초안", Value());
+            app.Invoke("records.mark.0.save");
+            // 화면의 상태 글 (진단 값이 아니라 보이는 요소). 막힌 쓰기는 1초·3초 재시도 동안 저장 중
+            AppDriver.WaitFor(() => app.Exists("records.mark.0.state") ? app.Text("records.mark.0.state") : "", s => s == "저장하는 중…", "저장하는 중 표시");
+            AppDriver.WaitFor(() => app.Exists("records.mark.0.text.error"), e => e, "저장 실패 줄", TimeSpan.FromSeconds(20));
+            Assert.Equal("펼쳐도 남는 초안", Value());
+            Assert.Equal(0, app.Close());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
+    [Fact]
+    public void AnEarlierMemoFailingWhileEditingAnotherLeavesFocusAndTextThere()
+    {
+        // 메모 A가 재시도하는 동안 메모 B를 고치는 중 A가 실패해도, 초점과 B의 글은 B에 남고 A에는 오류만 (G4 M7 6라운드 1:
+        // 실패 때 다시 그리며 A로 초점을 가져가 B에 치던 글이 A로 갈 수 있었다)
+        var userData = AppDriver.NewUserData();
+        try
+        {
+            using var app = Open(userData, "rec-two-memos-blocked", "--demo steady --screen records");
+            WaitAnalyzed(app);
+            app.Invoke("records.row.0");
+            WaitDetail(app);
+            string Value(string id) => ((System.Windows.Automation.ValuePattern)app.Find(id).GetCurrentPattern(System.Windows.Automation.ValuePattern.Pattern)).Current.Value;
+            string Focused() => app.WaitDiag(d => d.GetProperty("focused").ToString(), _ => true, "초점");
+            app.Invoke("records.mark.0.edit");
+            AppDriver.WaitFor(() => app.Exists("records.mark.0.text"), e => e, "메모 A 칸");
+            app.SetText("records.mark.0.text", "A 저장 실패할 글");
+            app.Invoke("records.mark.0.save");
+            AppDriver.WaitFor(() => app.Exists("records.mark.0.state") ? app.Text("records.mark.0.state") : "", s => s == "저장하는 중…", "A 저장하는 중");
+            app.Invoke("records.mark.1.edit");
+            AppDriver.WaitFor(() => app.Exists("records.mark.1.text"), e => e, "메모 B 칸");
+            app.Find("records.mark.1.text").SetFocus();
+            app.SetText("records.mark.1.text", "B 쓰는 중");
+            app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == "records.mark.1.text", "B 칸 초점");
+            Assert.False(app.Exists("records.mark.0.text.error"));   // 아직 재시도 중이어야 이 시험이 그 경우를 본다
+            AppDriver.WaitFor(() => app.Exists("records.mark.0.text.error"), e => e, "A 저장 실패 줄", TimeSpan.FromSeconds(20));
+            Assert.Equal("records.mark.1.text", Focused());
+            Assert.Equal("B 쓰는 중", Value("records.mark.1.text"));
+            Assert.Equal("A 저장 실패할 글", Value("records.mark.0.text"));
+            Assert.Equal("저장하지 못했습니다", app.Text("records.mark.0.state"));
             Assert.Equal(0, app.Close());
         }
         finally { AppDriver.DeleteUserData(userData); }
@@ -303,6 +378,55 @@ public sealed class M7FlowTests
             Assert.Equal(items[0].Stored.MainConclusion, open.GetProperty("MainConclusion").GetInt32());
             Assert.Equal(DiagnosisTexts.Head(items[0].Stored.MainConclusion).Head, app.Text("records.diagnosis.head"));
             Assert.False(app.Exists("diagnose.conclusion.flush"));   // 지난 결과에는 시스템 동작 단추가 없다
+            Assert.Equal(0, app.Close());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
+    [Fact]
+    public void OpeningARecordFromHomeAfterTheDiagnosesTabStaysInTheDetail()
+    {
+        // 진단 기록 탭을 본 뒤 홈의 최근 측정을 누르면 그 상세가 열린 채 남는다: 탭 맞추기가 목록으로 덮지 않는다 (G4 M7 1라운드 b3)
+        var userData = AppDriver.NewUserData();
+        try
+        {
+            using var app = Open(userData, "rec-diag", "--demo steady --screen records");
+            WaitAnalyzed(app);
+            app.Select("records.tabs.diagnoses");
+            app.WaitDiag(x => Sd(x).GetProperty("diagnoses").GetInt32(), n => n >= 0, "진단 기록");
+            app.Select("nav.home");
+            app.WaitDiag(d => d.GetProperty("recent").GetProperty("listed").GetBoolean()
+                && d.GetProperty("recent").GetProperty("items").EnumerateArray().All(x => !x.GetProperty("Analyzing").GetBoolean()), r => r, "최근 측정");
+            app.Invoke("home.recent.0");
+            app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "records", "기록 화면");
+            WaitDetail(app);
+            Thread.Sleep(1000);
+            Assert.Equal("Detail", Sd(app.Diag()).GetProperty("mode").GetString());
+            Assert.True(((System.Windows.Automation.SelectionItemPattern)app.Find("records.tabs.measurements").GetCurrentPattern(System.Windows.Automation.SelectionItemPattern.Pattern)).Current.IsSelected, "탭은 측정 목록");
+            Assert.Equal(0, app.Close());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
+    [Fact]
+    public void ADiagnosisRunAfterVisitingRecordsShowsUpWhenComingBack()
+    {
+        // 기록 화면을 먼저 본 뒤 새로 돌린 빠른 진단이 다시 들어오면 진단 기록에 나온다 (G4 M7 1라운드 b2)
+        var userData = AppDriver.NewUserData();
+        try
+        {
+            using var app = Open(userData, "rec-diag-empty", "--demo steady --screen records");
+            WaitAnalyzed(app);
+            app.Select("records.tabs.diagnoses");
+            app.WaitDiag(x => Sd(x).GetProperty("diagnoses").GetInt32(), n => n == 0, "진단 기록 없음");
+            app.Select("nav.diagnose");
+            app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "diagnose", "진단 화면");
+            app.Invoke("diagnose.start");
+            app.WaitDiag(x => x, x => M5Fixtures.Str(Sd(x), "operation") == "None" && Sd(x).GetProperty("saved").ValueKind == JsonValueKind.String
+                && Sd(x).GetProperty("saved").GetString()!.Length > 0, "진단 저장");
+            app.Select("nav.records");
+            app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "records", "기록 화면");
+            app.WaitDiag(x => Sd(x).GetProperty("diagnoses").GetInt32(), n => n == 1, "새 진단 기록");
             Assert.Equal(0, app.Close());
         }
         finally { AppDriver.DeleteUserData(userData); }

@@ -110,7 +110,9 @@ public sealed class M5MatrixTests
             case "diagdone":
                 app.WaitDiag(d => Sd(d) is { } s && s.GetProperty("operation").GetString() == "None" && s.GetProperty("conclusion").ValueKind == JsonValueKind.Number, b => b, "진단 끝");
                 break;
-            case "diagpartial": app.WaitDiag(d => Sd(d) is { } s ? s.GetProperty("partial").GetInt32() : 0, n => n >= int.Parse(value), "끝난 검사 " + value); break;
+            case "diagpartial":
+                app.WaitDiag(d => Sd(d) is { } s && s.GetProperty("operation").GetString() == "Diagnosing" && s.GetProperty("partial").GetInt32() >= int.Parse(value), b => b, "진행 중 끝난 검사 " + value);
+                break;
             case "diag": app.WaitDiag(d => Sd(d) is { } s ? s.GetProperty("operation").GetString() : "", o => o == value, "진단 작업 " + value); break;
             case "flushstage": app.WaitDiag(d => Sd(d) is { } s ? M5Fixtures.Str(s, "flush") : "", f => f == value, "비우기 단계 " + value); break;
             case "flushdone":
@@ -126,10 +128,12 @@ public sealed class M5MatrixTests
             case "recordsAnalyzed":
                 app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("listed", out var l) && l.GetBoolean() && s.GetProperty("analyzing").GetInt32() == 0, b => b, "기록 목록 분석");
                 break;
-            case "detailReady": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("detail", out var x) && x.ValueKind == JsonValueKind.Object, b => b, "기록 상세"); break;
+            case "detailReady": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("detail", out var x) && x.ValueKind == JsonValueKind.Object
+                && s.TryGetProperty("detailComplete", out var c) && c.GetBoolean(), b => b, "기록 상세"); break;
             case "detailLoading": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("detailLoading", out var x) && x.GetBoolean(), b => b, "기록 상세 여는 중"); break;
             case "compareReady": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("comparison", out var x) && x.ValueKind == JsonValueKind.Object, b => b, "비교"); break;
             case "diagnosesReady": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("diagnoses", out var x) && x.GetInt32() >= 0, b => b, "진단 기록"); break;
+            case "focused": app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == value, "초점 " + value); break;
             case "memoState":
                 app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("memoState", out var x) && x.EnumerateArray().Any(v => v.GetString()!.StartsWith(value, StringComparison.Ordinal)), b => b, "메모 상태 " + value);
                 break;

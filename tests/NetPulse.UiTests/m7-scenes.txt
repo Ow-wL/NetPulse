@@ -17,9 +17,9 @@ records-detail-damaged|rec-damaged|--demo steady --screen records|wait:screen=re
 records-detail-evidence-damaged|rec-evidence|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady
 records-detail-nosummary|rec-nosummary|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady
 records-detail-unreadable|rec-unreadable|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:exists=records.detail.error
-records-detail-memo-edit|rec-memo|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady;invoke:records.mark.0.edit;wait:exists=records.mark.0.text
+records-detail-memo-edit|rec-memo|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady;invoke:records.mark.0.edit;wait:exists=records.mark.0.text;wait:focused=records.mark.0.text
 records-detail-memo-saving|rec-memo-blocked|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady;invoke:records.mark.0.edit;text:records.mark.0.text=고친 메모;invoke:records.mark.0.save;wait:memoState=저장하는 중
-records-detail-memo-error|rec-memo-blocked|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady;invoke:records.mark.0.edit;text:records.mark.0.text=고친 메모;invoke:records.mark.0.save;wait:memoState=저장하지 못했습니다
+records-detail-memo-error|rec-memo-blocked|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady;invoke:records.mark.0.edit;text:records.mark.0.text=고친 메모;invoke:records.mark.0.save;wait:memoState=저장하지 못했습니다;wait:focused=records.mark.0.save
 records-detail-diagnoses|rec-diag|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady;scroll:records.scroll=100
 records-compare-pick|rec-compare|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.compare;invoke:records.row.0
 records-compare-analyzing|rec-compare|--demo steady --screen records --hold-analysis|wait:screen=records;wait:recordsListed;invoke:records.compare;invoke:records.row.0;invoke:records.row.1;wait:exists=records.compare.loading
@@ -28,5 +28,6 @@ records-compare-mismatch|rec-compare-mismatch|--demo steady --screen records|wai
 records-diagnoses-empty|rec-diag-empty|--demo steady --screen records|wait:screen=records;select:records.tabs.diagnoses;wait:diagnosesReady
 records-diagnoses|rec-diag|--demo steady --screen records|wait:screen=records;select:records.tabs.diagnoses;wait:diagnosesReady
 records-diagnosis-open|rec-diag|--demo steady --screen records|wait:screen=records;select:records.tabs.diagnoses;wait:diagnosesReady;invoke:records.diagnosis.0;wait:exists=records.diagnosis.head
+records-diagnosis-mismatch|rec-diag-mismatch|--demo steady --screen records|wait:screen=records;select:records.tabs.diagnoses;wait:diagnosesReady;invoke:records.diagnosis.0;wait:exists=records.diagnosis.mismatch
 records-external|rec-external|--demo steady --screen records --open-record {userData}\usb\picked|wait:screen=records;wait:detailReady
 measure-finished-link|profile-short|--demo steady --demo-speed 600 --start|wait:finished;wait:exists=measure.result.records

@@ -144,7 +144,11 @@ public sealed partial class AppShell : Window
             _ = recent.RefreshAsync(host.RunningId);
             _ = Task.Run(diagnosis.LoadRecent);
             StartScreen();
-            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => { if (!closing) foreach (var id in new[] { "home", "measure" }) screens.Prepare(id); });
+            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => { if (!closing) foreach (var id in new[] { "home", "measure", "diagnose", "records" }) screens.Prepare(id); });   // 진단도 미리 (M6 bench diag-enter 40 ms대), 기록도 (M7 bench records-enter 50 ms대)
+            // 기록 화면이 처음 쓰는 메서드는 백그라운드에서 미리 컴파일 (첫 상세 열기의 컴파일 시간, M7 bench records-open)
+            _ = Design.JitWarmup.Start(typeof(RecordsScreen), typeof(Design.Controls.TimelinePanel), typeof(Design.Controls.TrendChart),
+                typeof(Core.Presentation.RecordView), typeof(Core.Presentation.TimelineModel), typeof(Core.Analysis.EpisodeDetail),
+                typeof(Core.Records.SymptomMarks), typeof(Core.Analysis.MeasurementComparison));
             RenderStatus(host.Snapshot);
             QueueDiag();
             if (options.SelfTest is not null) selfTestTimer.Start();
@@ -286,6 +290,7 @@ public sealed partial class AppShell : Window
     private void Render(HostSnapshot s)
     {
         screens.Render(s);
+        if (screens.Current is not HomeScreen && screens.Prepared("home") is HomeScreen home) home.Warm(s);
         // 상태 반응: 외부 응답 없음이나 링크 끊김이 관측되고 있으면 배경 빛이 붉게 (끝나면 원래대로).
         // 띠·링크 다운은 관측이지 판정이 아니다: 알림도 관측한 그것만 말한다 (끊김 여부·원인은 잠정 분석이 말한다, G4 M5 1라운드 B4·2라운드 3)
         // 종류는 이 장면에서 먼저 정하고 알약을 그린다 (M5 이월 3: 이전 종류로 한 번 그려지던 것), 종류마다 전환 알림
@@ -347,15 +352,21 @@ public sealed partial class AppShell : Window
         if (closing) return;
         closing = true;
         runTimer?.Stop();
+        // 진단 억제는 첫 await 전에 (테마 정리를 기다리는 동안 결과를 저장·게시하지 않게, G4 1라운드 b4). 끝나기는 아래에서 기다린다
+        var diagnosisStop = diagnosis.ShutdownAsync();
         await ui.Theme.ShutdownAsync(Waits.ThemeCleanup);
         log.Write("closeCleanup", new { snapshotLayers = ui.Theme.SnapshotLayersInTree, inTransition = ui.Theme.InTransition, rendering = ui.Theme.RenderingSubscribed });
         AppWindow.Hide();
         try
         {
-            await diagnosis.ShutdownAsync();   // 진단을 먼저 멈춘다: 억제 → 취소 → 최대 3초 (M6 설계 3.4)
-            var shutdown = host.ShutdownAsync();
+            await diagnosisStop;   // 진단을 먼저 멈춘다: 억제 → 취소 → 최대 3초 (M6 설계 3.4)
+            // 기록 화면의 메모 저장은 쓰기 큐에 들어가기 전(저장 시작 알림·앞 요청 대기)일 수 있어 호스트 종료와 함께 따로 기다린다
+            // (호스트는 쓰기 큐만 기다린다, G4 M7 3라운드 1). 둘은 세대로 서로의 옛 글을 건너뛰므로 동시에 해도 된다
+            var memoWrites = memos.DrainAsync(Waits.CloseWrites);
+            var shutdown = Task.WhenAll(host.ShutdownAsync(), memoWrites);
             if (await Task.WhenAny(shutdown, Task.Delay(Waits.CloseWrites + Waits.CloseWrites + Waits.CloseWrites)) != shutdown)
                 log.Write("closeTimeout", new { state = host.Snapshot.State.ToString() });
+            if (memoWrites.IsCompleted && !memoWrites.Result) log.Write("memoCloseTimeout", new { });
             var left = host.UnsavedDrafts();
             if (left.Count > 0) log.Write("memoUnsaved", new { marks = left });   // 메모 글은 남기지 않는다
             await beforeClose();

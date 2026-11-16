@@ -1,4 +1,4 @@
-using NetPulse.Core.Diagnostics;
+﻿using NetPulse.Core.Diagnostics;
 
 namespace NetPulse.Core.Live;
 
@@ -163,16 +163,26 @@ public sealed class DiagnosisHost
     private async Task FlushFlowAsync(Task waitFor)
     {
         try { await waitFor.ConfigureAwait(false); } catch (Exception) { /* 앞 진단의 결과는 그 작업이 다룬다 */ }
-        if (closed) return;
-        lock (gate) flushStage = FlushStage.Flushing;
+        if (BeforeFlushForTest is { } hook) await hook().ConfigureAwait(false);
+        // 명령 시작 승인은 종료 진입과 같은 잠금 안에서 한 번만 (G4 2라운드 1): 종료가 먼저 잠금을 잡았으면 시작하지 않고,
+        // 승인이 먼저면 그 명령은 "종료 전에 시작한 것"이다 (설계 3.4: 이미 시작한 것은 취소 신호만 받고 끝까지).
+        // 실제 명령 쪽도 이미 취소된 토큰이면 프로세스를 띄우지 않는다
+        lock (gate)
+        {
+            if (closed) return;
+            flushStage = FlushStage.Flushing;
+        }
         Publish();
         SystemActionResult flush;
         try { flush = await world.Actions.FlushDnsAsync(stop.Token).ConfigureAwait(false); }
         catch (OperationCanceledException) { return; }
         catch (Exception ex) { flush = new SystemActionResult(false, ex.GetType().Name); }
-        if (closed) return;
         string? measurementId;
-        lock (gate) { flushStage = FlushStage.Rechecking; partial = []; measurementId = runningMeasurementId(); }   // 다시 진단을 시작하는 순간
+        lock (gate)
+        {
+            if (closed) return;
+            flushStage = FlushStage.Rechecking; partial = []; measurementId = runningMeasurementId();   // 다시 진단을 시작하는 순간
+        }
         Publish();
         var run = await RunOnceAsync(flush, measurementId).ConfigureAwait(false);
         lock (gate)
@@ -198,7 +208,8 @@ public sealed class DiagnosisHost
         PreviousDiagnosis? previous;
         lock (gate) previous = last is { } l ? FromResult(l.Result) : recent;
         var changes = previous is null ? null : Compare(previous, result);
-        var save = store.Save(result, appVersion, measurementId, () => !closed);
+        // 확정(이동)은 종료 진입과 같은 잠금 안에서, 이름 충돌로 다시 해도 매번 확인 (G4 2라운드 2)
+        var save = store.Save(result, appVersion, measurementId, () => !closed, gate);
         if (closed) return null;
         return new DiagnosisRun(result, measurementId, flush, save, changes, previous);
     }
@@ -220,8 +231,11 @@ public sealed class DiagnosisHost
     {
         public void Report(CheckResult value)
         {
-            if (host.closed) return;
-            lock (host.gate) host.partial = [.. host.partial, value];
+            lock (host.gate)
+            {
+                if (host.closed) return;
+                host.partial = [.. host.partial, value];
+            }
             host.Publish();
         }
     }
@@ -238,8 +252,8 @@ public sealed class DiagnosisHost
             closed = true;
             a = current;
             b = siteTask;
+            Changed = null;
         }
-        Changed = null;
         stop.Cancel();
         var both = Task.WhenAll(a, b);
         await Task.WhenAny(both, Task.Delay(limit ?? TimeSpan.FromSeconds(3))).ConfigureAwait(false);
@@ -248,12 +262,22 @@ public sealed class DiagnosisHost
 
     // ---------------- 장면 ----------------
 
+    /// <summary>
+    /// 장면 게시. 종료 검사·장면 바꾸기·알림을 한 잠금 안에서 한다: 종료(<see cref="ShutdownAsync"/>)가 잠금을 잡은 뒤에는
+    /// 어떤 게시도 일어나지 않는다 (미리 읽어 둔 알림 대리자 호출 포함, G4 1라운드 a1). 알림 받는 쪽은 큐에 넣기만 한다.
+    /// </summary>
     private void Publish()
     {
-        if (closed) return;
-        lock (gate) Volatile.Write(ref snapshot, Build());
-        Changed?.Invoke();
+        lock (gate)
+        {
+            if (closed) return;
+            Volatile.Write(ref snapshot, Build());
+            Changed?.Invoke();
+        }
     }
+
+    /// <summary>시험용: 앞 진단을 기다린 뒤, 명령 시작 승인(잠금) 직전에 실행 (종료 끼어들기를 고정한다).</summary>
+    internal Func<Task>? BeforeFlushForTest { get; set; }
 
     /// <summary>gate 안 (생성자에서는 밖).</summary>
     private DiagnosisSnapshot Build() =>

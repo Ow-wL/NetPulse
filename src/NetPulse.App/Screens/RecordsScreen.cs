@@ -37,8 +37,19 @@ public sealed class RecordsScreen : Screen
     private (OpenedRecord A, OpenedRecord B)? comparison;
     private string? loadError;
     private int expanded = -1;
-    private string? editingMark;
-    private readonly Dictionary<string, string> memoState = [];
+    // 메모 고치기 (설계 3.5): 같은 상세 안에서는 여러 칸을 열 수 있고, 다시 그려도(끊김 펼침·다른 메모 열기·목록 갱신) 입력한 글이 남는다.
+    // 상세를 떠나면 버린다 (G4 M7 1라운드 b1)
+    private readonly List<string> editing = [];
+    private readonly Dictionary<string, string> memoDrafts = [];
+    private readonly Dictionary<string, TextBlock> memoStateText = [];
+    private readonly Dictionary<string, (StackPanel Row, GlassTextBox Box)> memoEditors = [];   // 지금 그려진 고치는 칸 (표시별): 실패를 다시 그리지 않고 그 칸에만 (G4 M7 6라운드 1)
+    private string? focusMark;
+    private readonly Dictionary<(string Key, string Mark), int> memoSaveSeq = [];   // (기록 출처, 표시)별 마지막 저장 요청 번호 (G4 M7 4라운드 1)
+    private int memoSaveCounter;
+    private readonly Dictionary<(string Key, string Mark), string> memoState = [];   // (기록 출처, 표시): 같은 표시 ID의 다른 출처와 섞이지 않게 (G4 M7 2라운드 3)
+    // 열기·비교 요청 세대: 모드를 바꾸거나 새로 열 때마다 올라간다. 비동기 완료는 자기 세대일 때만 반영한다 (b4)
+    private int requestGen;
+    private bool syncingTabs;
     private string? copyState, lastAction, externalError;
     private IReadOnlyList<string> externalNotices = [];
     private readonly TimelineView view = new(TimelineView.Steps.Length - 1);
@@ -49,12 +60,14 @@ public sealed class RecordsScreen : Screen
     private bool diagnosesLoaded;
     private StoredDiagnosis? openDiagnosis;
     private string renderedKey = "";
+    private int renderGen;
+    private bool detailComplete;   // 상세의 아래 카드까지 그려짐 (한 차례 늦게 만든다)
     private Mode? renderedMode;
 
     // ---------------- bench·시험 고리 ----------------
 
     /// <summary>상세가 열려 그려짐.</summary>
-    public bool DetailReady => mode == Mode.Detail && detail is not null;
+    public bool DetailReady => mode == Mode.Detail && detail is not null && detailComplete;
     /// <summary>비교 표가 그려짐.</summary>
     public bool CompareReady => mode == Mode.Compare && comparison is not null;
     /// <summary>상세 타임라인 조작 (bench).</summary>
@@ -69,7 +82,8 @@ public sealed class RecordsScreen : Screen
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
         tabs = new SegmentedChoice(Ui, "records.tabs", "보기", [("measurements", "측정 목록"), ("diagnoses", "진단 기록")], "measurements");
-        tabs.Changed += v => { if (v == "diagnoses") ShowDiagnoses(); else ShowList(); };
+        // 프로그램이 탭을 맞출 때(상세 열기 등)는 바꾸기 처리를 하지 않는다: 진단 기록 탭에서 상세를 열면 목록으로 덮였다 (b3)
+        tabs.Changed += v => { if (syncingTabs) return; if (v == "diagnoses") ShowDiagnoses(); else ShowList(); };
         compareButton = new GlassButton(Ui, ButtonKind.Secondary, "records.compare", "비교", Icons.Layers);
         compareButton.Click += (_, _) => ToggleCompare();
         openButton = new GlassButton(Ui, ButtonKind.Ghost, "records.open", "다른 위치의 기록 열기", Icons.Layers);
@@ -91,6 +105,15 @@ public sealed class RecordsScreen : Screen
     public override void Entered()
     {
         _ = Context.Records.RefreshAsync(Context.Host.RunningId);
+        // 진단 기록도 들어올 때마다 다시 읽는다 (다른 화면에서 새로 돌린 진단, b2). 바뀌었을 때만 다시 그린다
+        if (diagnosesLoaded) _ = LoadDiagnosesAsync();
+    }
+
+    private void SetTab(string value)
+    {
+        syncingTabs = true;
+        try { tabs.Set(value); }
+        finally { syncingTabs = false; }
     }
 
     // ---------------- 들어오는 길 ----------------
@@ -115,8 +138,10 @@ public sealed class RecordsScreen : Screen
 
     private async Task OpenWhenListedAsync(string key)
     {
+        // 열기를 요청한 순간 새 세대: 두 번 열면 마지막 것만 상세로 (G4 M7 2라운드 2)
+        int req = ++requestGen;
         await Context.Records.RefreshAsync(Context.Host.RunningId);
-        DispatcherQueue.TryEnqueue(() => { if (!Context.IsClosing()) OpenDetail(key, null); });
+        DispatcherQueue.TryEnqueue(() => { if (!Context.IsClosing() && req == requestGen) OpenDetail(key, null); });
     }
 
     private async Task PickExternalAsync()
@@ -137,7 +162,7 @@ public sealed class RecordsScreen : Screen
     {
         LeaveDetail();
         mode = Mode.List;
-        tabs.Set("measurements");
+        SetTab("measurements");
         Rerender();
     }
 
@@ -147,22 +172,26 @@ public sealed class RecordsScreen : Screen
         mode = Mode.Diagnoses;
         picking = false;
         picked.Clear();
-        tabs.Set("diagnoses");
+        SetTab("diagnoses");
         if (!diagnosesLoaded) _ = LoadDiagnosesAsync();
         Rerender();
     }
 
+    private int diagnosesLoads;
+
     private async Task LoadDiagnosesAsync()
     {
+        int load = ++diagnosesLoads;
         var store = Context.Diagnosis.Store;
         var (items, skipped) = await Task.Run(store.List);
         DispatcherQueue.TryEnqueue(() =>
         {
-            if (Context.IsClosing()) return;
+            if (Context.IsClosing() || load != diagnosesLoads) return;
+            bool same = diagnosesLoaded && skipped == diagnosesSkipped && items.Select(x => x.File).SequenceEqual(diagnoses.Select(x => x.File));
             diagnoses = items;
             diagnosesSkipped = skipped;
             diagnosesLoaded = true;
-            Rerender();
+            if (!same) Rerender();
         });
     }
 
@@ -171,8 +200,9 @@ public sealed class RecordsScreen : Screen
         var item = Context.Records.Items.FirstOrDefault(i => i.Key == key);
         if (item?.Entry.Lifecycle == RecordLifecycle.Running) { Context.Navigate("measure", null); return; }
         LeaveDetail();
+        int req = ++requestGen;
         mode = Mode.Detail;
-        tabs.Set("measurements");
+        SetTab("measurements");
         detailKey = key;
         openedFromRowId = fromRow;
         detail = null;
@@ -180,33 +210,49 @@ public sealed class RecordsScreen : Screen
         expanded = -1;
         Context.Records.SetPinned([key]);
         Rerender();
-        _ = LoadDetailAsync(key);
+        _ = LoadDetailAsync(key, req);
     }
 
-    private async Task LoadDetailAsync(string key)
+    private async Task LoadDetailAsync(string key, int req)
     {
         var opened = await Context.Records.OpenAsync(key);
+        // 타임라인의 창과 무관한 부분은 UI 밖에서 미리 구한다 (12시간 기록에서 UI 프레임을 막지 않게)
+        (TimelineData Timeline, RecordDetailView View)? prepared = opened?.Record.Header is null ? null : await Task.Run(() => (Timeline: TimelineData.Build(opened).Warm(), View: RecordView.Detail(opened.Record, opened.Analysis, opened.Lifecycle)));
         DispatcherQueue.TryEnqueue(() =>
         {
-            if (Context.IsClosing() || detailKey != key) return;
+            if (Context.IsClosing() || req != requestGen || detailKey != key || mode != Mode.Detail) return;
             detail = opened;
+            if (prepared is { } p) { timelineData = p.Timeline; detailView = (opened!, p.View); }
             loadError = opened is null ? "기록을 읽지 못했습니다." : null;
             view.ShowAll(EndMs(opened));
             Rerender();
             scroll.ChangeView(null, 0, null, true);
-            back.Focus(FocusState.Programmatic);
+            // 다시 그리면 [목록으로]가 새 줄로 옮겨 붙어 아직 배치 전이다: 프레임을 그린 뒤에 초점을 준다 (M7 UI 시험 1차: 초점이 탐색으로 빠짐)
+            OnePerFrame(() => { if (req == requestGen && mode == Mode.Detail) back.Focus(FocusState.Programmatic); });
         });
     }
 
     private static long EndMs(OpenedRecord? r) => Math.Max(1, r?.Record.Rounds.LastOrDefault()?.AtMs ?? 1);
 
-    /// <summary>상세를 떠날 때: 저장하지 않은 메모 초안은 버리고 알린다 (구현 중 결정 4).</summary>
+    /// <summary>
+    /// 상세·비교를 떠날 때: 저장하지 않은 메모 초안은 버리고 알린다 (구현 중 결정 4). 그 기록의 원본·분석 참조도 놓는다:
+    /// 화면이 쥐고 있으면 라이브러리의 보유 한도(3개) 밖에서 기록이 남았다 (b5). 진행 중인 열기·비교 완료는 버린다 (b4).
+    /// </summary>
     private void LeaveDetail()
     {
-        if (editingMark is not null && mode == Mode.Detail)
+        if (editing.Count > 0 && mode == Mode.Detail)
             Context.Toasts.Show(ToastKind.Info, "저장하지 않은 메모를 버렸습니다", "다시 고치려면 그 기록을 여세요.");
-        editingMark = null;
-        if (mode == Mode.Detail) Context.Records.SetPinned([]);
+        editing.Clear();
+        memoDrafts.Clear();
+        focusMark = null;
+        requestGen++;
+        if (mode is Mode.Detail or Mode.Compare) Context.Records.SetPinned([]);
+        detail = null;
+        comparison = null;
+        detailView = null;
+        timelineData = null;
+        timeline = null;
+        timelineRange = null;
     }
 
     private void GoBack()
@@ -214,7 +260,24 @@ public sealed class RecordsScreen : Screen
         string? row = openedFromRowId;
         if (mode == Mode.Diagnosis) { mode = Mode.Diagnoses; Rerender(); return; }
         ShowList();
-        if (row is not null) DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => FindRow(row)?.Focus(FocusState.Programmatic));
+        if (row is not null) FocusLater(row, Mode.List);
+    }
+
+    /// <summary>
+    /// 줄이 나눠 그려진 뒤에 초점을 준다: 프레임 조각 큐 맨 뒤에 넣어(앞선 줄 만들기가 먼저 끝남) 찾고, 아직 없거나 받지 못하면
+    /// 몇 프레임 더 해 본다 (b6: 목록 9번째 줄 뒤·끊김 줄은 다음 프레임에 생겨 초점 복귀가 빠졌다).
+    /// </summary>
+    private void FocusLater(string id, Mode expected) => FocusLater(id, expected, requestGen, detailKey, 10);
+
+    /// <param name="gen">예약할 때의 요청 세대, <paramref name="key"/>는 그때의 상세: 그 사이 다른 기록을 열었으면 하지 않는다 (G4 M7 2라운드 4)</param>
+    private void FocusLater(string id, Mode expected, int gen, string? key, int tries)
+    {
+        OnePerFrame(() =>
+        {
+            if (mode != expected || gen != requestGen || (expected == Mode.Detail && key != detailKey)) return;
+            if (FindRow(id) is { } c && c.Focus(FocusState.Programmatic)) return;
+            if (tries > 1) FocusLater(id, expected, gen, key, tries - 1);
+        });
     }
 
     private Control? FindRow(string id) =>
@@ -262,6 +325,7 @@ public sealed class RecordsScreen : Screen
 
     private async Task CompareAsync(string a, string b)
     {
+        int req = ++requestGen;
         mode = Mode.Compare;
         comparison = null;
         loadError = null;
@@ -271,7 +335,7 @@ public sealed class RecordsScreen : Screen
         var rb = await Context.Records.OpenAsync(b);
         DispatcherQueue.TryEnqueue(() =>
         {
-            if (Context.IsClosing() || mode != Mode.Compare) return;
+            if (Context.IsClosing() || req != requestGen || mode != Mode.Compare) return;
             if (ra is null || rb is null) loadError = "한쪽 기록을 읽지 못해 비교하지 못했습니다.";
             else comparison = (ra, rb);
             Rerender();
@@ -290,19 +354,21 @@ public sealed class RecordsScreen : Screen
     {
         var items = Context.Records.Items;
         string key = $"{mode}|{items.Count}|{string.Join(",", items.Select(i => i.Stamp.Length + (i.Summary.Analyzing ? "a" : "d")))}|{Context.Records.Listed}"
-            + $"|{shown}|{picking}|{string.Join(",", picked)}|{detail?.Stamp}|{loadError}|{expanded}|{editingMark}|{comparison is null}|{diagnosesLoaded}|{openDiagnosis?.StartedAt}";
+            + $"|{shown}|{picking}|{string.Join(",", picked)}|{detail?.Stamp}|{loadError}|{expanded}|{string.Join(",", editing)}|{comparison is null}|{diagnosesLoaded}|{openDiagnosis?.StartedAt}";
         if (key == renderedKey) return;
         renderedKey = key;
         compareButton.IsEnabled = mode is Mode.List or Mode.Compare or Mode.Detail;
         AutomationProperties.SetItemStatus(compareButton, picking ? "picking" : "off");
         content.Children.Clear();
+        renderGen++;
+        detailComplete = false;
         bool modeChanged = renderedMode is { } rm && rm != mode;
         renderedMode = mode;
         switch (mode)
         {
-            case Mode.List: RenderList(items); break;
-            case Mode.Detail: RenderDetail(); break;
-            case Mode.Compare: RenderCompare(); break;
+            case Mode.List: RenderProfile.Time("records.list", () => RenderList(items)); break;
+            case Mode.Detail: RenderProfile.Time("records.detail", RenderDetail); break;
+            case Mode.Compare: RenderProfile.Time("records.compare", RenderCompare); break;
             case Mode.Diagnoses: RenderDiagnoses(); break;
             case Mode.Diagnosis: RenderDiagnosis(); break;
         }
@@ -338,8 +404,21 @@ public sealed class RecordsScreen : Screen
             return;
         }
         var list = new StackPanel { Spacing = Space.S1 };
+        list.KeyDown += OnListKey;   // 위·아래 화살표로 줄 이동 (설계 4.4)
         var visible = items.Take(shown).ToArray();
-        for (int i = 0; i < visible.Length; i++) list.Children.Add(Row(visible[i], i));
+        // 화면에 먼저 보이는 줄만 이번에 만들고 나머지는 다음 차례에 (한 프레임에 30줄을 만들고 배치하면 예산 50 ms에 닿았다, M7 bench)
+        int first = Math.Min(visible.Length, Size.RecordsFirstRows);
+        for (int i = 0; i < first; i++) list.Children.Add(Row(visible[i], i));
+        if (first < visible.Length)
+        {
+            int gen = renderGen;
+            OnePerFrame(() =>
+            {
+                if (gen != renderGen) return;
+                for (int i = first; i < visible.Length; i++) list.Children.Insert(i, Row(visible[i], i));
+                Context.QueueDiag();
+            });
+        }
         Context.Records.SetVisible(visible.Select(v => v.Key));
         if (items.Count > shown)
         {
@@ -358,6 +437,17 @@ public sealed class RecordsScreen : Screen
         string state = items.Any(i => i.Summary.Analyzing) ? "analyzing" : "normal";
         listBody.Set(list, state);
         content.Children.Add(listCard);
+    }
+
+    private void OnListKey(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (e.Key is not (Windows.System.VirtualKey.Up or Windows.System.VirtualKey.Down)) return;
+        if (Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(XamlRoot) is not Control c) return;
+        const string prefix = "records.row.";
+        string id = AutomationProperties.GetAutomationId(c);
+        if (!id.StartsWith(prefix, StringComparison.Ordinal) || !int.TryParse(id[prefix.Length..], out int n)) return;
+        int next = e.Key == Windows.System.VirtualKey.Up ? n - 1 : n + 1;
+        if (next >= 0 && FindRow(prefix + next) is { } target && target.Focus(FocusState.Keyboard)) e.Handled = true;
     }
 
     private UIElement Row(LibraryItem item, int index)
@@ -416,11 +506,24 @@ public sealed class RecordsScreen : Screen
 
     // ---------------- 상세 ----------------
 
+    /// <summary>
+    /// "목록으로" 줄. 버튼은 한 개를 다시 쓰므로, 이전 그리기의 줄에서 떼어 낸 뒤 붙인다
+    /// (부모가 있는 요소를 다른 패널에 넣으면 XAML이 0x800F1000으로 앱을 즉시 끝낸다. M7 UI 시험 1차).
+    /// 이전 줄은 직접 들고 있다가 뗀다: 화면에서 빠진 줄의 버튼은 Parent로 찾지 못하는 경우가 있었다.
+    /// </summary>
+    private StackPanel BackBar()
+    {
+        backBar?.Children.Remove(back);
+        backBar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
+        backBar.Children.Add(back);
+        return backBar;
+    }
+
+    private StackPanel? backBar;
+
     private void RenderDetail()
     {
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
-        bar.Children.Add(back);
-        content.Children.Add(bar);
+        content.Children.Add(BackBar());
         var item = Context.Records.Items.FirstOrDefault(i => i.Key == detailKey);
         foreach (var n in item?.External == true ? externalNotices : [])
             content.Children.Add(new Banner(Ui, "records.external.notice", BannerKind.Info, n));
@@ -447,7 +550,13 @@ public sealed class RecordsScreen : Screen
         }
         var r = detail.Record;
         var a = detail.Analysis;
-        var v = RecordView.Detail(r, a, detail.Lifecycle);
+        // 화면 모델은 기록마다 한 번 (펼치기·메모 고치기로 다시 그릴 때마다 12시간 기록의 추세를 다시 구하지 않게)
+        if (!ReferenceEquals(detailView?.For, detail))
+        {
+            var d0 = detail;
+            RenderProfile.Time("records.detail.view", () => detailView = (d0, RecordView.Detail(d0.Record, d0.Analysis, d0.Lifecycle)));
+        }
+        var v = detailView!.Value.View;
         var h = r.Header!;
         var label = ScreenParts.TimeLabel(h.StartedAt, Context.Now);
 
@@ -473,26 +582,10 @@ public sealed class RecordsScreen : Screen
         foreach (var (d, i) in v.Damage.Select((d, i) => (d, i)))
             content.Children.Add(new Banner(Ui, $"records.detail.damage.{i}", BannerKind.Warn, d));
 
-        // 통계
-        var stats = new StackPanel { Spacing = Space.S2 };
-        if (v.Verdicts.Count == 0) stats.Children.Add(Fonts.Wrapped("판정별로 셀 끊김이 없습니다.", Typography.Body, Ui.Brushes.Muted));
-        foreach (var line in v.Verdicts) stats.Children.Add(Named($"records.detail.verdict.{line.Verdict}", $"{line.Name}: {line.Text}", Typography.Body, Ui.Brushes.Ink));
-        if (v.CountNote is { } note) stats.Children.Add(Fonts.Wrapped(note, Typography.Caption, Ui.Brushes.Muted));
-        foreach (var t in v.TargetLines)
-        {
-            var box = new StackPanel { Spacing = Space.S0 };
-            box.Children.Add(Fonts.Text($"{t.Name} ({(t.Role == TargetRole.Local ? "로컬" : "외부")} · {t.Method})", Typography.Label, Ui.Brushes.Ink));
-            box.Children.Add(Fonts.Wrapped($"{t.Loss} · 평균 {t.Average} · 최대 {t.Max} · 최대 연속 손실 {t.Consecutive} · 마지막 성공 {t.LastSuccess} · 마지막 손실 {t.LastLoss}", Typography.Caption, Ui.Brushes.Muted));
-            AutomationProperties.SetAutomationId(box, $"records.detail.target.{t.TargetId}");
-            AutomationProperties.SetName(box, $"{t.Name}, {t.Loss}, 평균 {t.Average}, 최대 {t.Max}, 최대 연속 손실 {t.Consecutive}");
-            stats.Children.Add(box);
-        }
-        var (statsCard, statsBody) = ScreenParts.Card(Ui, "records.detail.stats", "통계");
-        statsBody.Set(stats, "normal");
-
         // 타임라인
         timeline = new TimelinePanel(Ui, "records.timeline", compact: false);
         timeline.Command += OnTimeline;
+        timeline.Picked += OnTimelinePicked;
         var zoomOut = new GlassButton(Ui, ButtonKind.Icon, "records.zoomout", "축소", Icons.Minus);
         var zoomIn = new GlassButton(Ui, ButtonKind.Icon, "records.zoomin", "확대", Icons.Plus);
         var left = new GlassButton(Ui, ButtonKind.Icon, "records.left", "앞으로", Icons.Back);
@@ -511,14 +604,91 @@ public sealed class RecordsScreen : Screen
         tstack.Children.Add(timeline);
         tstack.Children.Add(Legend());
         timelineBody.Set(tstack, "normal");
-        timeline.SizeChanged += (_, _) => DrawTimeline();
+        // 크기가 바뀔 때마다 배치 중에 바로 그리지 않고 프레임마다 한 번만 (첫 그리기 30 ms가 배치 프레임에 겹쳤다, M7 bench)
+        timeline.SizeChanged += (_, _) => QueueTimeline();
+        content.Children.Add(timelineCard);
+        QueueTimeline();
+
+        // 아래 카드(통계·추세·끊김·메모·진단)는 다음 차례에 만든다: 한 프레임에 상세 전체를 만들고 배치하면 12시간 기록에서
+        // 예산(50 ms)을 넘었다 (M7 UI 시험 1차 bench). 그 사이 다른 그리기가 있었으면 버린다.
+        int gen = renderGen;
+        var opened = detail;
+        OnePerFrame(() =>
+        {
+            if (gen != renderGen || !ReferenceEquals(opened, detail) || mode != Mode.Detail) return;
+            RenderProfile.Time("records.detail.rest", () => RenderDetailRest(opened, v, item, label));
+            detailComplete = true;
+            Context.QueueDiag();
+        });
+    }
+
+    // ---------------- 프레임 나누기 ----------------
+
+    private readonly Queue<Action> perFrame = new();
+    private bool frameHooked, timelineQueued;
+
+    /// <summary>
+    /// 무거운 그리기 조각을 프레임마다 하나씩 한다 (한 틈에 몰아서 하면 조각을 나눈 보람이 없다). 다음 프레임을 그린 뒤 낮은 우선순위로.
+    /// 12시간 기록의 상세·목록을 한 프레임에 만들고 배치하면 예산(50 ms)을 넘었다 (M7 UI 시험 1차 bench).
+    /// </summary>
+    private void OnePerFrame(Action action)
+    {
+        perFrame.Enqueue(action);
+        if (frameHooked) return;
+        frameHooked = true;
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += RunOnePerFrame;
+    }
+
+    private void RunOnePerFrame(object? sender, object e)
+    {
+        if (perFrame.Count == 0 || Context.IsClosing())
+        {
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= RunOnePerFrame;
+            frameHooked = false;
+            perFrame.Clear();
+            return;
+        }
+        var next = perFrame.Dequeue();
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { if (!Context.IsClosing()) next(); });
+    }
+
+    private void QueueTimeline()
+    {
+        if (timelineQueued) return;
+        timelineQueued = true;
+        OnePerFrame(() => { timelineQueued = false; DrawTimeline(); });
+    }
+
+    private void RenderDetailRest(OpenedRecord opened, RecordDetailView v, LibraryItem? item, Func<long, string> label)
+    {
+        var r = opened.Record;
+        var a = opened.Analysis;
+        var h = r.Header!;
+        // 통계
+        var stats = new StackPanel { Spacing = Space.S2 };
+        if (v.Verdicts.Count == 0) stats.Children.Add(Fonts.Wrapped("판정별로 셀 끊김이 없습니다.", Typography.Body, Ui.Brushes.Muted));
+        foreach (var line in v.Verdicts) stats.Children.Add(Named($"records.detail.verdict.{line.Verdict}", $"{line.Name}: {line.Text}", Typography.Body, Ui.Brushes.Ink));
+        if (v.CountNote is { } note) stats.Children.Add(Fonts.Wrapped(note, Typography.Caption, Ui.Brushes.Muted));
+        foreach (var t in v.TargetLines)
+        {
+            var box = new StackPanel { Spacing = Space.S0 };
+            box.Children.Add(Fonts.Text($"{t.Name} ({(t.Role == TargetRole.Local ? "로컬" : "외부")} · {t.Method})", Typography.Label, Ui.Brushes.Ink));
+            box.Children.Add(Fonts.Wrapped($"{t.Loss} · 평균 {t.Average} · 최대 {t.Max} · 최대 연속 손실 {t.Consecutive} · 마지막 성공 {t.LastSuccess} · 마지막 손실 {t.LastLoss}", Typography.Caption, Ui.Brushes.Muted));
+            // 이름 붙은 묶음은 GroupPanel이어야 UI 자동화 트리에 나온다 (StackPanel은 peer가 없어 숨는다. M7 UI 시험 1차)
+            var group = new GroupPanel($"records.detail.target.{t.TargetId}", $"{t.Name}, {t.Loss}, 평균 {t.Average}, 최대 {t.Max}, 최대 연속 손실 {t.Consecutive}");
+            group.Children.Add(box);
+            stats.Children.Add(group);
+        }
+        var (statsCard, statsBody) = ScreenParts.Card(Ui, "records.detail.stats", "통계");
+        statsBody.Set(stats, "normal");
+
 
         // 지연 추세
         var trend = new TrendChart(Ui, "records.trend");
         var roles = h.Targets.ToDictionary(t => t.Id, t => t.Role);
         var lines = v.Trend.Where(t => !t.NoBaseline).Select(t => (t, roles.GetValueOrDefault(t.TargetId, TargetRole.External))).ToArray();
         long end = EndMs(detail);
-        trend.SetData(lines, 0, end, label, TrendSummary(v.Trend));
+        RenderProfile.Time("records.detail.trend", () => trend.SetData(lines, 0, end, label, TrendSummary(v.Trend)));
         var trendStack = new StackPanel { Spacing = Space.S2 };
         trendStack.Children.Add(trend);
         foreach (var t in v.Trend.Where(t => t.NoBaseline)) trendStack.Children.Add(Fonts.Wrapped($"{t.Name}: 값이 적어 추세 없음", Typography.Caption, Ui.Brushes.Muted));
@@ -533,13 +703,13 @@ public sealed class RecordsScreen : Screen
             episodes.Children.Add(Named("records.episodes.none", none, Typography.Body, Ui.Brushes.Ink));
             episodes.Children.Add(Fonts.Wrapped(v.Coverage, Typography.Caption, Ui.Brushes.Muted));
         }
-        for (int i = 0; i < v.Episodes.Count; i++) episodes.Children.Add(EpisodeRow(v.Episodes[i], a.Episodes[i], i, label));
+        RenderProfile.Time("records.detail.episodes", () => { for (int i = 0; i < v.Episodes.Count; i++) episodes.Children.Add(EpisodeRow(v.Episodes[i], a.Episodes[i], i, label)); });
         var (episodeCard, episodeBody) = ScreenParts.Card(Ui, "records.detail.episodes", "끊김 목록", v.Episodes.Count == 0 ? null : $"{v.Episodes.Count}번 · 줄을 펼치면 주변 회차");
         episodeBody.Set(episodes, v.Episodes.Count == 0 ? "empty" : "normal");
 
         // 증상 표시와 메모
         var (marksCard, marksBody) = ScreenParts.Card(Ui, "records.detail.marks", "증상 표시와 메모");
-        marksBody.Set(MarksPanel(r, h, label), "normal");
+        RenderProfile.Time("records.detail.marks", () => marksBody.Set(MarksPanel(r, h, label), "normal"));
 
         // 이 측정 중 진단
         var during = (diagnosesLoaded ? diagnoses : []).Where(x => x.Stored.MeasurementId == h.Id).ToArray();
@@ -552,7 +722,7 @@ public sealed class RecordsScreen : Screen
             var row = new RowButton(Ui, $"records.detail.diagnosis.{i}", $"{head}, {LiveSummary.When(x.Stored.StartedAt, Context.Now)}",
                 Fonts.Text($"{head} · {LiveSummary.When(x.Stored.StartedAt, Context.Now)}", Typography.Body, Ui.Brushes.Ink));
             var stored = x.Stored;
-            row.Click += (_, _) => { openDiagnosis = stored; mode = Mode.Diagnosis; Rerender(); };
+            row.Click += (_, _) => { LeaveDetail(); openDiagnosis = stored; mode = Mode.Diagnosis; SetTab("diagnoses"); Rerender(); };
             diagStack.Children.Add(row);
         }
         diagStack.Children.Add(FolderButton(item));
@@ -560,11 +730,11 @@ public sealed class RecordsScreen : Screen
         diagBody.Set(diagStack, "normal");
 
         var grid = TwoColumns([statsCard], [episodeCard, marksCard, diagCard]);
-        content.Children.Add(timelineCard);
         content.Children.Add(trendCard);
         content.Children.Add(grid);
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, DrawTimeline);
     }
+
+    private void DrawTimeline() => RenderProfile.Time("records.timeline", DrawTimelineNow);
 
     private static string TrendSummary(IReadOnlyList<TrendLine> lines) =>
         "지연 추세. " + string.Join(". ", lines.Select(t => t.NoBaseline ? $"{t.Name} 값이 적어 추세 없음"
@@ -654,22 +824,85 @@ public sealed class RecordsScreen : Screen
         DrawTimeline();
     }
 
-    private void DrawTimeline()
+    /// <summary>타임라인을 누른 자리(폭 비율)에 끊김이 있으면 그 줄로: 펼치고 초점 (설계 4.1).</summary>
+    private void OnTimelinePicked(double fraction)
+    {
+        if (detail?.Record.Header is not { } h || timeline is null) return;
+        var (from, to) = view.Window(EndMs(detail));
+        long at = from + (long)Math.Round(Math.Clamp(fraction, 0, 1) * (to - from));
+        long slack = Math.Max(h.IntervalMs, (to - from) / Math.Max(1, timeline.Columns) * 3);   // 좁은 띠도 누를 수 있게 몇 열 여유
+        var rounds = detail.Record.Rounds;
+        int index = -1;
+        long best = long.MaxValue;
+        for (int i = 0; i < detail.Analysis.Episodes.Count; i++)
+        {
+            var e = detail.Analysis.Episodes[i];
+            long s = rounds.FirstOrDefault(r => r.Round >= e.FirstRound)?.AtMs ?? 0;
+            long t = rounds.LastOrDefault(r => r.Round <= e.LastRound)?.AtMs ?? s;
+            long distance = at < s ? s - at : at > t ? at - t : 0;
+            if (distance <= slack && distance < best) { best = distance; index = i; }
+        }
+        lastPicked = index;
+        Context.QueueDiag();
+        if (index < 0) return;
+        expanded = index;
+        Rerender();
+        FocusLater($"records.episode.{index}", Mode.Detail);
+    }
+
+    private int? lastPicked;
+
+    private void DrawTimelineNow()
     {
         if (detail?.Record.Header is not { } h || timeline is null || timeline.ActualWidth <= 0) return;
         var r = detail.Record;
         long nowMs = EndMs(detail);
         var (from, to) = view.Window(nowMs);
         var label = ScreenParts.TimeLabel(h.StartedAt, Context.Now);
-        var marks = SymptomMarks.FromEvents(r.Events, r.NoteLines).Marks;
-        var downs = detail.Analysis.Links.Downs.Select(d => new LinkDownView(d.Adapter, d.Source, d.FromMs, d.ToMs, false)).ToArray();
-        var bands = TimelineModel.Bands(r.Rounds, h.Targets, r.Gaps, h.IntervalMs);
-        var frame = TimelineModel.Frame(r.Rounds, h.Targets, r.Gaps, marks, downs, bands, from, to, timeline.Columns, h.IntervalMs, $"{label(from)}~{label(to)}");
-        timeline.Show(frame, label, false, $"{label(from)}부터 {label(to)}까지 ({view.Label})");
+        // 창과 무관한 부분(증상 표시·링크 끊김·띠·회차 대표값)은 기록마다 한 번만 구한다. 보통은 상세를 열 때 백그라운드에서
+        // 미리 구해 둔다 (M7 UI 시험 1차: 12시간 기록에서 그릴 때마다 4만 회차를 다시 구해 프레임 예산을 넘김)
+        if (!ReferenceEquals(timelineData?.For, detail))
+        {
+            var built = TimelineData.Build(detail);
+            RenderProfile.Time("records.timeline.prepare", () => built.Warm());
+            timelineData = built;
+        }
+        var td = timelineData!;
+        TimelineFrame frame = default!;
+        RenderProfile.Time("records.timeline.frame", () => frame = TimelineModel.Frame(r.Rounds, h.Targets, r.Gaps, td.Marks, td.Downs, td.Bands, from, to, timeline.Columns, h.IntervalMs, $"{label(from)}~{label(to)}", td.Reps));
+        RenderProfile.Time("records.timeline.show", () => timeline.Show(frame, label, false, $"{label(from)}부터 {label(to)}까지 ({view.Label})"));
         if (timelineRange is not null)
         {
             timelineRange.Text = $"{label(from)} ~ {label(to)} · {view.Label}";
             AutomationProperties.SetName(timelineRange, timelineRange.Text);
+        }
+    }
+
+    private TimelineData? timelineData;
+    private (OpenedRecord For, RecordDetailView View)? detailView;
+
+    /// <summary>한 기록의 타임라인에서 보기 창과 무관한 부분. Warm은 UI 밖에서 불러도 된다 (그 뒤 UI만 읽는다).</summary>
+    private sealed class TimelineData(OpenedRecord record, IReadOnlyList<SymptomMark> marks, LinkDownView[] downs, IReadOnlyList<TimelineBand> bands)
+    {
+        public OpenedRecord For { get; } = record;
+        public IReadOnlyList<SymptomMark> Marks { get; } = marks;
+        public LinkDownView[] Downs { get; } = downs;
+        public IReadOnlyList<TimelineBand> Bands { get; } = bands;
+        public RepresentativeCache Reps { get; } = new();
+
+        public static TimelineData Build(OpenedRecord o)
+        {
+            var r = o.Record;
+            var h = r.Header!;
+            return new TimelineData(o, SymptomMarks.FromEvents(r.Events, r.NoteLines).Marks,
+                o.Analysis.Links.Downs.Select(d => new LinkDownView(d.Adapter, d.Source, d.FromMs, d.ToMs, false)).ToArray(),
+                TimelineModel.Bands(r.Rounds, h.Targets, r.Gaps, h.IntervalMs));
+        }
+
+        public TimelineData Warm()
+        {
+            Reps.Update(For.Record.Rounds, For.Record.Header!.Targets);
+            return this;
         }
     }
 
@@ -711,7 +944,9 @@ public sealed class RecordsScreen : Screen
         {
             expanded = expanded == index ? -1 : index;
             Rerender();
-            if (expanded == index) { CenterOn(episode); DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => FindRow($"records.episode.{index}")?.Focus(FocusState.Programmatic)); }
+            if (expanded == index) CenterOn(episode);
+            // 펼쳐도 접어도 그 줄로 초점을 돌려준다: 줄은 아래 카드와 함께 다음 프레임에 다시 생긴다 (b6)
+            FocusLater($"records.episode.{index}", Mode.Detail);
         };
         stack.Children.Add(toggle);
         if (open && detail is not null) stack.Children.Add(EpisodeDetailPanel(episode, index));
@@ -725,7 +960,6 @@ public sealed class RecordsScreen : Screen
         var names = h.Targets.Where(t => t.Enabled).ToDictionary(t => t.Id, t => t.Name);
         var offset = TimeSpan.FromMinutes(h.UtcOffsetMinutes);
         var panel = new StackPanel { Spacing = Space.S2, Margin = new Thickness(Space.S5, 0, 0, Space.S3) };
-        AutomationProperties.SetAutomationId(panel, $"records.episode.{index}.detail");
         if (episode.Parts.Count > 1)
         {
             panel.Children.Add(Fonts.Text("판정이 바뀐 구간", Typography.Label, Ui.Brushes.Ink));
@@ -751,7 +985,9 @@ public sealed class RecordsScreen : Screen
         var copy = new GlassButton(Ui, ButtonKind.Ghost, $"records.episode.{index}.copy", "상세 복사", Icons.Card) { HorizontalAlignment = HorizontalAlignment.Left };
         copy.Click += async (_, _) => await CopyAsync(RecordView.Copy(h, d));
         panel.Children.Add(copy);
-        return panel;
+        var group = new GroupPanel($"records.episode.{index}.detail", $"끊김 {index + 1} 상세");   // UI 자동화에 보이는 묶음
+        group.Children.Add(panel);
+        return group;
     }
 
     private async Task CopyAsync(string text)
@@ -783,6 +1019,8 @@ public sealed class RecordsScreen : Screen
     private UIElement MarksPanel(MeasurementRecord r, RecordHeader h, Func<long, string> label)
     {
         var stack = new StackPanel { Spacing = Space.S2 };
+        memoStateText.Clear();
+        memoEditors.Clear();
         var marks = SymptomMarks.FromEvents(r.Events, r.NoteLines).Marks;
         if (marks.Count == 0)
         {
@@ -794,24 +1032,45 @@ public sealed class RecordsScreen : Screen
         {
             var row = new StackPanel { Spacing = Space.S1 };
             string when = label(m.AtMs);
-            if (editingMark == m.Mark)
+            if (editing.Contains(m.Mark))
             {
-                var box = new GlassTextBox(Ui, $"records.mark.{i}.text", $"{when} 메모", m.Memo ?? "", "무슨 일이 있었나요?", double.NaN, multiline: false);
+                // 입력 칸은 다시 그릴 때마다 새로 만든다: 글은 초안에서 (없으면 저장하지 못한 글, 그다음 저장된 메모)
+                bool failed = Context.Memos.TryFailedDraft(detailKey!, m.Mark, out var failedText);
+                string text = memoDrafts.TryGetValue(m.Mark, out var draft) ? draft : failed ? failedText ?? "" : m.Memo ?? "";
+                var box = new GlassTextBox(Ui, $"records.mark.{i}.text", $"{when} 메모", text, "무슨 일이 있었나요?", double.NaN, multiline: false);
                 box.Box.MaxLength = SymptomMarks.MaxMemoLength;
-                if (Context.Memos.TryFailedDraft(detailKey!, m.Mark, out var failedText)) { box.Text = failedText ?? ""; box.SetError("저장하지 못했습니다. 다시 저장해 보세요."); }
+                if (failed) box.SetError("저장하지 못했습니다. 다시 저장해 보세요.");
+                var mark = m;
+                box.Box.TextChanged += (_, _) => memoDrafts[mark.Mark] = box.Text;
                 var save = new GlassButton(Ui, ButtonKind.Primary, $"records.mark.{i}.save", "저장", Icons.Check);
                 var cancel = new GlassButton(Ui, ButtonKind.Ghost, $"records.mark.{i}.cancel", "취소");
-                var mark = m;
-                save.Click += async (_, _) => await SaveMemoAsync(mark, box);
-                box.Box.KeyDown += async (_, e) => { if (e.Key == Windows.System.VirtualKey.Enter) { e.Handled = true; await SaveMemoAsync(mark, box); } };
-                cancel.Click += (_, _) => { editingMark = null; Rerender(); };
+                save.Click += async (_, _) => await SaveMemoAsync(mark, box.Text);
+                box.Box.KeyDown += async (_, e) => { if (e.Key == Windows.System.VirtualKey.Enter) { e.Handled = true; await SaveMemoAsync(mark, box.Text); } };
+                cancel.Click += (_, _) => { editing.Remove(mark.Mark); memoDrafts.Remove(mark.Mark); Rerender(); };
                 var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S2 };
                 buttons.Children.Add(save);
                 buttons.Children.Add(cancel);
                 row.Children.Add(box);
                 row.Children.Add(buttons);
-                if (memoState.GetValueOrDefault(m.Mark) is { } st) row.Children.Add(Named($"records.mark.{i}.state", st, Typography.Caption, Ui.Brushes.Muted));
-                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => box.Box.Focus(FocusState.Programmatic));
+                // 상태 글 자리는 늘 둔다: 저장을 시작하면 다시 그리지 않고 이 글만 바꾼다 (b9: "저장하는 중…"이 화면에 나오지 않았다)
+                string? st = memoState.GetValueOrDefault((detailKey!, m.Mark));
+                var state = Named($"records.mark.{i}.state", st ?? "", Typography.Caption, Ui.Brushes.Muted);
+                state.Visibility = st is null ? Visibility.Collapsed : Visibility.Visible;
+                memoStateText[m.Mark] = state;
+                memoEditors[m.Mark] = (row, box);
+                row.Children.Add(state);
+                // 막 연 칸에만 초점 (다시 그릴 때마다 초점을 가져가면 끊김 줄을 펼칠 때 초점을 빼앗는다).
+                // 초점만 주면 글 상자까지만 내려가 그 아래 오류 글·저장 단추·상태 글이 잘렸다: 칸 전체가 보이게 한다 (M7 UI 시험 2차)
+                if (focusMark == m.Mark)
+                {
+                    focusMark = null;
+                    var whole = row;
+                    DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+                    {
+                        box.Box.Focus(FocusState.Programmatic);
+                        whole.StartBringIntoView();
+                    });
+                }
             }
             else
             {
@@ -822,42 +1081,103 @@ public sealed class RecordsScreen : Screen
                 {
                     var edit = new GlassButton(Ui, ButtonKind.Ghost, $"records.mark.{i}.edit", "메모 고치기", Icons.Pencil) { HorizontalAlignment = HorizontalAlignment.Left };
                     var mark = m;
-                    edit.Click += (_, _) => { editingMark = mark.Mark; Rerender(); };
+                    edit.Click += (_, _) => { if (!editing.Contains(mark.Mark)) editing.Add(mark.Mark); focusMark = mark.Mark; Rerender(); };
                     row.Children.Add(edit);
                 }
-                if (memoState.GetValueOrDefault(m.Mark) is { } st) row.Children.Add(Named($"records.mark.{i}.state", st, Typography.Caption, Ui.Brushes.Muted));
+                if (memoState.GetValueOrDefault((detailKey!, m.Mark)) is { } st) row.Children.Add(Named($"records.mark.{i}.state", st, Typography.Caption, Ui.Brushes.Muted));
             }
             stack.Children.Add(row);
         }
         return stack;
     }
 
-    private async Task SaveMemoAsync(SymptomMark mark, GlassTextBox box)
+    /// <summary>
+    /// 상태 글: 값을 (기록 출처, 표시)로 남기고, <paramref name="show"/>(그 요청의 상세가 아직 열려 있음)일 때만 지금 칸의 글을 바꾼다
+    /// (다시 그리지 않음). 떠난 상세의 늦은 완료가 다른 기록의 같은 표시 칸을 바꾸지 않게 (G4 M7 2라운드 3).
+    /// </summary>
+    /// <param name="reveal">
+    /// 그 글이 보이게 스크롤 (방금 누른 저장 단추 아래라 화면 밖일 수 있다, M7 UI 시험 2차: 150%에서 "저장하는 중…"이 잘림).
+    /// 사용자가 방금 그 칸에서 누른 저장 시작, 또는 초점이 아직 그 칸에 있을 때만: 늦게 온 완료가 다른 곳에 있는 사용자를 끌어오지 않게 (G4 M7 6라운드 2)
+    /// </param>
+    private void SetMemoState(string key, string mark, string text, bool show, bool reveal = false)
+    {
+        memoState[(key, mark)] = text;
+        if (show && memoStateText.TryGetValue(mark, out var t))
+        {
+            t.Text = Fonts.KeepAll(text);
+            AutomationProperties.SetName(t, text);
+            t.Visibility = Visibility.Visible;
+            if (reveal)
+            {
+                // 막 보이게 한 글은 아직 배치 전이라 배치 뒤에. 그 사이 다시 그려 떨어진 글은 하지 않는다
+                var shown = t;
+                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { if (shown.IsLoaded) shown.StartBringIntoView(); });
+            }
+        }
+        Context.QueueDiag();
+    }
+
+    /// <summary>지금 초점이 <paramref name="root"/> 안에 있는지.</summary>
+    private bool FocusWithin(DependencyObject root)
+    {
+        if (XamlRoot is not { } xr) return false;
+        for (var o = Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(xr) as DependencyObject; o is not null; o = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(o))
+            if (ReferenceEquals(o, root)) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// 다시 그려도 초점을 같은 자동화 ID의 새 요소로 돌려준다 (다시 그리면 요소가 바뀌어 초점이 사이드바로 가고 맨 위로 올라갔다).
+    /// 다른 칸을 고치던 중 앞 메모의 저장이 끝나 다시 그려도 그 칸에 남는다 (G4 M7 6라운드 1).
+    /// </summary>
+    private void RerenderKeepingFocus()
+    {
+        string? id = null;
+        if (XamlRoot is { } xr && Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(xr) is UIElement f && FocusWithin(content))
+            id = AutomationProperties.GetAutomationId(f);
+        Rerender();
+        if (!string.IsNullOrEmpty(id)) FocusLater(id, mode);
+    }
+
+    private async Task SaveMemoAsync(SymptomMark mark, string text)
     {
         if (detail is not { } d || detailKey is not { } key) return;
         var item = Context.Records.Items.FirstOrDefault(i => i.Key == key);
         if (item is null) return;
-        memoState[mark.Mark] = "저장하는 중…";
-        Context.QueueDiag();
-        var result = await Context.Memos.SaveAsync(key, item.Entry.Segments, d.Record.Header!.Id, mark.Mark, mark.AtMs, box.Text);
+        int req = requestGen;   // 이 상세를 떠나거나 다른 기록을 열면 바뀐다 (b4)
+        bool Here() => !Context.IsClosing() && req == requestGen && detailKey == key && mode == Mode.Detail;
+        // 화면 스레드에서 부르기 전에 번호를 받고, 완료·다시 열기·큐 작업마다 아직 마지막 요청인지 본다:
+        // 저장 쪽 최신 판정과 화면에 반영하는 순간 사이에 다음 저장을 눌러도 앞 완료가 "저장했습니다"를 띄우지 않게 (G4 M7 4라운드 1)
+        int seq = ++memoSaveCounter;
+        memoSaveSeq[(key, mark.Mark)] = seq;
+        bool Mine() => memoSaveSeq.GetValueOrDefault((key, mark.Mark)) == seq;
+        SetMemoState(key, mark.Mark, "저장하는 중…", Here(), reveal: true);
+        var result = await Context.Memos.SaveAsync(key, item.Entry.Segments, d.Record.Header!.Id, mark.Mark, mark.AtMs, text);
         if (Context.IsClosing()) return;
-        if (!result.Latest) return;   // 더 새 요청이 있다: 오래된 완료는 반영하지 않는다
+        if (!result.Latest || !Mine()) return;   // 더 새 요청이 있다: 오래된 완료는 반영하지 않는다
         if (result.State == EventWriteState.Saved)
         {
-            memoState[mark.Mark] = result.Truncated ? "저장했습니다 (200자에서 잘라 저장)" : "저장했습니다";
-            if (detailKey == key) editingMark = null;
+            SetMemoState(key, mark.Mark, result.Truncated ? "저장했습니다 (200자에서 잘라 저장)" : "저장했습니다", Here(),
+                reveal: memoEditors.TryGetValue(mark.Mark, out var done) && FocusWithin(done.Row));
+            // 저장하는 동안 더 고친 글이 있으면 칸과 초안을 남긴다
+            if (Here() && (!memoDrafts.TryGetValue(mark.Mark, out var now) || now == text)) { editing.Remove(mark.Mark); memoDrafts.Remove(mark.Mark); }
             await Context.Records.RefreshAsync(Context.Host.RunningId);
-            if (detailKey == key && !Context.IsClosing())
-            {
-                var reopened = await Context.Records.OpenAsync(key);
-                DispatcherQueue.TryEnqueue(() => { if (detailKey == key && reopened is not null) { detail = reopened; Rerender(); } });
-            }
+            if (!Here() || !Mine()) return;
+            var reopened = await Context.Records.OpenAsync(key);
+            DispatcherQueue.TryEnqueue(() => { if (Here() && Mine() && reopened is not null) { detail = reopened; RerenderKeepingFocus(); } });
         }
         else
         {
-            memoState[mark.Mark] = "저장하지 못했습니다";
-            if (detailKey == key) { box.SetError("저장하지 못했습니다. 다시 저장해 보세요."); Rerender(); }
-            else Context.Toasts.Show(ToastKind.Error, "메모를 저장하지 못했습니다", "그 기록을 다시 열면 다시 저장할 수 있습니다.");
+            memoState[(key, mark.Mark)] = "저장하지 못했습니다";
+            // 다시 그리지 않고 그 칸에만 오류 (초안은 memoDrafts에 그대로): 다시 그리면 다른 칸을 고치거나 끊김 줄로 간 사용자의
+            // 초점·스크롤을 빼앗았다 (G4 M7 6라운드 1. 그 전에는 초점이 사이드바로 가 오류가 안 보였다, M7 UI 시험 2차).
+            // 초점이 그 칸에 있을 때만 오류가 보이게 스크롤한다
+            if (Here() && editing.Contains(mark.Mark) && memoEditors.TryGetValue(mark.Mark, out var ed))
+            {
+                ed.Box.SetError("저장하지 못했습니다. 다시 저장해 보세요.");
+                SetMemoState(key, mark.Mark, "저장하지 못했습니다", true, reveal: FocusWithin(ed.Row));
+            }
+            else Context.Toasts.Show(ToastKind.Error, "메모를 저장하지 못했습니다", Here() ? "메모 고치기를 누르면 저장하지 못한 글로 다시 저장할 수 있습니다." : "그 기록을 다시 열면 다시 저장할 수 있습니다.");
         }
         Context.QueueDiag();
     }
@@ -866,9 +1186,7 @@ public sealed class RecordsScreen : Screen
 
     private void RenderCompare()
     {
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
-        bar.Children.Add(back);
-        content.Children.Add(bar);
+        content.Children.Add(BackBar());
         if (loadError is { } err)
         {
             content.Children.Add(new Banner(Ui, "records.compare.failed", BannerKind.Error, err));
@@ -906,7 +1224,7 @@ public sealed class RecordsScreen : Screen
             box.Children.Add(Fonts.Text($"{p.A.Target.Name} ({RecordView.MethodText(p.A.Target.Method)})", Typography.Label, Ui.Brushes.Ink));
             string Loss(TargetSide s) => s.LossRate is double rr ? $"{s.Valid}번 중 {s.Lost}번 ({LiveSummary.Percent(rr)})" : "값 없음";
             box.Children.Add(CompareLine($"records.compare.target.{i}.loss", "응답 없음", Loss(p.A), Loss(p.B), p.LossRate, p.LossSuppressed));
-            string Run(TargetSide s) => $"{s.MaxConsecutive}번" + (s.LongestRunMinMs is long ms ? $" · {TimelineModel.Seconds(ms)} 이상" : "") + (s.LongestRunOpen ? " (끝을 모름)" : "");
+            string Run(TargetSide s) => s.Valid == 0 ? "값 없음" : $"{s.MaxConsecutive}번" + (s.LongestRunMinMs is long ms ? $" · {TimelineModel.Seconds(ms)} 이상" : "") + (s.LongestRunOpen ? " (끝을 모름)" : "");
             box.Children.Add(CompareLine($"records.compare.target.{i}.run", "최대 연속 손실", Run(p.A), Run(p.B), p.Consecutive, p.ConsecutiveSuppressed));
             string Ms(double? x) => x is double v ? PathMapModel.Ms(v) : "값 없음";
             box.Children.Add(CompareLine($"records.compare.target.{i}.latency", "평균 · 최대 지연", $"{Ms(p.A.AvgMs)} · {Ms(p.A.MaxMs)}", $"{Ms(p.B.AvgMs)} · {Ms(p.B.MaxMs)}", Lower.None, "값만"));
@@ -946,7 +1264,7 @@ public sealed class RecordsScreen : Screen
             Lower.B => lowerIsWorse ? "A가 더 좋음" : "B가 더 적음",
             _ => suppressed is { } s && s != "값만" ? "비교 안 함 (" + s + ")" : "",
         };
-        var grid = new Grid { ColumnSpacing = Space.S3 };
+        var grid = new GroupPanel(id) { ColumnSpacing = Space.S3 };   // UI 자동화에 보이는 줄
         foreach (var w in new[] { 2.0, 3.0, 3.0, 3.0 }) grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(w, GridUnitType.Star) });
         void Cell(int col, string text, Microsoft.UI.Xaml.Media.Brush brush)
         {
@@ -958,7 +1276,6 @@ public sealed class RecordsScreen : Screen
         Cell(1, a, Ui.Brushes.Ink);
         Cell(2, b, Ui.Brushes.Ink);
         Cell(3, verdict, lower == Lower.None ? Ui.Brushes.Muted : Ui.Brushes.Ink);
-        AutomationProperties.SetAutomationId(grid, id);
         AutomationProperties.SetName(grid, $"{label}, A {a}, B {b}" + (verdict.Length > 0 ? ", " + verdict : ""));
         AutomationProperties.SetItemStatus(grid, lower.ToString());
         return grid;
@@ -995,9 +1312,7 @@ public sealed class RecordsScreen : Screen
 
     private void RenderDiagnosis()
     {
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
-        bar.Children.Add(back);
-        content.Children.Add(bar);
+        content.Children.Add(BackBar());
         if (openDiagnosis is not { } s) return;
         var v = StoredDiagnosisView.From(s);
         var (icon, brush) = DiagnosisLook.Weight(Ui, v.Weight);
@@ -1063,8 +1378,12 @@ public sealed class RecordsScreen : Screen
                 window = d.Record.Header is null ? null : view.Window(EndMs(d)).ToString(),
             } : null,
             detailLoading = mode == Mode.Detail && detail is null && loadError is null,
+            detailComplete = DetailReady,   // 아래 카드까지 그려짐 (한 프레임 늦게 만든다)
             loadError,
-            editing = editingMark,
+            editing = editing.LastOrDefault(),
+            editingCount = editing.Count,
+            memoDrafts = memoDrafts.Count,
+            timelinePicked = lastPicked,
             memoState = memoState.Values.ToArray(),
             comparison = comparison is { } p && mode == Mode.Compare ? MeasurementComparison.Compare(
                 new CompareSide(p.A.Record, p.A.Analysis, p.A.Lifecycle), new CompareSide(p.B.Record, p.B.Analysis, p.B.Lifecycle)) is { } c ? new

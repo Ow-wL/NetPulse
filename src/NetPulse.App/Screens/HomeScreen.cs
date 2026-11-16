@@ -19,6 +19,15 @@ namespace NetPulse.App.Screens;
 public sealed class HomeScreen : Screen
 {
     private readonly RepresentativeCache reps = new();
+
+    /// <summary>
+    /// 숨어 있는 동안에도 대표값 캐시를 회차마다 이어 둔다 (M5 이월 2): 숨은 화면은 그리지 않아, 긴 측정 뒤 첫 홈 이동에서
+    /// 4만여 회차를 한 번에 계산하느라 한 프레임이 예산(50 ms)을 넘었다. 이어 붙이기만이라 회차마다 비용은 작다.
+    /// </summary>
+    public void Warm(HostSnapshot s)
+    {
+        if (s.Header is { } h && s.Rounds.Count > 0) reps.Update(s.Rounds, h.Targets);
+    }
     private readonly PageHeader header;
     private readonly StackPanel chips = new() { Orientation = Orientation.Horizontal, Spacing = Space.S2 };
     private readonly GradeRing ring;
@@ -32,7 +41,7 @@ public sealed class HomeScreen : Screen
     private readonly GroupPanel heroCard, mapCard, chartCard, recentCard, diagCard;
     private readonly Grid side = new() { RowSpacing = Space.S5 };
     private readonly CardBody diagBody;
-    private long diagVersion = -1;
+    private string diagKey = "";
     private readonly FrameworkElement chartEmpty;
     private readonly StackPanel recentList = new() { Spacing = Space.S1 };
     private string recentState = "";
@@ -203,9 +212,11 @@ public sealed class HomeScreen : Screen
     private void RenderDiagnosis()
     {
         var d = Context.Diagnosis.Snapshot;
-        if (d.Version == diagVersion) return;
-        diagVersion = d.Version;
         var now = Context.Now;
+        // 날짜도 열쇠에 넣는다: 진단이 그대로여도 자정을 넘기면 "오늘"이 "어제"로 바뀌어야 한다 (M6 G4 4라운드 이월 4)
+        string key = $"{d.Version}|{now.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture)}";
+        if (key == diagKey) return;
+        diagKey = key;
         (int Conclusion, DateTimeOffset At)? latest = d.Last is { } l ? (l.Result.Main.Number, l.Result.EndedAt) : d.Recent is { } r ? (r.Conclusion, r.StartedAt) : null;
         if (d.Operation != DiagnosisOperation.None)
         {

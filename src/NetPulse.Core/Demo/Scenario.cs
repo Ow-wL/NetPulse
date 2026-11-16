@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -250,15 +250,16 @@ public sealed class ScenarioDiagnosis
     }
 }
 
+/// <summary>어댑터 덮어쓰기. 적지 않은 필드(null)는 시간축 규칙 값 그대로 (M6 설계 3.2, G4 1라운드 a3).</summary>
 public sealed class ScenarioDiagAdapter
 {
-    public bool Up { get; init; } = true;
-    public bool Ipv4 { get; init; } = true;
-    public bool Apipa { get; init; }
-    public bool Gateway { get; init; } = true;
-    public bool Dns { get; init; } = true;
+    public bool? Up { get; init; }
+    public bool? Ipv4 { get; init; }
+    public bool? Apipa { get; init; }
+    public bool? Gateway { get; init; }
+    public bool? Dns { get; init; }
     /// <summary>false면 경로를 못 찾음 (활성 어댑터 수는 Up이면 1, 아니면 0).</summary>
-    public bool Route { get; init; } = true;
+    public bool? Route { get; init; }
 }
 
 public sealed class ScenarioDiagPortal
@@ -269,11 +270,12 @@ public sealed class ScenarioDiagPortal
     public bool Body { get; init; } = true;
 }
 
+/// <summary>링크 덮어쓰기. 적지 않은 필드(null)는 시간축 규칙 값 그대로.</summary>
 public sealed class ScenarioDiagLink
 {
     public string? Now { get; init; }
     public string? Log { get; init; }
-    public bool RecentDown { get; init; }
+    public bool? RecentDown { get; init; }
 }
 
 public sealed class ScenarioDiagSite

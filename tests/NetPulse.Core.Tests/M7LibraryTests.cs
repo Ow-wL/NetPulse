@@ -48,6 +48,31 @@ public sealed class M7LibraryTests : IDisposable
     }
 
     [Fact]
+    public async Task EveryRefreshRequestGetsAListPassThatStartsAfterIt()
+    {
+        // 갱신 루프가 끝내기로 정한 뒤 작업이 완료되기 전에 온 요청이 합쳐지기만 하고 사라지면, 측정 종료 갱신을 놓쳐
+        // 목록에 "측정 중"이 남는다 (G4 M7 1라운드 a4). 그 틈에서 요청을 넣고, 그 요청 뒤에 시작한 읽기가 있는지 본다
+        var p = dir.Sub("roots");
+        long requested = 0, seen = 0;
+        var lib = new RecordLibrary(() => { Interlocked.Exchange(ref seen, Interlocked.Read(ref requested)); return [p]; });
+        var ct = TestContext.Current.CancellationToken;
+        Task? late = null;
+        long lateStamp = 0;
+        lib.AfterLastPassForTest = () =>
+        {
+            if (late is not null) return;
+            lateStamp = Interlocked.Increment(ref requested);
+            late = lib.RefreshAsync(null);
+        };
+        long first = Interlocked.Increment(ref requested);
+        await lib.RefreshAsync(null).WaitAsync(Wait, ct);
+        Assert.True(Interlocked.Read(ref seen) >= first);
+        Assert.NotNull(late);
+        await late!.WaitAsync(Wait, ct);
+        Assert.True(Interlocked.Read(ref seen) >= lateStamp, "끝내기로 정한 뒤에 온 요청 뒤에 시작한 목록 읽기가 없습니다");
+    }
+
+    [Fact]
     public async Task ListHasNoLimitIsNewestFirstAndKeepsUnreadableAndRunningRecords()
     {
         var p = dir.Sub("p");

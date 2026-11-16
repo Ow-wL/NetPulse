@@ -41,6 +41,8 @@ public sealed class DiagnoseScreen : Screen
     private int columns;
     private ScrollViewer scroll = null!;
     private bool siteWasRunning;
+    /// <summary>끝난 사이트 점검 수 (진단 값: 시험이 새 결과를 기다리는 표지. 도메인은 넣지 않는다).</summary>
+    private int siteChecks;
 
     public DiagnoseScreen(ScreenContext context) : base(context, "diagnose")
     {
@@ -73,7 +75,7 @@ public sealed class DiagnoseScreen : Screen
         siteInput = new GlassTextBox(Ui, "diagnose.site.input", "도메인", "", "예: example.com", Size.FieldL, multiline: false);
         siteInput.Box.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.Enter) { e.Handled = true; CheckSite(); } };
         // TextChanged는 비동기로 늦게 올 수 있다: 오류를 낸 그 입력 그대로면 지우지 않는다
-        siteInput.Box.TextChanged += (_, _) => { if (siteInput.Text != erroredInput) siteInput.SetError(null); };
+        siteInput.Box.TextChanged += (_, _) => { userActions++; if (siteInput.Text != erroredInput) siteInput.SetError(null); };
         siteRun = new GlassButton(Ui, ButtonKind.Secondary, "diagnose.site.run", "점검", Icons.Globe) { VerticalAlignment = VerticalAlignment.Top };
         // 단추를 입력 칸과 같은 높이에 둔다 (아래 정렬이면 오류 줄이 생길 때 단추가 오류 옆으로 내려갔다)
         siteInput.SizeChanged += (_, _) =>
@@ -137,40 +139,76 @@ public sealed class DiagnoseScreen : Screen
     public void Start()
     {
         bool had = start.FocusState != FocusState.Unfocused;
-        Context.Diagnosis.StartDiagnosis();
+        var r = Context.Diagnosis.StartDiagnosis();
         Render(Context.Host.Snapshot);
-        NoteDisplacedFocus(start, had, e => startDisplaced = e, top: true);
+        // 실제로 새 작업을 시작했을 때만 그 작업의 기준을 잡는다: 바쁨·닫힘이면 진행 중인 작업의 기준을 그대로 (G4 3라운드 1)
+        if (r == DiagnosisRequest.Started)
+            NoteDisplacedFocus(start, had, e => startDisplaced = e, b => startBaseline = b, top: true);
     }
 
     /// <summary>
     /// 초점을 가진 단추가 꺼지면 WinUI가 초점을 다음 요소로 옮기고 그 요소가 보이게 화면을 내린다.
-    /// 누를 때 초점이 단추에 있었으면 적어 두었다가, 작업이 끝나면 단추로 돌려놓는다 (그 사이 글 상자에 입력 중이면 두기).
+    /// 누를 때 초점이 단추에 있었으면 적어 두었다가, 작업이 끝나면 단추로 돌려놓는다. 그 자동 이동이 끝난 뒤의
+    /// 사용자 조작 수를 기준으로 적어 두고, 끝났을 때 그 뒤에 조작이 있었으면 아무것도 바꾸지 않는다 (G4 2라운드 3).
     /// </summary>
-    private void NoteDisplacedFocus(Control button, bool hadFocus, Action<bool> note, bool top = false)
+    private void NoteDisplacedFocus(Control button, bool hadFocus, Action<bool> note, Action<long> noteBaseline, bool top = false)
     {
+        HookUserActions();
         bool displaced = hadFocus && !button.IsEnabled;
         note(displaced);
-        if (displaced && top)
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => scroll.ChangeView(null, 0, null, true));   // 진행 중에도 결론 자리가 보이게
+        noteBaseline(-1);
+        // 자동 초점 이동(같은 차례에 일어남)이 끝난 뒤에 기준을 잡는다. 끝나는 쪽 작업도 같은 낮은 우선순위로
+        // 나중에 넣으므로, 진단이 아주 빨리 끝나도 기준이 먼저 잡힌다
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            noteBaseline(userActions);
+            if (top && displaced) scroll.ChangeView(null, 0, null, true);   // 진행 중에도 결론 자리가 보이게
+        });
     }
 
-    private DependencyObject? Focused() =>
-        XamlRoot is null ? null : Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(XamlRoot) as DependencyObject;
+    private bool RestoreFocus(Control button, bool displaced) =>
+        displaced && button.IsEnabled && button.Focus(FocusState.Programmatic);
 
-    private void RestoreFocus(Control button, bool displaced)
+    /// <summary>
+    /// 작업이 끝났을 때 화면(초점·스크롤)을 건드려도 되는지 (G4 1·2라운드 b1): 대화상자가 열렸거나, 이 화면이 보이지 않거나,
+    /// 작업을 시작한 뒤 사용자가 무엇이든 조작했으면(키·누르기·휠·입력·이 화면 밖으로의 초점 이동) 그대로 둔다.
+    /// </summary>
+    private bool Undisturbed(long baseline) =>
+        !Context.Dialog.IsOpen && Visibility == Visibility.Visible && baseline >= 0 && userActions == baseline;
+
+    /// <summary>
+    /// 창 전체의 사용자 조작 수 (UI 스레드에서만). 키·포인터 누르기·휠은 이미 처리된 것까지 센다.
+    /// 초점 이동은 이 화면 밖으로 나간 것만 센다: 화면 안의 이동은 키·누르기로 이미 세었거나, 다시 그리기가 만든 자동 이동이다.
+    /// </summary>
+    private long userActions;
+    private UIElement? actionRoot;
+
+    private void HookUserActions()
     {
-        if (!displaced || !button.IsEnabled) return;
-        if (Focused() is TextBox) return;
-        button.Focus(FocusState.Programmatic);
+        if (actionRoot is not null || XamlRoot?.Content is not UIElement root) return;
+        actionRoot = root;
+        root.AddHandler(KeyDownEvent, new Microsoft.UI.Xaml.Input.KeyEventHandler((_, _) => userActions++), true);
+        root.AddHandler(PointerPressedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_, _) => userActions++), true);
+        root.AddHandler(PointerWheelChangedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_, _) => userActions++), true);
+        Microsoft.UI.Xaml.Input.FocusManager.GotFocus += (_, e) =>
+        {
+            if (e.NewFocusedElement is DependencyObject now && !IsInside(now, this)) userActions++;
+        };
     }
 
     private bool startDisplaced, siteDisplaced;
+    private long startBaseline = -1, siteBaseline = -1;
+    // 시험 고리: 사이트 점검 요청 수와 마지막 응답 (Enter가 앱에 닿았는지 확인, M6 G4 4라운드 이월 2)
+    private long siteRequests;
+    private DiagnosisRequest? lastSiteRequest;
     private string? erroredInput;
 
     private void CheckSite()
     {
         bool had = siteRun.FocusState != FocusState.Unfocused;
         var r = Context.Diagnosis.CheckSite(siteInput.Text);
+        siteRequests++;
+        lastSiteRequest = r;
         if (r == DiagnosisRequest.Invalid && Context.Diagnosis.Snapshot.Site.InputError is { } code)
         {
             erroredInput = siteInput.Text;
@@ -184,7 +222,9 @@ public sealed class DiagnoseScreen : Screen
             });
         }
         Render(Context.Host.Snapshot);
-        NoteDisplacedFocus(siteRun, had, e => siteDisplaced = e);
+        // 점검 중 입력 칸의 Enter는 바쁨으로 끝난다: 진행 중인 점검의 기준(그 뒤의 수정 포함)을 덮지 않는다 (G4 3라운드 1)
+        if (r == DiagnosisRequest.Started)
+            NoteDisplacedFocus(siteRun, had, e => siteDisplaced = e, b => siteBaseline = b);
     }
 
     private void ConfirmFlush(Control opener)
@@ -192,6 +232,8 @@ public sealed class DiagnoseScreen : Screen
         void Closed(bool ok)
         {
             Context.Dialog.Closed -= Closed;
+            // 연 단추가 그 사이 화면에서 빠졌으면 지금 있는 같은 역할의 단추로 초점을 돌린다 (G4 1라운드 b2)
+            if (opener.XamlRoot is null || !opener.IsLoaded) (FindById("diagnose.conclusion.flush") ?? flush).Focus(FocusState.Programmatic);
             if (!ok) return;
             if (Context.Diagnosis.RequestFlush() == DiagnosisRequest.Queued)
                 Context.Toasts.Show(ToastKind.Info, "진단이 끝나면 DNS 캐시를 비웁니다", "비운 뒤 빠른 진단을 다시 돌립니다.");
@@ -271,7 +313,8 @@ public sealed class DiagnoseScreen : Screen
     {
         var d = Context.Diagnosis.Snapshot;
         folderTarget = PickFolder();
-        string folderKey = (folderTarget ?? "") + "|" + (Context.Host.RunningId ?? "");
+        // 오늘 날짜도 넣는다: 최근 기록의 "오늘/어제"가 진단 상태 변화 없이 자정에 바뀐다 (G4 3라운드 4)
+        string folderKey = (folderTarget ?? "") + "|" + (Context.Host.RunningId ?? "") + "|" + Context.Now.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture);
         if (d.Version == renderedVersion && folderKey == renderedFolderKey) return;
         bool finished = renderedVersion >= 0 && d.Operation == DiagnosisOperation.None && d.Last is not null
             && !ReferenceEquals(d.Last, lastRun);
@@ -313,13 +356,31 @@ public sealed class DiagnoseScreen : Screen
     {
         var displaced = startDisplaced;
         startDisplaced = false;
-        // 배치가 끝난 뒤에 (초점 이동이 만든 스크롤보다 나중에)
+        // 배치가 끝난 뒤에 (초점 이동이 만든 스크롤보다 나중에). 기준은 그때 읽는다:
+        // 진단이 아주 빨리 끝나면 기준을 잡는 작업(같은 낮은 우선순위, 먼저 넣음)이 아직 돌지 않았다
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
-            if (Context.IsClosing()) return;
+            if (Context.IsClosing() || !Undisturbed(startBaseline)) return;
             RestoreFocus(start, displaced);
             scroll.ChangeView(null, 0, null, true);
         });
+    }
+
+    private static string RuntimeHelpersId(object? o) => o is null ? "-" : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(o).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private Control? FindById(string id)
+    {
+        static IEnumerable<DependencyObject> All(DependencyObject root)
+        {
+            int n = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root);
+            for (int i = 0; i < n; i++)
+            {
+                var c = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, i);
+                yield return c;
+                foreach (var x in All(c)) yield return x;
+            }
+        }
+        return All(this).OfType<Control>().FirstOrDefault(c => AutomationProperties.GetAutomationId(c) == id);
     }
 
     /// <summary>초점을 가진 요소에서 가장 가까운 자동화 Id (진단 출력용).</summary>
@@ -345,8 +406,15 @@ public sealed class DiagnoseScreen : Screen
         _ => "DNS 캐시를 비웠고 다시 검사하는 중",
     };
 
+    private string? conclusionKey;
+
     private void RenderConclusion(DiagnosisSnapshot d)
     {
+        // 사이트 점검처럼 결론과 무관한 변경으로 결론 단추(대화상자를 연 단추)가 사라지지 않게 (G4 1라운드 b2)
+        // 최근 기록 설명의 "오늘/어제"가 날짜에 따라 바뀌므로 오늘 날짜도 넣는다 (G4 2라운드 5)
+        string key = $"{d.Operation}|{d.Flush}|{d.Partial.Count}|{RuntimeHelpersId(d.Last)}|{d.Recent?.StartedAt}|{d.Recent?.Conclusion}|{d.SkippedRecords}|{Context.Now.Date:yyyyMMdd}";
+        if (key == conclusionKey) return;
+        conclusionKey = key;
         conclusion.Children.Clear();
         if (d.Operation != DiagnosisOperation.None)
         {
@@ -459,6 +527,7 @@ public sealed class DiagnoseScreen : Screen
         siteRun.IsEnabled = !d.Site.Running;
         bool siteFinished = siteWasRunning && !d.Site.Running;
         siteWasRunning = d.Site.Running;
+        if (siteFinished) siteChecks++;
         // 결과 줄이 카드 아래에 붙으므로, 점검이 끝나면 결과가 보이게 한다
         if (siteFinished)
         {
@@ -466,7 +535,7 @@ public sealed class DiagnoseScreen : Screen
             siteDisplaced = false;
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
-                if (Context.IsClosing()) return;
+                if (Context.IsClosing() || !Undisturbed(siteBaseline)) return;
                 RestoreFocus(siteRun, displaced);
                 siteResult.UpdateLayout();
                 siteResult.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false });
@@ -550,7 +619,7 @@ public sealed class DiagnoseScreen : Screen
             compare = d.Last is { } run && DiagnosisView.Compare(run, d.SkippedRecords) is { } c ? c.Title : null,
             changes = d.Last?.Changes?.Select(x => x.Id.ToString()).ToArray(),
             recent = d.Recent?.Conclusion,
-            site = new { d.Site.InputError, d.Site.Running, dns = d.Site.Result?.Dns.Judgment.ToString(), https = d.Site.Result?.Https.Judgment.ToString(), httpsState = d.Site.Result?.Https.State.ToString() },
+            site = new { d.Site.InputError, d.Site.Running, checks = siteChecks, dns = d.Site.Result?.Dns.Judgment.ToString(), https = d.Site.Result?.Https.Judgment.ToString(), httpsState = d.Site.Result?.Https.State.ToString() },
             expanded = checkCards.Values.Where(c => c.Expanded).Select(c => c.Id.ToString()).ToArray(),
             copyState,
             // 결과 복사가 쓰는 글 그대로 (주소·도메인 없음, G2가 검사). 흐름 시험이 실제 클립보드와 비교한다 (설계 7.2-4)
@@ -560,6 +629,8 @@ public sealed class DiagnoseScreen : Screen
             folderEnabled = folder.IsEnabled,
             scrollY = (int)scroll.VerticalOffset,
             focus = FocusedId(),
+            // 완료 처리의 사용자 조작 기준 (수: 지금까지의 조작 수, 기준 -1 = 아직 없음)
+            guard = new { inputs = userActions, start = startBaseline, site = siteBaseline, siteRequests, lastSiteRequest = lastSiteRequest?.ToString() },
         };
     }
 }

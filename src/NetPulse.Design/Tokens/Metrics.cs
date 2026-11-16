@@ -57,6 +57,8 @@ public static class Size
     public const double HomeTwoColumns = 760;
     /// <summary>기록 목록이 한 번에 더 보여 주는 줄 수 (M7 설계 3.1)</summary>
     public const int RecordsPage = 30;
+    /// <summary>기록 목록에서 첫 프레임에 만드는 줄 수 (나머지는 다음 차례, M7 bench records-enter).</summary>
+    public const int RecordsFirstRows = 8;
     /// <summary>창의 기본 클라이언트 크기 (물리 픽셀). UI 테스트와 캡처 매트릭스도 이 크기를 쓴다.</summary>
     public const int WindowWidth = 1280, WindowHeight = 800;
 }

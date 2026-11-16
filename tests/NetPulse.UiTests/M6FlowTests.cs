@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 using NetPulse.Core.Diagnostics;
 
@@ -114,10 +114,11 @@ public sealed class M6FlowTests
                 var d = WaitRun(app);
                 Assert.True(Sd(d).GetProperty("conclusion").GetInt32() == conclusion, $"{scenario}: 결론 {Sd(d).GetProperty("conclusion").GetInt32()} (기대 {conclusion})");
                 AssertJudgments(d, judgments, scenario);
-                AssertRecordMatches(userData, d);
-                // 관측 범위 줄: 일부 성공·확인 못 한 검사가 있으면 그 줄이 있다
-                bool needsScope = judgments.Any(j => j is C or U);
-                Assert.Equal(needsScope, app.Exists("diagnose.conclusion.scope"));
+                // 관측 범위 줄: 저장된 검사 판정으로 Core가 만드는 범위 줄이 있을 때만 (일부 성공·게이트웨이 무응답 단서)
+                var stored = AssertRecordMatches(userData, d);
+                var scope = DiagnosisTexts.Scope(stored.Checks.Select(c => new CheckResult(c.Id, c.Judgment, c.PartlyUnconfirmed, c.State, c.Code, c.Targets,
+                    TimeSpan.FromMilliseconds(c.ElapsedMs), new Dictionary<string, string>())).ToArray());
+                Assert.True(scope.Count > 0 == app.Exists("diagnose.conclusion.scope"), $"{scenario}: 관측 범위 줄 {scope.Count}개, 화면 {app.Exists("diagnose.conclusion.scope")}");
                 // 그 자리 도구: 결론 3 → 비우기, 결론 1·5 → 네트워크 설정
                 Assert.Equal(conclusion == 3, app.Exists("diagnose.conclusion.flush"));
                 Assert.Equal(conclusion is 1 or 5, app.Exists("diagnose.conclusion.settings"));
@@ -160,23 +161,28 @@ public sealed class M6FlowTests
     {
         // 시작 때 클립보드에 글이 아닌 내용이 있으면 덮어쓰지 않고 미완료로 둔다 (구현 중 결정 "클립보드 되읽기·시험 복원")
         var saved = ClipboardText.Save();
-        if (saved.Blocked) Assert.Skip("미완료: 클립보드에 글이 아닌 내용이 있어 덮어쓰지 않았습니다.");
+        if (saved.Blocked) Assert.Skip("미완료: 클립보드에 그대로 되돌릴 수 없는 형식이 있어 덮어쓰지 않았습니다.");
         var userData = AppDriver.NewUserData();
+        uint? owned = null;   // 앱이 쓴 뒤 자리 잡은 클립보드 번호. null이면 시험의 내용이 아니다 → 되돌리지 않는다
         try
         {
             using var app = Open(userData, "profile", "--demo tests:diag-dns --screen diagnose");
             app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "diagnose", "진단 화면");
             app.Invoke("diagnose.start");
             var d = WaitRun(app);
+            // 보관한 뒤 다른 곳에서 클립보드를 바꿨으면 (사용자가 새로 복사) 덮어쓰지 않고 미완료 (G4 3라운드 2)
+            if (ClipboardText.Sequence() != saved.Sequence) Assert.Skip("미완료: 시험 중 클립보드가 바뀌어 덮어쓰지 않았습니다.");
             app.Invoke("diagnose.copy");
             app.WaitDiag(d2 => S(d2, "copyState"), s => s.Length > 0, "복사 결과");
+            owned = ClipboardText.Claim(S(d, "copyText"));
+            Assert.True(owned is not null, "앱이 쓴 클립보드로 확인하지 못함 (형식: " + ClipboardText.LastFormats + ")");
             Assert.Equal("ok", S(app.Diag(), "copyState"));
             Assert.Equal(S(d, "copyText"), ClipboardText.Read());
             Assert.Equal(0, app.Close());
         }
         finally
         {
-            ClipboardText.Restore(saved);
+            ClipboardText.Restore(saved, owned);
             AppDriver.DeleteUserData(userData);
         }
     }
@@ -201,16 +207,53 @@ public sealed class M6FlowTests
                 Assert.Equal("", S(d, "site", "dns"));
                 Assert.True(app.Exists("diagnose.site.input.error"), "칸 오류가 보여야 한다: " + input);
             }
+            int done = 0;
             foreach (var (domain, https, state) in new[] { ("shop.example", "Normal", "Run"), ("down.example", "Fail", "Run"), ("slow.example", "Unmeasured", "Timeout") })
             {
                 app.SetText("diagnose.site.input", domain);
                 app.Invoke("diagnose.site.run");
-                var d = app.WaitDiag(x => x, x => !Sd(x).GetProperty("site").GetProperty("Running").GetBoolean() && S(x, "site", "dns").Length > 0
-                    && app.Exists("diagnose.site.domain") && app.Text("diagnose.site.domain") == domain, "사이트 점검 " + domain);
+                // 끝난 점검 수가 늘어난 그 진단 값으로 판정하고, 도메인은 화면 글로 본다 (진단 값에 도메인을 넣지 않음, 설계 결정)
+                var d = app.WaitDiag(x => x, x => !Sd(x).GetProperty("site").GetProperty("Running").GetBoolean() && Sd(x).GetProperty("site").GetProperty("checks").GetInt32() == done + 1, "사이트 점검 " + domain);
+                done++;
+                Assert.Equal(domain, app.Text("diagnose.site.domain"));
                 Assert.Equal("Normal", S(d, "site", "dns"));
                 Assert.Equal(https, S(d, "site", "https"));
                 Assert.Equal(state, S(d, "site", "httpsState"));
             }
+            Assert.Equal(0, app.Close());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
+    /// <summary>
+    /// 점검 중 입력을 고치고 Enter를 다시 누르면 바쁨으로 끝나고, 진행 중인 점검의 사용자 조작 기준을 덮지 않는다 (G4 3라운드 1).
+    /// 끝났을 때 기준보다 조작이 많으므로 완료 처리는 초점·스크롤을 건드리지 않는다.
+    /// </summary>
+    [Fact]
+    public void EnterWhileASiteCheckRunsKeepsThatChecksBaseline()
+    {
+        var userData = AppDriver.NewUserData();
+        try
+        {
+            using var app = Open(userData, "profile", "--demo tests:diag-ok --screen diagnose");
+            app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "diagnose", "진단 화면");
+            app.SetText("diagnose.site.input", "slow.example");
+            app.Invoke("diagnose.site.run");
+            var running = app.WaitDiag(x => x, x => Sd(x).GetProperty("site").GetProperty("Running").GetBoolean()
+                && Sd(x).GetProperty("guard").GetProperty("site").GetInt64() >= 0, "점검 중, 기준 잡힘");
+            long baseline = Sd(running).GetProperty("guard").GetProperty("site").GetInt64();
+            long requests = Sd(running).GetProperty("guard").GetProperty("siteRequests").GetInt64();
+            app.SetText("diagnose.site.input", "shop.example");   // 진행 중 입력 수정
+            app.PressEnter("diagnose.site.input");                 // 진행 중 Enter → 바쁨
+            // Enter가 앱에 닿았다는 증거: 점검 요청이 하나 늘고 그 응답이 바쁨 (입력 수정만으로는 늘지 않는다)
+            var after = app.WaitDiag(x => x, x => Sd(x).GetProperty("guard").GetProperty("siteRequests").GetInt64() > requests, "Enter가 점검 요청으로 닿음");
+            Assert.Equal(requests + 1, Sd(after).GetProperty("guard").GetProperty("siteRequests").GetInt64());
+            Assert.Equal("Busy", M5Fixtures.Str(Sd(after).GetProperty("guard"), "lastSiteRequest"));
+            Assert.True(Sd(after).GetProperty("site").GetProperty("Running").GetBoolean(), "앞 점검이 아직 진행 중이어야 한다 (시나리오 시간 부족)");
+            Assert.Equal(baseline, Sd(after).GetProperty("guard").GetProperty("site").GetInt64());
+            var done = app.WaitDiag(x => x, x => !Sd(x).GetProperty("site").GetProperty("Running").GetBoolean(), "앞 점검 끝남");
+            Assert.Equal(baseline, Sd(done).GetProperty("guard").GetProperty("site").GetInt64());
+            Assert.Equal("slow.example", app.Text("diagnose.site.domain"));   // 끝난 것은 앞 점검
             Assert.Equal(0, app.Close());
         }
         finally { AppDriver.DeleteUserData(userData); }
@@ -326,7 +369,7 @@ public sealed class M6FlowTests
             Assert.Equal(session, stored.MeasurementId);   // 진단을 시작한 순간의 측정
             app.Select("nav.home");
             app.WaitDiag(x => M5Fixtures.Str(x, "screen"), s => s == "home", "홈");
-            Assert.True(app.Exists("home.diagnosis.last"));
+            AppDriver.WaitFor(() => app.Exists("home.diagnosis.last"), e => e, "홈 진단 카드");   // 홈은 이동 뒤 그려진다
             app.Invoke("home.diagnosis.open");
             app.WaitDiag(x => M5Fixtures.Str(x, "screen"), s => s == "diagnose", "홈 카드 → 진단 화면");
             Assert.Equal(0, app.Close());
@@ -419,12 +462,21 @@ public sealed class M6FlowTests
 }
 
 /// <summary>
-/// 시험이 쓰는 실제 클립보드 (STA 스레드). 시작 때 글을 보관하고 끝나면 되돌린다. 글이 아닌 내용이 있으면 막힘(덮어쓰지 않음).
+/// 시험이 쓰는 실제 클립보드 (STA 스레드). 시작 때 모든 형식을 값째 보관하고 끝나면 되돌린다. 그대로 되돌릴 수 없는 형식이 있으면 막힘(덮어쓰지 않음).
 /// 클립보드 내용은 기록에 남기지 않는다.
 /// </summary>
 internal static class ClipboardText
 {
-    public sealed record Saved(bool Blocked, string? Text);
+    /// <summary>보관한 형식과 그 값 (글은 string, 그 밖은 바이트). 막힘이면 보관하지 않았다.</summary>
+    public sealed record Saved(bool Blocked, IReadOnlyList<KeyValuePair<string, object>> Items, uint Sequence);
+
+    /// <summary>클립보드가 바뀔 때마다 느는 시스템 번호.</summary>
+    public static uint Sequence() => Native.GetClipboardSequenceNumber();
+
+    private static class Native
+    {
+        [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetClipboardSequenceNumber();
+    }
 
     private static T Sta<T>(Func<T> body)
     {
@@ -438,23 +490,92 @@ internal static class ClipboardText
         return result;
     }
 
+    /// <summary>
+    /// 지금 클립보드의 모든 형식을 값째 보관한다. 하나라도 글(string)이나 바이트 흐름(MemoryStream)으로 읽히지 않으면
+    /// 그대로 되돌릴 수 없으므로 막힘 (그림·핸들 형식 등, 덮어쓰지 않는다, G4 1라운드 b3). 클립보드 관리 도구가 붙이는
+    /// 표시 형식처럼 바이트로 읽히는 형식은 보관했다가 그대로 되돌린다.
+    /// </summary>
     public static Saved Save() => Sta(() =>
     {
-        if (System.Windows.Forms.Clipboard.ContainsText()) return new Saved(false, System.Windows.Forms.Clipboard.GetText());
+        uint sequence = Sequence();
         var data = System.Windows.Forms.Clipboard.GetDataObject();
-        bool other = data is not null && data.GetFormats().Length > 0;
-        return new Saved(other, null);
+        var items = new List<KeyValuePair<string, object>>();
+        foreach (var f in data?.GetFormats(autoConvert: false) ?? [])
+        {
+            object? v;
+            try { v = data!.GetData(f, autoConvert: false); }
+            catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException or OutOfMemoryException or InvalidOperationException) { return new Saved(true, [], sequence); }
+            switch (v)
+            {
+                case string text: items.Add(new(f, text)); break;
+                case MemoryStream ms: items.Add(new(f, ms.ToArray())); break;
+                default: return new Saved(true, [], sequence);
+            }
+        }
+        // 읽는 사이에 바뀌었으면 섞인 보관일 수 있다: 막힘
+        return Sequence() == sequence ? new Saved(false, items, sequence) : new Saved(true, [], sequence);
     });
 
     public static string Read() => Sta(() => System.Windows.Forms.Clipboard.GetText());
 
-    public static void Restore(Saved saved)
+    /// <summary>앱의 글 복사(WinRT <c>DataPackage.SetText</c>)가 남기는 형식: 글 형식과 그 합성, OLE 내부 형식.</summary>
+    private static readonly HashSet<string> TextFormats = new(StringComparer.OrdinalIgnoreCase) { "UnicodeText", "Text", "OEMText", "Locale", "System.String", "Ole Private Data" };
+
+    /// <summary>내용이 아니라 클립보드 기록·관리 도구가 붙이는 표시 형식.</summary>
+    private static bool MarkerFormat(string f) =>
+        f.StartsWith("Clipboard Viewer Ignore", StringComparison.OrdinalIgnoreCase)
+        || f.StartsWith("ExcludeClipboardContentFromMonitorProcessing", StringComparison.OrdinalIgnoreCase)
+        || f.StartsWith("CanIncludeInClipboardHistory", StringComparison.OrdinalIgnoreCase)
+        || f.StartsWith("CanUploadToCloudClipboard", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>마지막 <see cref="Claim"/>이 본 형식 (실패 문장용).</summary>
+    public static string LastFormats { get; private set; } = "";
+
+    /// <summary>
+    /// 앱이 <paramref name="text"/>를 실제로 썼는지 확인하고, 그 쓰기가 자리 잡은(번호가 잠시 그대로인) 클립보드 번호를 돌려준다.
+    /// 클립보드 관리 도구가 복사에 반응해 표시 형식을 덧붙이는 것은 자리 잡는 동안이면 시험의 내용으로 본다.
+    /// 글이 다르거나, 글 형식·표시 형식 밖의 형식(서식 있는 글, 그림 등)이 있으면 null: 그 사이 누가 같은 글을 서식째 복사했을 수 있다
+    /// (시험의 내용이 아니다 → 되돌리지 않는다). M6 G4 4라운드 이월 1, M7 G4 1라운드 b8.
+    /// 같은 글을 서식 없이 복사한 경우만은 구별하지 못한다: 그때 되돌리면 사용자의 같은 글이 시험 전 내용으로 바뀐다 (격리 세션만 막음).
+    /// </summary>
+    public static uint? Claim(string text)
     {
-        if (saved.Blocked) return;
+        var limit = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+        uint seq = Sequence();
+        var stableSince = DateTime.UtcNow;
+        while (DateTime.UtcNow < limit)
+        {
+            Thread.Sleep(50);
+            uint now = Sequence();
+            if (now != seq) { seq = now; stableSince = DateTime.UtcNow; continue; }
+            if (DateTime.UtcNow - stableSince >= TimeSpan.FromMilliseconds(400)) break;
+        }
+        bool ours = Sta(() =>
+        {
+            var formats = System.Windows.Forms.Clipboard.GetDataObject()?.GetFormats(autoConvert: false) ?? [];
+            LastFormats = string.Join(", ", formats);
+            return formats.All(f => TextFormats.Contains(f) || MarkerFormat(f))
+                && System.Windows.Forms.Clipboard.ContainsText() && System.Windows.Forms.Clipboard.GetText() == text;
+        });
+        // 확인하는 사이에 바뀌었으면 누구의 것인지 모른다
+        return ours && Sequence() == seq ? seq : null;
+    }
+
+    /// <summary>
+    /// 클립보드 번호가 시험이 확인한 그대로(<paramref name="owned"/>)일 때만 보관한 것을 되돌린다.
+    /// 그 뒤 누가 무엇이든 썼으면 (같은 글에 다른 서식을 붙인 복사 포함) 번호가 바뀌므로 지우거나 덮지 않는다.
+    /// 확인과 쓰기 사이의 아주 짧은 틈은 남는다: 동시 사용자 내용의 완전한 보존은 격리된 시험 세션만 보장한다.
+    /// </summary>
+    public static void Restore(Saved saved, uint? owned)
+    {
+        if (saved.Blocked || owned is null) return;
         Sta(() =>
         {
-            if (saved.Text is { Length: > 0 } text) System.Windows.Forms.Clipboard.SetText(text);
-            else System.Windows.Forms.Clipboard.Clear();
+            if (Sequence() != owned) return false;
+            if (saved.Items.Count == 0) { System.Windows.Forms.Clipboard.Clear(); return true; }
+            var o = new System.Windows.Forms.DataObject();
+            foreach (var (f, v) in saved.Items) o.SetData(f, false, v is byte[] bytes ? new MemoryStream(bytes) : v);
+            System.Windows.Forms.Clipboard.SetDataObject(o, copy: true, retryTimes: 10, retryDelay: 100);
             return true;
         });
     }

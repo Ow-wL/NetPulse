@@ -72,6 +72,34 @@ internal static class M7Fixtures
                 return true;
             }
             case "rec-diag-empty": Ok(userData); return true;
+            case "rec-diag-mismatch":
+            {
+                // 저장된 결론 번호를 바꿔, 다시 해석한 결론과 다르게 (설계 3.6·4.3 "불일치")
+                Ok(userData);
+                M5Fixtures.MakeDiagnosisRecord(userData);
+                var file = Directory.GetFiles(Path.Combine(userData, "diagnoses"), "*.json").Single();
+                var o = JsonNode.Parse(File.ReadAllText(file))!.AsObject();
+                o["conclusion"] = (int)o["conclusion"]! == 1 ? 2 : 1;
+                File.WriteAllText(file, o.ToJsonString());
+                return true;
+            }
+            case "rec-two-memos-blocked":
+            {
+                // 서로 다른 증상 표시 둘, 노트 쓰기는 막힘 (한 메모가 재시도하는 동안 다른 메모를 고친다, G4 M7 6라운드 1)
+                var id = Ok(userData);
+                AddMark(userData, id, 30_000, "첫 메모", "fixture-mark-a");
+                AddMark(userData, id, 90_000, "둘째 메모", "fixture-mark-b");
+                Directory.CreateDirectory(Path.Combine(Folder(userData, id), RecordNotes.FileName));
+                return true;
+            }
+            case "rec-mixed-memo-blocked":
+            {
+                // 끊김과 증상 표시가 있는 기록, 노트 쓰기는 막힘 (저장하는 중이 몇 초 보임)
+                var id = Synthetic(userData, Kst.AddMinutes(-40), mixed: true);
+                AddMark(userData, id, 30_000, "회의 중 끊김");
+                Directory.CreateDirectory(Path.Combine(Folder(userData, id), RecordNotes.FileName));
+                return true;
+            }
             case "rec-compare":
                 M5Fixtures.SaveProfile(userData, "steady");
                 M5Fixtures.MakeRecord(userData, "outage-long", Kst.AddHours(-3), 3);
@@ -136,11 +164,11 @@ internal static class M7Fixtures
         File.Delete(Path.Combine(target, "summary.json"));
     }
 
-    public static void AddMark(string userData, string id, long atMs, string? memo)
+    public static void AddMark(string userData, string id, long atMs, string? memo, string mark = "fixture-mark")
     {
         var folder = Folder(userData, id);
         var header = RecordSchema.ParseHeader(File.ReadAllText(Path.Combine(folder, "measurement.json"))).Header!;
-        var fields = new JsonObject { ["mark"] = "fixture-mark" };
+        var fields = new JsonObject { ["mark"] = mark };
         if (memo is not null) fields["memo"] = memo;
         File.AppendAllText(Path.Combine(folder, "events.jsonl"),
             RecordSchema.EventLine(id, SymptomMarks.MarkType, atMs / 1000, atMs, header.StartedAt.AddMilliseconds(atMs), fields) + "\n");

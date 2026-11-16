@@ -98,6 +98,12 @@ public sealed partial class AppShell
     /// </summary>
     private async void RunBench()
     {
+        // 실행 중 최고 전용 메모리 (강제 수집 뒤 값만으로는 최고치를 모른다, G4 1라운드 b 마무리 말)
+        long peakMb = 0;
+        var sampler = DispatcherQueue.CreateTimer();
+        sampler.Interval = BenchTokens.MemorySample;
+        sampler.Tick += (_, _) => peakMb = Math.Max(peakMb, PrivateMb());
+        sampler.Start();
         try
         {
             if (screens.CurrentId != "measure") Navigate("measure", null);
@@ -180,10 +186,11 @@ public sealed partial class AppShell
             {
                 kind = "measure", segments, profile, navSteps, rounds = host.Snapshot.Rounds.Count,
                 analysis = new { samples = durations.Length, p95Ms = P95(durations), maxMs = durations.LastOrDefault() },
-                baselineMs = ui.Pacer.Baseline, privateMb,
+                baselineMs = ui.Pacer.Baseline, privateMb, peakPrivateMb = Math.Max(peakMb, privateMb),
             });
         }
         catch (Exception ex) { log.Write("bench", new { kind = "measure", error = ex.GetType().Name, message = ex.Message }); }
+        sampler.Stop();
         BeginClose();
     }
 
@@ -207,19 +214,42 @@ public sealed partial class AppShell
             var segments = new List<object>();
             var memory = new List<object>();
             var timings = new List<object>();
+            var profile = new List<object>();
             async Task Segment(string name, Func<Task> body)
             {
+                // 구간마다 그리기 부분별 시간과 GC (M6 bench와 같은 방식, M7 UI 시험 1차: 예산 초과 원인 찾기)
+                RenderProfile.Take();
+                RenderProfile.On = true;
+                int[] gcBefore = [GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2)];
+                var pauseBefore = GC.GetTotalPauseDuration();
                 ui.Pacer.BeginSegment();
                 var watch = System.Diagnostics.Stopwatch.StartNew();
                 await body();
                 segments.Add(ui.Pacer.EndSegment(name));
+                RenderProfile.On = false;
+                profile.Add(new
+                {
+                    segment = name, parts = RenderProfile.Take(),
+                    gc = new { gen0 = GC.CollectionCount(0) - gcBefore[0], gen1 = GC.CollectionCount(1) - gcBefore[1], gen2 = GC.CollectionCount(2) - gcBefore[2], pauseMs = (GC.GetTotalPauseDuration() - pauseBefore).TotalMilliseconds },
+                });
                 timings.Add(new { segment = name, ms = watch.ElapsedMilliseconds });
                 memory.Add(new { segment = name, privateMb = PrivateMb(), held = library.HeldCount });
             }
-            async Task Until(Func<bool> done)
+            // 준비를 기다리다 한도를 넘으면 bench 실패 (프레임만 좋고 화면이 준비되지 않은 구간을 통과시키지 않게, G4 M7 1라운드 b7)
+            async Task Until(Func<bool> done, string what)
             {
                 var limit = DateTime.UtcNow + BenchTokens.RecordsOpenLimit;
-                while (DateTime.UtcNow < limit && !done()) await Task.Delay(MotionTokens.Fast);
+                while (!done())
+                {
+                    if (DateTime.UtcNow >= limit) throw new TimeoutException(what + " 준비가 한도 안에 끝나지 않았습니다");
+                    await Task.Delay(MotionTokens.Fast);
+                }
+            }
+            // 캐시 없는 열기·비교 (설계 5절): 구간 전에 화면이 쥔 기록을 놓고 보유분을 비운 뒤, 정말 비었는지 확인한다
+            void NoCache(string what)
+            {
+                library.DropUnpinned();
+                if (library.HeldCount != 0) throw new InvalidOperationException($"{what}: 보유분이 비지 않았습니다 ({library.HeldCount})");
             }
             RecordsScreen Screen() => (RecordsScreen)screens.Get("records");
 
@@ -231,11 +261,12 @@ public sealed partial class AppShell
 
             // 목록 분석이 끝난 뒤 보유분을 비워 "캐시 없는 열기"로 시작한다
             library.SetPinned([]);
+            NoCache("records-open");
             await Segment("records-open", async () =>
             {
                 var watch = System.Diagnostics.Stopwatch.StartNew();
                 Screen().Show(longs[0]);
-                await Until(() => Screen().DetailReady);
+                await Until(() => Screen().DetailReady, "records-open 상세");
                 timings.Add(new { segment = "records-open-analysis", ms = watch.ElapsedMilliseconds });
                 await Task.Delay(BenchTokens.RecordsSettle);
             });
@@ -251,15 +282,19 @@ public sealed partial class AppShell
                 Screen().Show(null);
                 await Task.Delay(BenchTokens.NavStep);
                 Screen().Show(longs[1]);
-                await Until(() => Screen().DetailReady);
+                await Until(() => Screen().DetailReady, "records-switch 둘째 상세");
                 Screen().Show(shorts[0]);
-                await Until(() => Screen().DetailReady);
+                await Until(() => Screen().DetailReady, "records-switch 셋째 상세");
                 await Task.Delay(BenchTokens.RecordsSettle);
             });
+            // 앞 구간에서 연 12시간 기록 둘이 보유분에 남아 있었다: 목록으로 돌아가 놓고 비운 뒤 비교한다 (b7)
+            Screen().Show(null);
+            await Task.Delay(BenchTokens.NavStep);
+            NoCache("records-compare");
             await Segment("records-compare", async () =>
             {
                 _ = Screen().Compare(longs[0], longs[1]);
-                await Until(() => Screen().CompareReady);
+                await Until(() => Screen().CompareReady, "records-compare 비교");
                 await Task.Delay(BenchTokens.RecordsSettle);
             });
             await Segment("records-nav-during-analysis", async () =>
@@ -289,12 +324,12 @@ public sealed partial class AppShell
                     await memos.SaveAsync(item.Key, item.Entry.Segments, opened.Record.Header!.Id, mark.Mark, mark.AtMs, "bench 메모");
                     await library.RefreshAsync(host.RunningId);
                     Screen().Show(item.Key);
-                    await Until(() => Screen().DetailReady);
+                    await Until(() => Screen().DetailReady, "records-after-memo 상세");
                 }
                 await Task.Delay(BenchTokens.RecordsSettle);
             });
             sampler.Stop();
-            log.Write("bench", new { kind = "records", segments, timings, memory, peakPrivateMb = Math.Max(peakMb, PrivateMb()), records = library.Items.Count, baselineMs = ui.Pacer.Baseline });
+            log.Write("bench", new { kind = "records", segments, timings, memory, profile, peakPrivateMb = Math.Max(peakMb, PrivateMb()), records = library.Items.Count, baselineMs = ui.Pacer.Baseline });
         }
         catch (Exception ex)
         {
