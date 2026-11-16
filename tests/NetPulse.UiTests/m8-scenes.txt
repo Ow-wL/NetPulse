@@ -7,7 +7,7 @@ report-building|rec-ok|--demo steady --screen report --hold-analysis|wait:screen
 report-preview|rec-mixed|--demo steady --screen report|wait:screen=report;wait:reportReady
 report-preview-figure|rec-mixed|--demo steady --screen report|wait:screen=report;wait:reportReady;scroll:report.scroll=25
 report-preview-episodes|rec-mixed|--demo steady --screen report|wait:screen=report;wait:reportReady;scroll:report.scroll=45
-report-memo|rec-memo|--demo steady --screen report|wait:screen=report;wait:reportReady;toggle:report.memos;wait:reportMemos;scroll:report.scroll=85
+report-memo|rec-memo|--demo steady --screen report|wait:screen=report;wait:reportReady;select:report.mask.unmasked;wait:reportUnmasked;toggle:report.memos;wait:reportMemos;scroll:report.scroll=85
 report-unmasked|rec-mixed|--demo steady --screen report|wait:screen=report;wait:reportReady;select:report.mask.unmasked;wait:reportUnmasked
 report-no-outage|rec-ok|--demo steady --screen report|wait:screen=report;wait:reportReady;scroll:report.scroll=20
 report-insufficient|rec-short|--demo steady --screen report|wait:screen=report;wait:reportReady;scroll:report.scroll=20

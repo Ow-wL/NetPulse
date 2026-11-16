@@ -58,6 +58,12 @@ public sealed record ReportOptions(bool Masked = true, bool IncludeMemos = false
 {
     public const int MaxEpisodeDetails = 10;
     public ReportOptions Normalized() => this with { EpisodeDetails = Math.Clamp(EpisodeDetails, 0, MaxEpisodeDetails) };
+
+    /// <summary>
+    /// 메모가 실제로 들어가는지: 가리기를 끈 문서에서 메모 넣기를 켰을 때만. 가린 문서에는 메모를 넣지 않는다
+    /// (자유 글의 식별 값을 패턴으로 다 가릴 수 없다, G4 M8 1~6라운드 뒤 사용자 결정).
+    /// </summary>
+    public bool Memos => IncludeMemos && !Masked;
 }
 
 /// <summary>

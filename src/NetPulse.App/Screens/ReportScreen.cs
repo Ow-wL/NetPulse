@@ -83,10 +83,11 @@ public sealed class ReportScreen : Screen
         pickRow.Children.Add(nextButton);
 
         maskChoice = new SegmentedChoice(Ui, "report.mask", "가리기", [("masked", "통신사에 보낼 때 (가리기)"), ("unmasked", "가리지 않음 (내가 볼 때)")], "masked");
-        maskChoice.Changed += v => SetOptions(options with { Masked = v == "masked" });
+        // 가리기를 켜면 메모 넣기를 끈다 (가린 리포트에는 메모를 넣지 않음, 메모 넣기 스위치도 막는다)
+        maskChoice.Changed += v => SetOptions(v == "masked" ? options with { Masked = true, IncludeMemos = false } : options with { Masked = false });
         detailsChoice = new SegmentedChoice(Ui, "report.details", "끊김 상세", [("0", "없음"), ("3", "3개"), ("5", "5개"), ("10", "10개")], "5");
         detailsChoice.Changed += v => SetOptions(options with { EpisodeDetails = int.Parse(v, System.Globalization.CultureInfo.InvariantCulture) });
-        memosToggle = new SettingToggle(Ui, "report.memos", "증상 메모 넣기 (주소·전화번호 같은 꼴만 가립니다)", false);
+        memosToggle = new SettingToggle(Ui, "report.memos", "증상 메모 넣기 (가리지 않은 리포트에서만, 적은 그대로 들어갑니다)", false) { IsEnabled = false };
         // UI 자동화의 바꾸기(Toggle)는 Click을 내지 않는다: 상태 변화로 받는다
         memosToggle.Checked += (_, _) => SetOptions(options with { IncludeMemos = true });
         memosToggle.Unchecked += (_, _) => SetOptions(options with { IncludeMemos = false });
@@ -384,6 +385,7 @@ public sealed class ReportScreen : Screen
             maskChoice.Set(options.Masked ? "masked" : "unmasked");
             detailsChoice.Set(options.EpisodeDetails.ToString(System.Globalization.CultureInfo.InvariantCulture));
             memosToggle.IsChecked = options.IncludeMemos;
+            memosToggle.IsEnabled = !options.Masked;
             diagnosesToggle.IsChecked = options.IncludeDiagnoses;
         }
         finally { syncing = false; }

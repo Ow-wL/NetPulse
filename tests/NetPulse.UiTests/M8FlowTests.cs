@@ -116,10 +116,8 @@ public sealed class M8FlowTests
                 app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "report", "리포트 화면");
                 var ready = WaitReady(app);
                 Assert.Equal(id, Sd(ready).GetProperty("id").GetString());
-                app.Toggle("report.memos");
-                WaitReady(app);
-                app.WaitDiag(d => Sd(d).GetProperty("memos").GetBoolean(), b => b, "메모 넣기");
-                WaitReady(app);
+                // 가린 리포트에는 메모를 넣지 않는다: 메모 넣기 스위치가 막혀 있다 (G4 M8 1~6라운드 뒤 사용자 결정)
+                Assert.False(app.Find("report.memos").Current.IsEnabled, "가린 문서의 메모 넣기가 막혀 있지 않음");
                 app.Invoke("report.export");
                 var done = WaitExport(app);
                 Assert.True(Sd(done).GetProperty("export").GetProperty("Ok").GetBoolean());
@@ -163,10 +161,12 @@ public sealed class M8FlowTests
                 Assert.Equal(targets.Select(t => t.Role == NetPulse.Core.Targets.TargetRole.Local ? "로컬" : "외부"), Values(fields, "condition.target.role"));
                 Assert.Equal([$"{h.IntervalMs / 1000.0:0.#}초"], Values(fields, "condition.interval"));
                 Assert.Equal([$"{h.TimeoutMs / 1000.0:0.#}초"], Values(fields, "condition.timeout"));
-                // 메모 (넣기 켬, 식별 값 없는 글이라 그대로)
+                // 증상 표시: 시각만 (가린 리포트에는 메모 없음, 안내 문구)
                 var marks = SymptomMarks.FromEvents(record.Events, record.NoteLines).Marks.OrderBy(m => m.AtMs).ToArray();
                 Assert.Equal(marks.Select(m => Clock(m.Wall)), Values(fields, "mark.time"));
-                Assert.Equal(marks.Select(m => m.Memo ?? "메모 없음"), Values(fields, "mark.memo"));
+                Assert.Empty(Values(fields, "mark.memo"));
+                Assert.Contains(Squash([ReportTexts.MaskedNoMemos]), Squash(ReportHtml.BodyTexts(html)));
+                Assert.DoesNotContain(Markup.Text(Memo), html);
                 // 요약 (설계 7.2-1): 시작·끝 시각, 최장 끊김 — 시험이 기록 값에서 직접 만든 글
                 string Full(DateTimeOffset w) => w.ToOffset(TimeSpan.FromMinutes(h.UtcOffsetMinutes)).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
                     + " (UTC" + (h.UtcOffsetMinutes < 0 ? "-" : "+") + TimeSpan.FromMinutes(Math.Abs(h.UtcOffsetMinutes)).ToString(@"hh\:mm", CultureInfo.InvariantCulture) + ")";
@@ -413,8 +413,11 @@ public sealed class M8FlowTests
             WaitExport(app);
             var masked = File.ReadAllText(Assert.Single(Directory.GetFiles(outDir)));
 
-            // 가리지 않음: 내보내기 전에 확인을 묻는다
+            // 가리지 않음: 메모 넣기를 켤 수 있고, 내보내기 전에 확인을 묻는다
             app.Select("report.mask.unmasked");
+            WaitReady(app, masked: false);
+            app.Toggle("report.memos");
+            app.WaitDiag(d => Sd(d).GetProperty("memos").GetBoolean(), b => b, "메모 넣기");
             WaitReady(app, masked: false);
             app.Invoke("report.export");
             app.WaitDiag(d => d.GetProperty("dialogOpen").GetBoolean(), b => b, "확인 대화상자");
@@ -434,7 +437,8 @@ public sealed class M8FlowTests
             NoNamesInRecordFields(record, ReportHtml.FieldValues(masked));
             Assert.DoesNotContain(h.Id, masked);
             Assert.Contains(h.Id, unmasked);
-            Assert.DoesNotContain(Memo, masked);   // 메모는 기본으로 뺀다
+            Assert.DoesNotContain(Memo, masked);   // 가린 문서에는 메모 없음
+            Assert.Equal([Memo], ReportHtml.FieldValues(unmasked).Where(f => f.Field == "mark.memo").Select(f => f.Value));   // 가리지 않은 문서에는 적은 그대로
 
             // 옵션: 진단 뺌·끊김 상세 0개 → 그 절이 없다
             app.Toggle("report.diagnoses");
@@ -442,7 +446,7 @@ public sealed class M8FlowTests
             app.Select("report.mask.masked");
             var d = app.WaitDiag(x => x, x => Has(x, "published") && Sd(x).GetProperty("published").ValueKind == JsonValueKind.Object
                 && Sd(x).GetProperty("state").GetString() == "Ready" && !Sd(x).GetProperty("diagnoses").GetBoolean() && Sd(x).GetProperty("details").GetInt32() == 0
-                && Sd(x).GetProperty("published").GetProperty("masked").GetBoolean(), "옵션 반영");
+                && Sd(x).GetProperty("published").GetProperty("masked").GetBoolean() && !Sd(x).GetProperty("memos").GetBoolean(), "옵션 반영 (가리면 메모 넣기도 꺼짐)");
             var sections = Sd(d).GetProperty("published").GetProperty("sections").EnumerateArray().Select(s => s.GetString()).ToArray();
             Assert.DoesNotContain("diagnoses", sections);
             Assert.DoesNotContain("details", sections);

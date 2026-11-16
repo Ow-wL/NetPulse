@@ -29,7 +29,7 @@ public static class ReportTexts
 
     public const string UnmaskedNote = "가리지 않은 리포트입니다. 대상 이름·주소·사업자 이름이 그대로 들어 있습니다. 다른 사람에게 보낼 때는 가린 리포트를 만드세요.";
 
-    public const string MemoNote = "증상 메모가 들어 있습니다. 주소·이메일·전화번호·경로·URL의 호스트와 대상 이름·주소를 [가림]으로 바꿨지만, 사람 이름·와이파이 이름·컴퓨터 이름 같은 글은 가리지 못합니다.";
+    public const string MaskedNoMemos = "가린 리포트에는 증상 메모를 넣지 않습니다 (자유 글 속 식별 정보를 다 가릴 수 없어서). 메모는 가리기를 끈 리포트에서 넣을 수 있습니다.";
 
     public const string Masked = "[가림]";
 

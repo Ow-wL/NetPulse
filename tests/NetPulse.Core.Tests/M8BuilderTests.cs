@@ -191,8 +191,8 @@ public sealed class M8BuilderTests : IDisposable
         Assert.DoesNotContain(d.Texts(), r => r.Origin == TextOrigin.Memo);
         Assert.Equal(["1. 요약", "2. 타임라인", "3. 끊김 목록", "4. 관측 근거", "5. 증상 표시와 메모", "6. 측정 조건"], d.Sections.Select(s => s.Title));
 
-        var withAll = Build(rec, new ReportOptions(IncludeMemos: true, EpisodeDetails: 1), diagnoses: [Diagnosis(W0.AddMinutes(3)), Diagnosis(W0.AddMinutes(4), "other")]);
-        Assert.Equal(["회의 중 끊김"], All(withAll, "mark.memo"));
+        var withAll = Build(rec, new ReportOptions(Masked: false, IncludeMemos: true, EpisodeDetails: 1), diagnoses: [Diagnosis(W0.AddMinutes(3)), Diagnosis(W0.AddMinutes(4), "other")]);
+        Assert.Equal(["회의 중 끊김"], All(withAll, "mark.memo"));   // 메모는 가리기를 끈 문서에서만
         Assert.Single(All(withAll, "diagnosis.head"));   // 그 측정 ID의 진단만
         Assert.Equal(7, All(withAll, "diagnosis.check.judgment").Length);
         Assert.Single(withAll.Sections.Single(s => s.Id == "details").Blocks.OfType<ReportHeading>());
@@ -217,7 +217,7 @@ public sealed class M8BuilderTests : IDisposable
     [Fact]
     public void FixedPhrasesHaveNoForbiddenWordsAndCandidatesStayCandidates()
     {
-        string[] fixedTexts = [ReportTexts.Intro, ReportTexts.Scope, ReportTexts.MaskedNote, ReportTexts.UnmaskedNote, ReportTexts.MemoNote, ReportTexts.NoLinkEvidence, ReportTexts.PrintHint];
+        string[] fixedTexts = [ReportTexts.Intro, ReportTexts.Scope, ReportTexts.MaskedNote, ReportTexts.UnmaskedNote, ReportTexts.MaskedNoMemos, ReportTexts.NoLinkEvidence, ReportTexts.PrintHint];
         foreach (var t in fixedTexts)
             foreach (var w in ReportTexts.Forbidden) Assert.DoesNotContain(w, t);
         foreach (var k in Enum.GetValues<CandidateKind>())

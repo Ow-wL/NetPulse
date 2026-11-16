@@ -403,14 +403,14 @@ public sealed partial class AppShell
             });
             await Segment("report-options", async () =>
             {
-                Screen().BenchOptions(new Core.Report.ReportOptions(IncludeMemos: true, EpisodeDetails: Core.Report.ReportOptions.MaxEpisodeDetails));
+                Screen().BenchOptions(new Core.Report.ReportOptions(Masked: false, IncludeMemos: true, EpisodeDetails: Core.Report.ReportOptions.MaxEpisodeDetails));
                 await Until(() => Screen().PreviewReady, "report-options 미리 보기");
                 await Task.Delay(BenchTokens.RecordsSettle);
             });
             await Segment("report-worst", async () =>
             {
                 // 최악 사례는 가장 무거운 옵션으로 (메모 넣기·끊김 상세 10, 앞 구간에서 정한 것을 명시)
-                Screen().BenchOptions(new Core.Report.ReportOptions(IncludeMemos: true, EpisodeDetails: Core.Report.ReportOptions.MaxEpisodeDetails));
+                Screen().BenchOptions(new Core.Report.ReportOptions(Masked: false, IncludeMemos: true, EpisodeDetails: Core.Report.ReportOptions.MaxEpisodeDetails));
                 Screen().Show(worst);
                 await Until(() => Screen().PreviewReady, "report-worst 미리 보기");
                 await Task.Delay(BenchTokens.RecordsSettle);

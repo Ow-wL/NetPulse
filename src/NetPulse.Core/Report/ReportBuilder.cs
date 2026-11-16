@@ -127,8 +127,8 @@ public static class ReportBuilder
             blocks.Add(options.Masked
                 ? new ReportParagraph(ReportTexts.MaskedNote, ParagraphKind.Note)
                 : new ReportParagraph(ReportTexts.UnmaskedNote, ParagraphKind.Warning));
-            if (options.IncludeMemos && marks.Any(m => m.Memo is not null))
-                blocks.Add(new ReportParagraph(options.Masked ? ReportTexts.MemoNote : "증상 메모가 적은 그대로 들어 있습니다.", ParagraphKind.Note));
+            if (options.Memos && marks.Any(m => m.Memo is not null))
+                blocks.Add(new ReportParagraph("증상 메모가 적은 그대로 들어 있습니다.", ParagraphKind.Note));
             return blocks;
         }
 
@@ -378,15 +378,15 @@ public static class ReportBuilder
             if (marks.Count == 0) return [new ReportParagraph("증상 표시가 없습니다.")];
             var blocks = new List<ReportBlock>();
             var ordered = marks.OrderBy(m => m.AtMs).ToArray();
-            if (options.IncludeMemos)
+            if (options.Memos)
                 blocks.Add(new ReportTable("증상 표시와 메모", Cols("표시 시각", "메모"), ordered.Select(m => new ReportRow([
                     new(ReportRun.Gen(Clock(m.Wall)), "mark.time"),
-                    new(m.Memo is null ? ReportRun.Gen("메모 없음") : ReportRun.Memo(options.Masked ? red.MaskMemo(m.Memo) : m.Memo), "mark.memo"),
+                    new(m.Memo is null ? ReportRun.Gen("메모 없음") : ReportRun.Memo(m.Memo), "mark.memo"),
                 ])).ToArray()));
             else
             {
                 blocks.Add(new ReportTable("증상 표시", Cols("표시 시각"), ordered.Select(m => new ReportRow([new(ReportRun.Gen(Clock(m.Wall)), "mark.time")])).ToArray()));
-                blocks.Add(new ReportParagraph("메모는 넣지 않았습니다 (리포트 옵션).", ParagraphKind.Note));
+                blocks.Add(new ReportParagraph(options.Masked ? ReportTexts.MaskedNoMemos : "메모는 넣지 않았습니다 (리포트 옵션).", ParagraphKind.Note));
             }
             return blocks;
         }

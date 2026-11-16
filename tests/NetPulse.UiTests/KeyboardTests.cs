@@ -268,7 +268,8 @@ public sealed class KeyboardTests
     [Fact]
     public void KeyboardAloneSetsReportOptionsAndExports()
     {
-        // M8 설계 4.3·7.2-7: 리포트 화면 → 메모 넣기(Space) → 끊김 상세(화살표·Space) → 내보내기(Enter) → 초점은 내보내기 단추
+        // M8 설계 4.3·7.2-7: 리포트 화면 → 진단 넣기 끄기(Space) → 끊김 상세(화살표·Space) → 내보내기(Enter) → 초점은 내보내기 단추.
+        // 가린 문서(기본)에서는 메모 넣기 스위치가 막혀 Tab이 건너뛴다 (가린 리포트에는 메모를 넣지 않음)
         var userData = AppDriver.NewUserData();
         var outDir = Path.Combine(AppDriver.OutputDirectory, "m8-out", "keyboard");
         if (Directory.Exists(outDir)) Directory.Delete(outDir, true);
@@ -280,9 +281,9 @@ public sealed class KeyboardTests
             bool Ready(System.Text.Json.JsonElement d) => Sd(d).ValueKind == System.Text.Json.JsonValueKind.Object && Sd(d).TryGetProperty("previewReady", out var p) && p.GetBoolean()
                 && Sd(d).GetProperty("state").GetString() == "Ready";
             app.WaitDiag(d => Ready(d), b => b, "미리 보기");
-            TabTo(app, "report.memos");
+            TabTo(app, "report.diagnoses");
             Press(app, Space);
-            app.WaitDiag(d => Sd(d).GetProperty("memos").GetBoolean() && Ready(d), b => b, "메모 넣기 (Space)");
+            app.WaitDiag(d => !Sd(d).GetProperty("diagnoses").GetBoolean() && Ready(d), b => b, "진단 넣기 끄기 (Space)");
             // 단추 묶음은 Tab 한 번으로 들어간다 (들어가는 단추는 묶음이 정함): 들어간 뒤 오른쪽 화살표로 "10개"까지
             for (int i = 0; i < 20 && !Focused(app).StartsWith("report.details.", StringComparison.Ordinal); i++) Press(app, Tab);
             Assert.StartsWith("report.details.", Focused(app));

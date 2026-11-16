@@ -193,7 +193,7 @@ public sealed class M8G5Tests
                     read.Add(w.ElapsedMilliseconds);
                     episodes = a.Episodes.Count;
                     w.Restart();
-                    var doc = ReportBuilder.Build(new ReportInput("k", "s", record, a, RecordLifecycle.Ended, [], new ReportOptions(IncludeMemos: true, EpisodeDetails: ReportOptions.MaxEpisodeDetails), M5Fixtures.DemoNow, "bench"));
+                    var doc = ReportBuilder.Build(new ReportInput("k", "s", record, a, RecordLifecycle.Ended, [], new ReportOptions(Masked: false, IncludeMemos: true, EpisodeDetails: ReportOptions.MaxEpisodeDetails), M5Fixtures.DemoNow, "bench"));
                     build.Add(w.ElapsedMilliseconds);
                     w.Restart();
                     var leaks = doc.Guard!.Check(doc);
