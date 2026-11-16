@@ -156,13 +156,19 @@ public sealed class ReportScreen : Screen
     /// <summary>기록 상세의 "리포트 만들기" (그 측정이 골라진 채로).</summary>
     public void Show(string recordKey)
     {
-        if (key != recordKey)
+        if (key != recordKey || requests.Latest?.Key != recordKey)
         {
             key = recordKey;
             Request();
         }
         Rerender();
     }
+
+    /// <summary>
+    /// 들어가기 전에 고를 측정을 정한다 (기록 상세의 "리포트 만들기"): 들어가며 기본 측정(가장 최근)으로 문서를 만들기 시작했다가
+    /// 바로 버리는 일이 없게 (M8 bench, GPT 교차 검토).
+    /// </summary>
+    public void Preselect(string recordKey) => key = recordKey;
 
     // ---------------- 고르기 ----------------
 
@@ -213,6 +219,8 @@ public sealed class ReportScreen : Screen
 
     // ---------------- 만들기 ----------------
 
+    private bool IsLatest(ReportRequest r) => requests.Latest?.Number == r.Number;
+
     private void Request()
     {
         if (key is null) return;
@@ -228,16 +236,19 @@ public sealed class ReportScreen : Screen
     {
         try
         {
+            if (!IsLatest(req)) return;   // 이미 밀려난 요청은 기록을 열지 않는다
             var opened = await Context.Records.OpenAsync(req.Key);
+            if (!IsLatest(req)) return;
             if (opened is null) { requests.Fail(req, ReportError.Unreadable); return; }
             var store = Context.Diagnosis.Store;
             var now = Context.Now;
             var doc = await Task.Run(() =>
             {
+                if (!IsLatest(req)) return null;
                 IReadOnlyList<NetPulse.Core.Diagnostics.StoredDiagnosis> diags = req.Options.IncludeDiagnoses ? store.List().Items.Select(x => x.Stored).ToArray() : [];
                 return ReportBuilder.Build(new ReportInput(req.Key, req.Stamp, opened.Record, opened.Analysis, opened.Lifecycle, diags, req.Options, now, version));
             });
-            requests.Complete(req, doc);
+            if (doc is not null) requests.Complete(req, doc);
         }
         catch (ReportException ex) { requests.Fail(req, ex.Error); }
         catch (Exception ex)
@@ -418,7 +429,7 @@ public sealed class ReportScreen : Screen
         void OnFrame(object? sender, object e)
         {
             var watch = System.Diagnostics.Stopwatch.StartNew();
-            while (old.Children.Count > 0 && watch.Elapsed < FrameBudget.PieceSlice) old.Children.RemoveAt(old.Children.Count - 1);
+            while (old.Children.Count > 0 && watch.Elapsed < FrameBudget.PieceSlice) RemoveLastPiece(old);
             if (old.Children.Count > 0 && !Context.IsClosing()) return;
             Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFrame;
             paperHost.Children.Remove(old);
@@ -468,6 +479,28 @@ public sealed class ReportScreen : Screen
             while (watch.Elapsed < FrameBudget.PieceSlice);
         }
         Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnFrame;
+    }
+
+    /// <summary>
+    /// 지난 종이 면에서 맨 끝의 작은 조각 하나를 뗀다 (붙일 때와 같은 단위: 절 머리·블록·표 줄 묶음). 절 하나를 통째로 떼면 한 번에 길어졌다.
+    /// </summary>
+    private static void RemoveLastPiece(Panel root)
+    {
+        Panel p = root;
+        for (int depth = 0; depth < 8; depth++)
+        {
+            var last = p.Children[^1];
+            Panel? inner = last switch
+            {
+                Grid g when g.RowDefinitions.Count > 0 => null,   // 표 줄 묶음은 한 조각
+                Panel lp when lp.Children.Count > 0 => lp,
+                Border { Child: Panel bp } when bp.Children.Count > 0 => bp,
+                _ => null,
+            };
+            if (inner is null) break;
+            p = inner;
+        }
+        p.Children.RemoveAt(p.Children.Count - 1);
     }
 
     private void SetExport()

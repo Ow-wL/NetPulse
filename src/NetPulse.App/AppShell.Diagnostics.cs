@@ -345,16 +345,20 @@ public sealed partial class AppShell
     /// </summary>
     private async void RunReportBench()
     {
-        long peakMb = 0;
+        long peakMb = 0, segmentPeakMb = 0;
         var sampler = DispatcherQueue.CreateTimer();
         sampler.Interval = BenchTokens.MemorySample;
-        sampler.Tick += (_, _) => peakMb = Math.Max(peakMb, PrivateMb());
+        sampler.Tick += (_, _) => { long now = PrivateMb(); peakMb = Math.Max(peakMb, now); segmentPeakMb = Math.Max(segmentPeakMb, now); };
         try
         {
             sampler.Start();
             await Task.Delay(BenchTokens.Warmup);
             var library = recent.Library;
             await library.RefreshAsync(host.RunningId);
+            // M7 bench와 같은 조건: 목록 분석이 끝난 뒤 보유분을 비우고 캐시 없이 연다 (다른 기록 작업이 측정 구간과 겹치지 않게)
+            await library.AnalyzedAsync(library.Items.Select(i => i.Key).ToArray());
+            library.SetPinned([]);
+            library.DropUnpinned();
             var typical = library.Items.FirstOrDefault(i => i.Entry.PlannedMs >= 12 * 3_600_000L && i.Entry.Targets.Count < 8)?.Key;
             var worst = library.Items.FirstOrDefault(i => i.Entry.Targets.Count >= 8)?.Key;
             if (typical is null || worst is null) throw new InvalidOperationException("bench 준비가 모자랍니다 (12시간 기록·최악 사례)");
@@ -374,13 +378,14 @@ public sealed partial class AppShell
             {
                 int[] gcBefore = [GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2)];
                 var pauseBefore = GC.GetTotalPauseDuration();
+                segmentPeakMb = PrivateMb();
                 ui.Pacer.BeginSegment();
                 var watch = System.Diagnostics.Stopwatch.StartNew();
                 await body();
                 segments.Add(ui.Pacer.EndSegment(name));
                 timings.Add(new
                 {
-                    segment = name, ms = watch.ElapsedMilliseconds, privateMb = PrivateMb(),
+                    segment = name, ms = watch.ElapsedMilliseconds, privateMb = PrivateMb(), peakMb = Math.Max(segmentPeakMb, PrivateMb()),
                     gc = new { gen0 = GC.CollectionCount(0) - gcBefore[0], gen1 = GC.CollectionCount(1) - gcBefore[1], gen2 = GC.CollectionCount(2) - gcBefore[2], pauseMs = (GC.GetTotalPauseDuration() - pauseBefore).TotalMilliseconds },
                 });
             }
@@ -404,6 +409,8 @@ public sealed partial class AppShell
             });
             await Segment("report-worst", async () =>
             {
+                // 최악 사례는 가장 무거운 옵션으로 (메모 넣기·끊김 상세 10, 앞 구간에서 정한 것을 명시)
+                Screen().BenchOptions(new Core.Report.ReportOptions(IncludeMemos: true, EpisodeDetails: Core.Report.ReportOptions.MaxEpisodeDetails));
                 Screen().Show(worst);
                 await Until(() => Screen().PreviewReady, "report-worst 미리 보기");
                 await Task.Delay(BenchTokens.RecordsSettle);

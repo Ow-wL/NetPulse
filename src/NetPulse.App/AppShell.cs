@@ -178,6 +178,7 @@ public sealed partial class AppShell : Window
     /// <summary>리포트 화면에서 그 기록을 고른다 (M8 설계 4.1).</summary>
     private void OpenReport(string key)
     {
+        if (screens.Get("report") is ReportScreen pre) pre.Preselect(key);   // 들어가며 기본 측정으로 만들기 시작하지 않게
         Navigate("report", null);
         if (screens.Get("report") is ReportScreen r) r.Show(key);
     }

@@ -306,6 +306,7 @@ public static class ReportBuilder
             var top = a.Episodes.Select((e, i) => (Episode: e, Index: i)).OrderByDescending(x => x.Episode.MinDurationMs).ThenBy(x => x.Episode.FirstRound)
                 .Take(options.EpisodeDetails).ToArray();
             var names = targets.Select(red.TargetName).ToArray();
+            var shared = EpisodeDetail.Prepare(record, a);   // 상세마다 회차 정렬·경로 문맥·표시를 다시 만들지 않는다 (M8 bench)
             foreach (var (e, i) in top)
             {
                 blocks.Add(new ReportHeading(ReportRun.Gen($"끊김 {i + 1} · {ClockOf(e.FirstRound)} · {EpisodeDuration(e)}")));
@@ -319,7 +320,7 @@ public static class ReportBuilder
                 else
                     blocks.Add(new ReportParagraph($"판정: {RecordView.VerdictName(e.Parts[0].Verdict)} · {ReportTexts.Candidate(e.Parts[0].Candidate)}"));
 
-                var d = EpisodeDetail.For(record, a, e);
+                var d = EpisodeDetail.For(record, a, e, shared);
                 var columns = new List<ReportRun> { ReportRun.Gen("시각"), ReportRun.Gen("위치") };
                 columns.AddRange(names);
                 var detailRows = new List<ReportRow>();
