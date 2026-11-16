@@ -154,11 +154,11 @@ internal static class M7Fixtures
 
     public static string Folder(string userData, string id) => Path.Combine(Records(userData), id);
 
-    private static void CorruptRounds(string userData, string id) =>
+    internal static void CorruptRounds(string userData, string id) =>
         File.AppendAllText(Path.Combine(Folder(userData, id), "rounds.jsonl"), "{ 망가진 회차\n{ 또 망가짐\n");
 
     /// <summary>조각 2만 따로 두어 조각 1이 없는 상태 (누락 조각).</summary>
-    private static void AddDetachedSegment(string userData, string id)
+    internal static void AddDetachedSegment(string userData, string id)
     {
         var target = Path.Combine(Records(userData), id + "~3");
         CopyDirectory(Folder(userData, id), target);

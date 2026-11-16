@@ -461,12 +461,17 @@ public static class ReportBuilder
         }
 
         /// <summary>
-        /// 기록의 앱 버전은 기록에서 온 글이다: 숫자·영문·점·더하기·빼기 32자까지이고 원본 식별 값을 담지 않을 때만 쓰고, 아니면 "알 수 없음" (G4 M8 1라운드 a4).
+        /// 기록의 앱 버전은 기록에서 온 글이다: 앞쪽의 숫자 버전(숫자 마디 1~4개, 마디마다 5자리까지)만 쓰고 뒤 꼬리(+커밋 등)는 버린다.
+        /// 숫자 버전도 원본 식별 값(주소 등)을 담으면, 길이와 관계없이 "알 수 없음" (G4 M8 1라운드 a4, 2라운드 a3: 한 글자 식별 값).
         /// </summary>
         private string SafeVersion(string v)
         {
-            bool shape = v.Length is > 0 and <= 32 && v.All(c => c is (>= '0' and <= '9') or (>= 'a' and <= 'z') or (>= 'A' and <= 'Z') or '.' or '+' or '-');
-            return shape && !red.Identities.Any(i => i.Value.Length >= 2 && Redactor.Contains(v, i.Value)) ? v : "알 수 없음";
+            int end = 0;
+            while (end < v.Length && (char.IsAsciiDigit(v[end]) || v[end] == '.')) end++;
+            var core = v[..end].TrimEnd('.');
+            var parts = core.Split('.');
+            bool shape = core.Length > 0 && parts.Length <= 4 && parts.All(p => p.Length is > 0 and <= 5);
+            return shape && !red.Identities.Any(i => i.Value.Trim().Length > 0 && core.Contains(i.Value.Trim(), StringComparison.OrdinalIgnoreCase)) ? core : "알 수 없음";
         }
 
         private static IReadOnlyList<ReportRun> Cols(params string[] names) => names.Select(ReportRun.Gen).ToArray();

@@ -248,6 +248,119 @@ public sealed class M8FlowTests
         finally { AppDriver.DeleteUserData(userData); }
     }
 
+    /// <summary>임시 파일에 절반을 쓴 채 멈춘 내보내기 중에 닫기: 닫기가 취소를 보내고 정리가 끝난 뒤에 끝난다 (G4 M8 2라운드 b1).</summary>
+    [Fact]
+    public void ClosingWhileTheTempFileIsBeingWrittenRemovesIt()
+    {
+        var userData = AppDriver.NewUserData();
+        var outDir = OutDir("close-hold");
+        try
+        {
+            M5Fixtures.SaveProfile(userData, "outage-long");
+            M5Fixtures.MakeRecord(userData, "outage-long", M5Fixtures.DemoNow.AddHours(-2), 3);
+            using var app = Launch(userData, "--screen", "report", "--report-out", outDir, "--report-fail", "hold");
+            WaitReady(app);
+            app.Invoke("report.export");
+            // 임시 파일이 생겨 쓰는 중임을 확인한 뒤 닫는다
+            var until = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+            while (Directory.GetFiles(outDir, ReportFile.TempPrefix + "*").Length == 0 && DateTime.UtcNow < until) Thread.Sleep(20);
+            Assert.Single(Directory.GetFiles(outDir, ReportFile.TempPrefix + "*"));
+            Assert.Equal(0, app.Close());
+            Assert.Empty(Directory.GetFiles(outDir));   // 임시 파일 정리가 끝난 뒤 프로세스가 끝남, 결과 파일도 없음
+            Assert.Contains(app.ReadLog(), e => e.GetProperty("kind").GetString() == "reportExportCancelled");
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
+    // ---------------- 혼합 끊김·링크 보조 근거·손상 (G4 M8 2라운드 b2) ----------------
+
+    /// <summary>
+    /// 혼합 끊김(외부 둘 3회차 → 외부 하나 2회차), 링크 근거(직접: 관측 범위 50%·알림 넘침·끊김 하나, 로그: 접근 거부), 손상(망가진 회차 줄·누락 조각)이
+    /// 실제로 있는 기록을 가려서 내보내, 하위 구간·링크 보조 사유·손상 알림을 기록에서 만든 기대값과 대조한다.
+    /// </summary>
+    [Fact]
+    public void AMixedDamagedRecordWithLinkNotesMatchesTheRecord()
+    {
+        var userData = AppDriver.NewUserData();
+        var outDir = OutDir("mixed");
+        const string Nic = "np-test-nic";
+        try
+        {
+            var id = M7Fixtures.Synthetic(userData, M5Fixtures.DemoNow.AddHours(-1), mixed: true);
+            var folder = M7Fixtures.Folder(userData, id);
+            var start = RecordReader.Read(RecordReader.FindSegments(id, M5Fixtures.RecordRoots(userData))).Header!.StartedAt;
+            System.Text.Json.Nodes.JsonObject Nic0(string collection, long? eventMs) => new()
+            {
+                ["collection"] = collection, ["adapter"] = Nic, ["interfaceIndex"] = 7, ["kind"] = "wired", ["virtual"] = false, ["eventMs"] = eventMs,
+            };
+            var link = new List<string>
+            {
+                RecordSchema.EventLine(id, "link", 0, 0, start, Nic0("up", 0)),
+                // 링크 끊김은 끊김(400~404회차)과 떨어진 곳에 둔다 (하위 구간 판정이 바뀌지 않게)
+                RecordSchema.EventLine(id, "link", 800, 800_000, start.AddSeconds(800), Nic0("down", 800_000)),
+                RecordSchema.EventLine(id, "link", 803, 803_000, start.AddSeconds(803), Nic0("up", 803_000)),
+                RecordSchema.EventLine(id, "link", 900, 900_000, start.AddSeconds(900), new() { ["collection"] = "overflow", ["spans"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonArray(900_000, 905_000)) }),
+                RecordSchema.EventLine(id, "link", 1199, 1_199_000, start.AddSeconds(1199), new() { ["collection"] = "summary", ["adapter"] = Nic, ["capability"] = "supported", ["coverage"] = 0.5 }),
+                RecordSchema.EventLine(id, "link", 1199, 1_199_000, start.AddSeconds(1199), new() { ["source"] = "log", ["collection"] = "summary", ["adapter"] = Nic, ["capability"] = "denied", ["code"] = "log-denied" }),
+            };
+            File.AppendAllLines(Path.Combine(folder, "events.jsonl"), link);
+            M7Fixtures.CorruptRounds(userData, id);
+            M7Fixtures.AddDetachedSegment(userData, id);
+
+            using (var app = Launch(userData, "--screen", "report", "--report-out", outDir))
+            {
+                var ready = WaitReady(app, masked: true);
+                Assert.Equal(id, Sd(ready).GetProperty("id").GetString());
+                app.Invoke("report.export");
+                Assert.True(Sd(WaitExport(app)).GetProperty("export").GetProperty("Ok").GetBoolean());
+                var html = File.ReadAllText(Assert.Single(Directory.GetFiles(outDir)));
+                Assert.Empty(ReportHtml.Verify(html));
+                Assert.Equal(Squash(ReportHtml.BodyTexts(html)), Squash(PreviewTexts(app)));
+                Assert.Equal(0, app.Close());
+
+                var (record, a) = Reanalyze(userData, id);
+                var h = record.Header!;
+                var fields = ReportHtml.FieldValues(html);
+                string Clock(DateTimeOffset w) => w.ToOffset(TimeSpan.FromMinutes(h.UtcOffsetMinutes)).ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+                var walls = record.Rounds.ToDictionary(r => r.Round, r => r.Wall);
+
+                // 혼합 끊김: 기록의 모양을 시험이 안다 — 400회차부터 3회차, 403회차부터 2회차, 두 판정이 다름
+                var mixed = Assert.Single(a.Episodes, e => e.Parts.Count > 1);
+                Assert.Equal([400L, 403L], mixed.Parts.Select(p => p.FirstRound));
+                Assert.Equal([3, 2], mixed.Parts.Select(p => p.Count));
+                Assert.NotEqual(mixed.Parts[0].Verdict, mixed.Parts[1].Verdict);
+                var parts = a.Episodes.Where(e => e.Parts.Count > 1).SelectMany(e => e.Parts).ToArray();
+                Assert.Equal(parts.Select(p => Clock(walls[p.FirstRound])), Values(fields, "part.start"));
+                Assert.Equal([Clock(start.AddSeconds(400)), Clock(start.AddSeconds(403))], Values(fields, "part.start"));
+                Assert.Equal(parts.Select(RecordView.Duration), Values(fields, "part.duration"));
+                Assert.Equal(parts.Select(p => RecordView.VerdictName(p.Verdict)), Values(fields, "part.verdict"));
+                Assert.Equal(parts.Select(p => RecordView.CandidateText(p.Candidate)), Values(fields, "part.candidate"));
+                Assert.Contains($"여러 판정 (하위 구간 2개)", Values(fields, "episode.verdict"));
+
+                // 링크 근거: 직접(끊김 관측, 관측 범위·일부·넘침), 로그(접근 거부, 사유는 고정 문구로만)
+                Assert.Equal(["끊김 관측", "접근 거부"], Values(fields, "link.state"));
+                var notes = Values(fields, "link.notes");
+                Assert.Equal(2, notes.Length);
+                Assert.Equal($"관측 범위 {LiveSummary.Percent(0.5)} · 일부만 관측 · 알림이 넘쳐 일부 빠짐", notes[0]);
+                Assert.DoesNotContain("log-denied", notes[1]);
+                Assert.NotEqual("없음", notes[1]);
+                Assert.DoesNotContain(Nic, html);   // 어댑터 이름은 가림
+
+                // 손상: 망가진 회차 줄과 누락 조각 → 알림 개수와 각 알림 글이 파일·미리 보기에 있다
+                var notices = RecordView.DamageNotices(record, SymptomMarks.FromEvents(record.Events, record.NoteLines).Ignored);
+                Assert.True(notices.Count >= 2, "손상 알림 " + notices.Count);
+                Assert.True(record.Damage.Total >= 2);
+                Assert.NotEmpty(record.MissingSegments);
+                Assert.Equal([$"알림 {notices.Count}건"], Values(fields, "condition.damage"));
+                var body = Squash(ReportHtml.BodyTexts(html));
+                foreach (var n in notices) Assert.Contains(Squash([n]), body);
+                foreach (var v in Strong(record)) Assert.False(html.Contains(v, StringComparison.OrdinalIgnoreCase), "남은 값: " + v);
+                Record("flow-report-mixed", new { id, parts = parts.Length, links = notes.Length, notices = notices.Count });
+            }
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
     // ---------------- 2. 가리기 켬/끔, 3. 옵션 ----------------
 
     [Fact]

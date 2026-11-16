@@ -24,38 +24,67 @@ public static class ReportFile
 
     private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
 
-    public static ReportWriteResult Write(string path, string content, bool overwrite, ReportFault fault = ReportFault.None)
+    /// <summary>쓰기 조각 크기: 조각마다 취소를 확인한다 (앱을 닫을 때 쓰는 중이어도 곧 멈추고 임시 파일을 지운다, G4 M8 2라운드 b1).</summary>
+    public const int Chunk = 64 * 1024;
+
+    /// <summary>
+    /// 쓰기. 취소되면 임시 파일을 지우고 <see cref="OperationCanceledException"/>을 던진다 (기존 파일은 그대로).
+    /// <paramref name="midWrite"/>는 시험용: 임시 파일에 앞 절반을 쓴 뒤 불린다 (쓰는 중 닫기 시험).
+    /// </summary>
+    public static ReportWriteResult Write(string path, string content, bool overwrite, ReportFault fault = ReportFault.None,
+        CancellationToken token = default, Action<CancellationToken>? midWrite = null)
     {
         string full = System.IO.Path.GetFullPath(path);
         string folder = System.IO.Path.GetDirectoryName(full) ?? throw new ArgumentException("폴더가 없는 경로입니다.", nameof(path));
         if (File.Exists(full) && !overwrite) return new ReportWriteResult(ReportWriteError.Exists, null, 0, "같은 이름의 파일이 있습니다.");
+        token.ThrowIfCancellationRequested();
         string temp = System.IO.Path.Combine(folder, TempPrefix + Guid.NewGuid().ToString("N") + TempSuffix);
+        bool placed = false;
         try
         {
             var bytes = Utf8.GetBytes(content);
             using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                if (fault == ReportFault.Write)
+                int half = bytes.Length / 2;
+                bool halfDone = false;
+                for (int at = 0; at < bytes.Length;)
                 {
-                    stream.Write(bytes, 0, bytes.Length / 2);
-                    throw new IOException("시험 주입: 쓰는 중 실패");
+                    token.ThrowIfCancellationRequested();
+                    int end = Math.Min(bytes.Length, at < half ? Math.Min(half, at + Chunk) : at + Chunk);
+                    stream.Write(bytes, at, end - at);
+                    at = end;
+                    if (!halfDone && at >= half)
+                    {
+                        halfDone = true;
+                        if (fault == ReportFault.Write) throw new IOException("시험 주입: 쓰는 중 실패");
+                        if (midWrite is not null)
+                        {
+                            stream.Flush();
+                            midWrite(token);
+                        }
+                    }
                 }
-                stream.Write(bytes, 0, bytes.Length);
+                token.ThrowIfCancellationRequested();
                 stream.Flush(flushToDisk: true);
             }
             if (fault == ReportFault.Move) throw new IOException("시험 주입: 옮기기 직전 실패");
+            token.ThrowIfCancellationRequested();   // 옮기기 뒤에는 취소하지 않는다 (결과 파일이 완성됨)
             if (File.Exists(full))
             {
                 if (!overwrite) throw new IOException("같은 이름의 파일이 생겼습니다.");
                 File.Replace(temp, full, destinationBackupFileName: null);   // 실패하면 원래 파일 유지
             }
             else File.Move(temp, full, overwrite: false);
+            placed = true;
             return new ReportWriteResult(ReportWriteError.None, full, bytes.LongLength, null);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or NotSupportedException)
         {
-            Cleanup(temp);
             return new ReportWriteResult(ReportWriteError.Failed, null, 0, ex is UnauthorizedAccessException ? "그 폴더에 쓸 권한이 없습니다." : "파일을 쓰지 못했습니다.");
+        }
+        finally
+        {
+            if (!placed) Cleanup(temp);   // 실패·취소·예상 못 한 예외 모두
         }
     }
 

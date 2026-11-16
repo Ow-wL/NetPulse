@@ -102,15 +102,15 @@ public sealed class M8RequestFileTests : IDisposable
     {
         var folder = dir.Sub("ok");
         var path = Path.Combine(folder, "NetPulse-리포트.html");
-        var r = ReportFile.Write(path, "<p>한글</p>", overwrite: false);
+        var r = ReportFile.Write(path, "<p>한글</p>", overwrite: false, token: TestContext.Current.CancellationToken);
         Assert.True(r.Ok);
         Assert.Equal("<p>한글</p>", File.ReadAllText(path, Encoding.UTF8));
         Assert.Equal(Encoding.UTF8.GetByteCount("<p>한글</p>"), r.Bytes);
         Assert.Empty(Temps(folder));
-        var exists = ReportFile.Write(path, "새 글", overwrite: false);
+        var exists = ReportFile.Write(path, "새 글", overwrite: false, token: TestContext.Current.CancellationToken);
         Assert.Equal(ReportWriteError.Exists, exists.Error);
         Assert.Equal("<p>한글</p>", File.ReadAllText(path, Encoding.UTF8));
-        Assert.True(ReportFile.Write(path, "바꾼 글", overwrite: true).Ok);
+        Assert.True(ReportFile.Write(path, "바꾼 글", overwrite: true, token: TestContext.Current.CancellationToken).Ok);
         Assert.Equal("바꾼 글", File.ReadAllText(path, Encoding.UTF8));
         Assert.Empty(Temps(folder));
     }
@@ -123,14 +123,14 @@ public sealed class M8RequestFileTests : IDisposable
         var folder = dir.Sub("fail-" + fault);
         var path = Path.Combine(folder, "r.html");
         File.WriteAllText(path, "원래 파일");
-        var r = ReportFile.Write(path, "<p>새 리포트</p>", overwrite: true, fault);
+        var r = ReportFile.Write(path, "<p>새 리포트</p>", overwrite: true, fault, token: TestContext.Current.CancellationToken);
         Assert.Equal(ReportWriteError.Failed, r.Error);
         Assert.Null(r.Path);
         Assert.Equal("원래 파일", File.ReadAllText(path));
         Assert.Empty(Temps(folder));
 
         var fresh = Path.Combine(folder, "new.html");
-        Assert.False(ReportFile.Write(fresh, "<p>x</p>", overwrite: false, fault).Ok);
+        Assert.False(ReportFile.Write(fresh, "<p>x</p>", overwrite: false, fault, token: TestContext.Current.CancellationToken).Ok);
         Assert.False(File.Exists(fresh));
         Assert.Empty(Temps(folder));
     }
@@ -143,7 +143,7 @@ public sealed class M8RequestFileTests : IDisposable
         File.WriteAllText(path, "원래 파일");
         ReportWriteResult r;
         using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))   // 바꾸기가 실패하게 열어 둔다
-            r = ReportFile.Write(path, "<p>새 리포트</p>", overwrite: true);
+            r = ReportFile.Write(path, "<p>새 리포트</p>", overwrite: true, token: TestContext.Current.CancellationToken);
         Assert.False(r.Ok);
         Assert.Equal("원래 파일", File.ReadAllText(path));
         Assert.Empty(Temps(folder));
@@ -153,8 +153,42 @@ public sealed class M8RequestFileTests : IDisposable
     public void AMissingFolderFailsWithoutThrowing()
     {
         var path = Path.Combine(dir.Path, "no-such-folder", "r.html");
-        var r = ReportFile.Write(path, "<p>x</p>", overwrite: false);
+        var r = ReportFile.Write(path, "<p>x</p>", overwrite: false, token: TestContext.Current.CancellationToken);
         Assert.Equal(ReportWriteError.Failed, r.Error);
+    }
+
+    // ---------------- G4 2라운드 b1: 쓰는 중 취소 ----------------
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CancellingInTheMiddleOfAWriteRemovesTheTempFileAndKeepsTheOriginal(bool existing)
+    {
+        var folder = dir.Sub("cancel-" + existing);
+        var path = Path.Combine(folder, "r.html");
+        if (existing) File.WriteAllText(path, "원래 파일");
+        using var cts = new CancellationTokenSource();
+        var big = "<p>" + new string('가', ReportFile.Chunk) + "</p>";   // 조각 여럿
+        bool sawTemp = false;
+        Assert.Throws<OperationCanceledException>(() => ReportFile.Write(path, big, overwrite: true, token: cts.Token, midWrite: _ =>
+        {
+            sawTemp = Temps(folder).Length == 1;   // 임시 파일에 절반을 쓴 상태
+            cts.Cancel();
+        }));
+        Assert.True(sawTemp);
+        Assert.Empty(Temps(folder));
+        if (existing) Assert.Equal("원래 파일", File.ReadAllText(path));
+        else Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public void AWriteCancelledBeforeItStartsCreatesNothing()
+    {
+        var folder = dir.Sub("cancel-early");
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        Assert.Throws<OperationCanceledException>(() => ReportFile.Write(Path.Combine(folder, "r.html"), "<p>x</p>", overwrite: false, token: cts.Token));
+        Assert.Empty(Directory.GetFiles(folder));
     }
 
     // ---------------- G4 1라운드 a2·a3 ----------------

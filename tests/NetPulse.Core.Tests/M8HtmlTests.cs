@@ -202,6 +202,9 @@ public sealed class M8HtmlTests
     [InlineData("<style>.a { background: \\75 rl(https://example.invalid/a.png); }</style>", "CSS 이스케이프")]
     [InlineData("<a href=\"#summary\">x</a>", "요소 a")]
     [InlineData("<p onmouseover=\"x()\">x</p>", "허용하지 않는 속성 onmouseover")]
+    // G4 M8 2라운드 a4: SVG 색 속성의 CSS 이스케이프·외부 값
+    [InlineData("<svg xmlns=\"http://www.w3.org/2000/svg\"><rect fill=\"\\75 rl(https://example.invalid/p.svg#x)\" /></svg>", "속성 이스케이프 fill")]
+    [InlineData("<svg xmlns=\"http://www.w3.org/2000/svg\"><rect stroke=\"var(--x)\" /></svg>", "허용하지 않는 색 값 stroke")]
     public void TheAllowListRejectsAnythingTheDocumentDoesNotUse(string body, string expected)
     {
         var html = "<!DOCTYPE html>\n<html><head><title>t</title></head><body>" + body + "</body></html>";

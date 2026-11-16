@@ -149,13 +149,24 @@ public sealed class M8RedactionTests
     [InlineData(@"로그는 D:\Shared Data\Hong Gil-Dong\private.txt, 확인", "Gil-Dong")]
     [InlineData(@"\\nas box\사진 폴더\a.jpg; 끝", "사진 폴더")]
     [InlineData("내 메일은me@example.org입니다", "me@example.org")]
+    // G4 M8 2라운드 a1: 문장 끝 점 앞 IPv6, 이름에 괄호·대괄호가 든 경로
+    [InlineData("주소는 fe80::1.", "fe80::1")]
+    [InlineData("끊긴 곳 2001:db8::1234. 다시", "db8::1234")]
+    [InlineData(@"로그 D:\Home\Hong[work]\private.txt", "private.txt")]
+    [InlineData(@"로그 D:\Home\Hong[work]\private.txt", "Hong")]
+    [InlineData(@"\\nas\Shared (Sales)\private.txt", "private.txt")]
+    [InlineData(@"\\nas\Shared (Sales)\private.txt", "Sales")]
+    [InlineData(@"(D:\Data (2026)\a b.txt) 확인", "a b.txt")]
     public void MemoPatternsCatchValuesNextToKoreanTextAndPathsWithSpaces(string memo, string leaked)
     {
         var d = Build(Typical(memo), new ReportOptions(IncludeMemos: true));
         var text = d.Fields().Single(f => f.Field == "mark.memo").Value;
         Assert.DoesNotContain(leaked, text);
         Assert.Contains(ReportTexts.Masked, text);
-        Assert.DoesNotContain(leaked, ReportExport.Render(d).Html!);
+        var rendered = ReportExport.Render(d);
+        Assert.True(rendered.Ok, string.Join(", ", rendered.LeakKinds.Concat(rendered.Problems)));
+        Assert.NotNull(rendered.Html);
+        Assert.DoesNotContain(leaked, rendered.Html);
     }
 
     [Fact]
@@ -166,21 +177,39 @@ public sealed class M8RedactionTests
         Assert.Equal("[가림]에서 끊김", text);
     }
 
-    [Fact]
-    public void ClockTimesAndDatesStayInMemos()
+    [Theory]
+    [InlineData("13:20:05에 끊기고 2026-11-13 13시에 다시")]
+    // G4 M8 2라운드 a2: 공백으로 붙은 시각·날짜를 전화번호로 합쳐 가리지 않는다
+    [InlineData("13:20:05 2026-11-13")]
+    [InlineData("2026-11-13 09:00 2026-11-14 09:00")]
+    [InlineData("2026-01-05 08:00~2026-01-05 09:30 0.5초")]
+    public void ClockTimesAndDatesStayInMemos(string memo)
     {
-        var text = Build(Typical("13:20:05에 끊기고 2026-11-13 13시에 다시"), new ReportOptions(IncludeMemos: true)).Fields().Single(f => f.Field == "mark.memo").Value;
-        Assert.Equal("13:20:05에 끊기고 2026-11-13 13시에 다시", text);
+        var text = Build(Typical(memo), new ReportOptions(IncludeMemos: true)).Fields().Single(f => f.Field == "mark.memo").Value;
+        Assert.Equal(memo, text);
+    }
+
+    [Theory]
+    [InlineData("13:20 010-9876-5432 연락", "13:20 [가림] 연락")]
+    [InlineData("2026-11-13 +82 10 9876 5432", "2026-11-13 [가림]")]
+    public void PhoneNumbersNextToTimesAreStillMasked(string memo, string expected)
+    {
+        var text = Build(Typical(memo), new ReportOptions(IncludeMemos: true)).Fields().Single(f => f.Field == "mark.memo").Value;
+        Assert.Equal(expected, text);
     }
 
     // ---------------- a4: 앱 버전 ----------------
 
     [Theory]
     [InlineData("1.0", "NetPulse 1.0")]
-    [InlineData("0.5.0+abc", "NetPulse 0.5.0+abc")]
+    [InlineData("0.5.0+abc", "NetPulse 0.5.0")]
     [InlineData("예시 통신사 가나", "NetPulse 알 수 없음")]
-    [InlineData("1.0-isp-a1", "NetPulse 알 수 없음")]
-    [InlineData("1.0 C:\\x", "NetPulse 알 수 없음")]
+    [InlineData("1.0-isp-a1", "NetPulse 1.0")]
+    [InlineData("1.0 C:\\x", "NetPulse 1.0")]
+    // G4 M8 2라운드 a3: 숫자 버전만 쓰고, 그 안에 주소 같은 식별 값이 있으면 버린다
+    [InlineData("192.0.2.254", "NetPulse 알 수 없음")]
+    [InlineData("1.2.3.4.5", "NetPulse 알 수 없음")]
+    [InlineData("+X", "NetPulse 알 수 없음")]
     public void TheRecordedAppVersionIsUsedOnlyWhenItLooksLikeAVersion(string version, string expected)
     {
         var rec = Typical();

@@ -365,6 +365,8 @@ public sealed partial class AppShell : Window
         runTimer?.Stop();
         // 진단 억제는 첫 await 전에 (테마 정리를 기다리는 동안 결과를 저장·게시하지 않게, G4 1라운드 b4). 끝나기는 아래에서 기다린다
         var diagnosisStop = diagnosis.ShutdownAsync();
+        // 리포트 내보내기 취소도 첫 await 전에 보낸다: 쓰는 중이면 조각 사이에서 멈추고 임시 파일을 지운다 (G4 M8 2라운드 b1)
+        var reportStop = screens.Prepared("report") is ReportScreen report ? report.StopExportAsync() : Task.CompletedTask;
         await ui.Theme.ShutdownAsync(Waits.ThemeCleanup);
         log.Write("closeCleanup", new { snapshotLayers = ui.Theme.SnapshotLayersInTree, inTransition = ui.Theme.InTransition, rendering = ui.Theme.RenderingSubscribed });
         AppWindow.Hide();
@@ -374,11 +376,16 @@ public sealed partial class AppShell : Window
             // 기록 화면의 메모 저장은 쓰기 큐에 들어가기 전(저장 시작 알림·앞 요청 대기)일 수 있어 호스트 종료와 함께 따로 기다린다
             // (호스트는 쓰기 큐만 기다린다, G4 M7 3라운드 1). 둘은 세대로 서로의 옛 글을 건너뛰므로 동시에 해도 된다
             var memoWrites = memos.DrainAsync(Waits.CloseWrites);
-            // 리포트 내보내기도 기다린다: 쓰는 중 프로세스가 끝나면 (가리지 않은) 임시 파일이 남을 수 있다 (G4 M8 1라운드 b1)
-            var reportStop = screens.Prepared("report") is ReportScreen report ? report.StopExportAsync() : Task.CompletedTask;
             var shutdown = Task.WhenAll(host.ShutdownAsync(), memoWrites, reportStop);
             if (await Task.WhenAny(shutdown, Task.Delay(Waits.CloseWrites + Waits.CloseWrites + Waits.CloseWrites)) != shutdown)
                 log.Write("closeTimeout", new { state = host.Snapshot.State.ToString() });
+            // 리포트 내보내기는 시간 한도 없이 끝까지 기다린다: 취소를 받았으니 곧 끝나고, 끝나기 전에 닫으면 임시 파일이 남을 수 있다
+            // (G4 M8 1·2라운드 b1. 입출력 자체가 멈추면 운영체제가 오류로 끝낼 때까지 기다린다 — 남는 파일보다 늦은 닫기를 택함)
+            if (!reportStop.IsCompleted)
+            {
+                log.Write("reportCloseWait", new { });
+                await reportStop;
+            }
             if (memoWrites.IsCompleted && !memoWrites.Result) log.Write("memoCloseTimeout", new { });
             var left = host.UnsavedDrafts();
             if (left.Count > 0) log.Write("memoUnsaved", new { marks = left });   // 메모 글은 남기지 않는다

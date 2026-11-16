@@ -103,12 +103,13 @@ public sealed partial class Redactor
     [GeneratedRegex(@"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")]
     private static partial Regex EmailPattern();
 
-    // 경로는 공백이 든 이름(사용자 폴더 "Hong Gil-Dong")이 있어 공백에서 끊지 않고 구분 기호(쉼표·세미콜론·따옴표·괄호)나 메모 끝까지 가린다.
-    // 경로 뒤의 같은 마디 글이 함께 가려질 수 있다 (덜 가리는 것보다 낫다)
-    [GeneratedRegex(@"\\\\[^,;""'<>()\[\]]+")]
+    // 경로는 이름에 공백·괄호·대괄호가 들 수 있어 (사용자 폴더 "Hong Gil-Dong", "Shared (Sales)", "Hong[work]") 그 줄의 마지막 경로 구분자까지
+    // 통째로 가리고, 마지막 이름은 쉼표·세미콜론·따옴표·꺾쇠나 줄 끝까지 가린다 (G4 M8 2라운드 a1).
+    // 경로 뒤의 같은 줄 글이 함께 가려질 수 있다 (덜 가리는 것보다 낫다)
+    [GeneratedRegex(@"\\\\(?:[^\r\n""<>]*[\\/])?[^\\/,;""'<>\r\n]*")]
     private static partial Regex UncPattern();
 
-    [GeneratedRegex(@"(?<![A-Za-z0-9])[A-Za-z]:[\\/][^,;""'<>()\[\]]*")]
+    [GeneratedRegex(@"(?<![A-Za-z0-9])[A-Za-z]:[\\/](?:[^\r\n""<>]*[\\/])?[^\\/,;""'<>\r\n]*")]
     private static partial Regex DrivePattern();
 
     [GeneratedRegex(@"(?<![0-9A-Fa-f:\-])[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(?:\1[0-9A-Fa-f]{2}){4}(?![0-9A-Fa-f])|(?<![0-9A-Fa-f.])[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}(?![0-9A-Fa-f])")]
@@ -118,15 +119,17 @@ public sealed partial class Redactor
     [GeneratedRegex(@"(?<![0-9A-Za-z:])(?:[0-9A-Fa-f]{0,4}:){2,6}\d{1,3}(?:\.\d{1,3}){3}(?![0-9])")]
     private static partial Regex Ipv6With4Pattern();
 
-    // IPv6: 콜론 셋 이상이거나 "::" (시각 13:20:05는 콜론 둘이라 걸리지 않음)
-    [GeneratedRegex(@"(?<![0-9A-Za-z:])(?:[0-9A-Fa-f]{0,4}:){3,7}[0-9A-Fa-f]{0,4}(?:%[0-9A-Za-z]+)?(?![0-9A-Za-z:.])|(?<![0-9A-Za-z:])[0-9A-Fa-f]{0,4}::(?:[0-9A-Fa-f]{1,4}:?){0,6}(?:%[0-9A-Za-z]+)?(?![0-9A-Za-z:.])")]
+    // IPv6: 콜론 셋 이상이거나 "::" (시각 13:20:05는 콜론 둘이라 걸리지 않음). 끝 경계의 점은 뒤에 글자가 이어질 때만 막는다
+    // (문장 끝 "fe80::1."은 가리고, IPv4가 든 꼴은 앞 패턴이 먼저 처리, G4 M8 2라운드 a1)
+    [GeneratedRegex(@"(?<![0-9A-Za-z:])(?:[0-9A-Fa-f]{0,4}:){3,7}[0-9A-Fa-f]{0,4}(?:%[0-9A-Za-z]+)?(?![0-9A-Za-z:]|\.[0-9A-Za-z])|(?<![0-9A-Za-z:])[0-9A-Fa-f]{0,4}::(?:[0-9A-Fa-f]{1,4}:?){0,6}(?:%[0-9A-Za-z]+)?(?![0-9A-Za-z:]|\.[0-9A-Za-z])")]
     private static partial Regex Ipv6Pattern();
 
     [GeneratedRegex(@"(?<![0-9.])\d{1,3}(?:\.\d{1,3}){3}(?![0-9]|\.[0-9])")]
     private static partial Regex Ipv4Pattern();
 
-    // 전화번호 꼴: +나 0으로 시작해 숫자 9~15개가 공백·점·줄표로만 이어진 것 (날짜 "2026-11-13 13시"는 2로 시작해 걸리지 않음)
-    [GeneratedRegex(@"(?<![\d])(?:\+\d|0)(?:[ .\-]?\d){8,14}(?![\d])")]
+    // 전화번호 꼴: +나 0으로 시작해 숫자 9~15개가 공백·점·줄표로만 이어진 것 (날짜 "2026-11-13 13시"는 2로 시작해 걸리지 않음).
+    // 시각·날짜의 한 마디(":05", "-01")에서는 시작하지 않고, 시각의 앞 마디("09:")에서 끝나지 않는다 (G4 M8 2라운드 a2: "13:20:05 2026-11-13")
+    [GeneratedRegex(@"(?<![\d:.\-/])(?:\+\d|0)(?:[ .\-]?\d){8,14}(?![\d]|:\d)")]
     private static partial Regex PhonePattern();
 
     /// <summary>메모 패턴 가림 (가리기를 켠 문서에서 메모를 넣을 때). 기록의 식별 값도 가린다 (긴 것부터, 3글자 이하는 단어 경계).</summary>

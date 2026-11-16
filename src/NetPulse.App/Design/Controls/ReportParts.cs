@@ -270,7 +270,7 @@ public static class ReportParts
         void Lines(IReadOnlyList<IReadOnlyList<FigurePoint>> series, Brush brush, bool dashed)
         {
             // 한 점짜리 구간은 점으로 (SVG와 같음, G4 M8 1라운드 a5). 최악 사례에는 수백 개라 요소 하나(경로)에 모은다 (M8 bench)
-            var dots = new GeometryGroup();
+            var dots = new GeometryGroup { FillRule = FillRule.Nonzero };   // 기본 EvenOdd는 겹친 이웃 점의 겹친 곳을 비운다 (G4 M8 2라운드 b7)
             foreach (var seg in series)
             {
                 if (seg.Count == 0) continue;

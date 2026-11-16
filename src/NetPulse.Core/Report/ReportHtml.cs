@@ -52,7 +52,7 @@ public static class Markup
 }
 
 /// <summary>문서 → HTML 한 파일 (M8 설계 3.4). 인라인 CSS·SVG, 스크립트·외부 참조 없음.</summary>
-public static class ReportHtml
+public static partial class ReportHtml
 {
     public static string Write(ReportDocument d) => Write(d, ReportPalette.Document);
 
@@ -182,6 +182,9 @@ svg.timeline { width: 100%; height: auto; font-family: "Segoe UI", "Malgun Gothi
         "patternUnits", "patternTransform", "text-anchor",
     };
 
+    [System.Text.RegularExpressions.GeneratedRegex(@"^(?:none|#[0-9A-Fa-f]{6}|url\(#[A-Za-z0-9\-]+\))$")]
+    private static partial System.Text.RegularExpressions.Regex PaintValue();
+
     private static XmlReader Reader(string html) => XmlReader.Create(new StringReader(html), new XmlReaderSettings
     {
         DtdProcessing = DtdProcessing.Ignore, XmlResolver = null, IgnoreComments = false,
@@ -216,6 +219,9 @@ svg.timeline { width: 100%; height: auto; font-family: "Segoe UI", "Malgun Gothi
                                 if (local is "href" or "src" or "action" or "formaction" or "srcset" or "poster" or "data" && !value.StartsWith('#'))
                                     problems.Add("외부 참조 속성 " + name);
                                 if (local == "style" || value.Contains("url(", StringComparison.OrdinalIgnoreCase)) CheckCss(value, problems);
+                                // 속성 값의 이스케이프와 색 속성 (G4 M8 2라운드 a4): fill·stroke는 문서가 쓰는 꼴(#색, none, url(#id))만
+                                if (value.Contains('\\')) problems.Add("속성 이스케이프 " + name);
+                                if (local is "fill" or "stroke" && !PaintValue().IsMatch(value)) problems.Add("허용하지 않는 색 값 " + name);
                             }
                             while (r.MoveToNextAttribute());
                             r.MoveToElement();

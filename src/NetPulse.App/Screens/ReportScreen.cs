@@ -565,7 +565,9 @@ public sealed class ReportScreen : Screen
         Context.QueueDiag();
         var fault = Context.Options.ReportFail switch { "write" => ReportFault.Write, "move" => ReportFault.Move, "leak" => ReportFault.Leak, _ => ReportFault.None };
         bool slow = Context.Options.ReportFail == "slow";
-        // 내보내기는 앱 종료 절차가 기다린다 (StopExportAsync): 쓰기 전이면 취소, 쓰는 중이면 끝(또는 실패 정리)까지 (G4 M8 1라운드 b1)
+        // 시험: 임시 파일에 절반을 쓴 뒤 멈춰 있는다 (쓰는 중 닫기, G4 M8 2라운드 b1)
+        Action<CancellationToken>? hold = Context.Options.ReportFail == "hold" ? t => t.WaitHandle.WaitOne(Waits.ReportSlowTest) : null;
+        // 내보내기는 앱 종료 절차가 기다린다 (StopExportAsync): 취소를 보내면 쓰기 전이든 쓰는 중이든 멈추고 임시 파일을 지운다 (G4 M8 1·2라운드 b1)
         exportCts = new CancellationTokenSource();
         var token = exportCts.Token;
         var work = Task.Run(async () =>
@@ -574,7 +576,7 @@ public sealed class ReportScreen : Screen
             if (!r.Ok) return (r, (ReportWriteResult?)null);
             if (slow) await Task.Delay(Waits.ReportSlowTest, token);
             token.ThrowIfCancellationRequested();
-            return (r, ReportFile.Write(path, r.Html!, overwrite: true, fault is ReportFault.Write or ReportFault.Move ? fault : ReportFault.None));
+            return (r, ReportFile.Write(path, r.Html!, overwrite: true, fault is ReportFault.Write or ReportFault.Move ? fault : ReportFault.None, token, hold));
         }, token);
         exportTask = work;
         ReportExport.Rendered rendered;
@@ -616,12 +618,15 @@ public sealed class ReportScreen : Screen
     private Task exportTask = Task.CompletedTask;
     private CancellationTokenSource? exportCts;
 
-    /// <summary>앱을 닫을 때: 쓰기 전인 내보내기는 취소하고, 쓰는 중이면 끝날 때까지 (임시 파일이 남지 않게). 예외는 삼킨다.</summary>
+    /// <summary>
+    /// 앱을 닫을 때: 취소를 보내고(동기, 첫 await 전) 쓰기·임시 파일 정리가 끝날 때까지. 쓰기는 조각마다 취소를 확인하므로 곧 끝난다.
+    /// 옮기기를 이미 마쳤으면 완성된 결과 파일이 남는다. 예외는 삼킨다.
+    /// </summary>
     public async Task StopExportAsync()
     {
         exportCts?.Cancel();
         try { await exportTask; }
-        catch (OperationCanceledException) { }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or UnauthorizedAccessException or InvalidOperationException) { }
     }
 
     private Task<bool> ConfirmUnmaskedAsync()
