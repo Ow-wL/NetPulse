@@ -99,11 +99,15 @@ if (Test-Path $g5Dir) {
     $required += @('list', 'detail') | ForEach-Object { $v = $_; @('hc-aquatic', 'hc-desert') | ForEach-Object { "matrix-m7-records-$v-$_" } }
     $required += @('matrix-m7-records-detail-dark-reduced', 'matrix-m7-records-detail-light-reduced', 'matrix-m7-records-detail-dark-reducedmotion', 'matrix-m7-records-detail-light-reducedmotion')
     foreach ($p in '0', '0.5', '1') { $required += "matrix-m7-transition-crossfade-$p" }
+    # M8 (설계 7.4·7.5): 리포트 장면 × 테마 × 배율, 흐름. bench·Edge 확인·고대비는 C단계에서 더한다
+    $m8Ids = @(Get-Content (Join-Path $root 'tests\NetPulse.UiTests\m8-scenes.txt') -Encoding UTF8 | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | ForEach-Object { ($_ -split '\|')[0] })
+    foreach ($id in $m8Ids) { foreach ($t in 'dark', 'light') { foreach ($s in '100', '150') { $required += "matrix-m8-$id-$t-$s" } } }
+    $required += @('flow-report', 'flow-report-mask')
     $missing = @($required | Where-Object { -not (Test-Path (Join-Path $g5Dir "$_.json")) })
     $matrix = @(Get-ChildItem $g5Dir -Filter 'matrix-*.json' | Sort-Object Name)
     # M2 회귀 매트릭스는 따로 센다: M5 결과가 합쳐져 M2 캡처 누락을 가리지 않게 (G4 M5 1라운드 C3)
     # M6 결과도 M2 수에 섞이지 않게 뺀다
-    $m2Matrix = @($matrix | Where-Object { -not $_.Name.StartsWith('matrix-m5-') -and -not $_.Name.StartsWith('matrix-m6-') -and -not $_.Name.StartsWith('matrix-m7-') })
+    $m2Matrix = @($matrix | Where-Object { -not $_.Name.StartsWith('matrix-m5-') -and -not $_.Name.StartsWith('matrix-m6-') -and -not $_.Name.StartsWith('matrix-m7-') -and -not $_.Name.StartsWith('matrix-m8-') })
     $captures = @(Get-ChildItem $env:NETPULSE_UITEST_OUT -Filter *.png | Sort-Object Name | ForEach-Object { [ordered]@{ file = "ui/captures/$($_.Name)"; sha256 = Get-Sha256Text $_.FullName } })
     $bench = & $read 'bench'
     $g5 = [ordered]@{
@@ -119,6 +123,8 @@ if (Test-Path $g5Dir) {
         m5Scenes       = $sceneIds.Count
         m6Scenes       = $m6Ids.Count
         m7Scenes       = $m7Ids.Count
+        m8Scenes       = $m8Ids.Count
+        flowReport     = & $read 'flow-report'
         benchRecords   = & $read 'bench-records'
         flowRecords    = & $read 'flow-records'
         benchDiagnose  = & $read 'bench-diagnose'

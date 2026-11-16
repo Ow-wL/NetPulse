@@ -7,7 +7,7 @@
 | 항목 | 값 |
 | --- | --- |
 | 마일스톤 | M8 리포트 |
-| 단계 | C단계 1차: 앱에서 처음 돌림, 고침 몇 가지, 흐름 시험 `M8FlowTests` 8개 통과 (디버그 빌드). 남은 것: 키보드 흐름, G5 장면(m8-scenes)·고대비, bench, Edge 확인 자동화(`html-render`), `ui-test.ps1` 필수 결과, 실측 시험 → 게이트 → G4 |
+| 단계 | C단계 2차: 흐름 시험 8개 + G5 장면 68장 통과 (디버그 빌드). 남은 것: 키보드 흐름, 고대비·효과 줄이기 장면, bench(`report-build`·`report-preview`), Edge 확인 자동화(`html-render`), 실측 시험 `M8LiveRunTests` → 게이트 → G4 |
 | 브랜치 | `loop/m8-report` (설계 커밋 위에 M7 병합 뒤 `main`(`573d24b`)을 병합) |
 | 설계 검토 라운드 | 2 / 2 (1라운드 REVISE 13건 → 2판, 2라운드 APPROVE + 구현 중 결정 7건) |
 | diff 리뷰 라운드 | 0 / 3 |

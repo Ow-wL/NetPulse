@@ -29,6 +29,7 @@ public sealed class ReportScreen : Screen
     private readonly StackPanel paperStack = new() { Spacing = Space.S6 };
     private readonly Border paper;
     private readonly StackPanel content = new() { Spacing = Space.S5 };
+    private readonly StackPanel body = new() { Spacing = Space.S5 };
     private readonly ScrollViewer scroll;
     private readonly ReportRequests requests = new();
     private readonly DocumentBrushes documentBrushes;
@@ -113,6 +114,9 @@ public sealed class ReportScreen : Screen
         previewStack.Children.Add(paperGroup);
         previewCard.Children.Add(previewStack);
 
+        content.Children.Add(optionsCard);
+        content.Children.Add(statusArea);
+        content.Children.Add(body);
         scroll = new ScrollViewer { Content = content, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, Space.S3, Space.S5) };
         AutomationProperties.SetAutomationId(scroll, "report.scroll");
         Grid.SetRow(scroll, 1);
@@ -240,7 +244,8 @@ public sealed class ReportScreen : Screen
 
     private void Rerender()
     {
-        content.Children.Clear();
+        // 옵션 카드는 빼지 않는다: 빼고 다시 넣으면 그 안의 초점(가리기 단추 등)이 탐색 막대로 튀었다 (M8 G5 캡처)
+        body.Children.Clear();
         statusArea.Children.Clear();
         var list = Candidates();
         bool listed = Context.Records.Listed;
@@ -253,7 +258,8 @@ public sealed class ReportScreen : Screen
             go.Click += (_, _) => Context.Navigate("measure", null);
             stack.Children.Add(go);
             body.Set(stack, "empty");
-            content.Children.Add(card);
+            optionsCard.Visibility = Visibility.Collapsed;
+            this.body.Children.Add(card);
             SetExport();
             Context.QueueDiag();
             return;
@@ -266,8 +272,7 @@ public sealed class ReportScreen : Screen
         prevButton.IsEnabled = index >= 0 && index < list.Count - 1;
         nextButton.IsEnabled = index > 0;
         SyncOptions();
-        content.Children.Add(optionsCard);
-        content.Children.Add(statusArea);
+        optionsCard.Visibility = Visibility.Visible;
 
         var state = requests.State;
         statusText.Text = state switch
@@ -286,25 +291,25 @@ public sealed class ReportScreen : Screen
 
         if (state == ReportState.Failed)
         {
-            content.Children.Add(ErrorCard("report.failed", "리포트를 만들지 못했습니다", FailureText(requests.Failure), records: true));
+            this.body.Children.Add(ErrorCard("report.failed", "리포트를 만들지 못했습니다", FailureText(requests.Failure), records: true));
             ClearPaper();
         }
         else if (leakKinds.Count > 0)
         {
-            content.Children.Add(ErrorCard("report.redaction", "식별 정보가 남아 있어 내보내지 않았습니다",
+            this.body.Children.Add(ErrorCard("report.redaction", "식별 정보가 남아 있어 내보내지 않았습니다",
                 $"가린 리포트에서 원본 값이 발견됐습니다 ({string.Join(", ", leakKinds)}). 다시 만들어 보세요.", records: false));
             ClearPaper();
         }
         else if (requests.Published is { } doc)
         {
-            content.Children.Add(previewCard);
+            this.body.Children.Add(previewCard);
             Draw(doc);
         }
         else
         {
             var (card, body) = ScreenParts.Card(Ui, "report.building", "리포트를 만드는 중");
             body.Set(GlassCard.Skeleton(Ui), "loading");
-            content.Children.Add(card);
+            this.body.Children.Add(card);
             ClearPaper();
         }
         SetExport();
@@ -467,11 +472,14 @@ public sealed class ReportScreen : Screen
         else if (written is { Ok: true })
         {
             lastExport = new ExportOutcome(true, written.Bytes, doc.Options.Masked, null, System.IO.Path.GetFileName(path), System.IO.Path.GetDirectoryName(path));
+            // 결과 줄은 옵션 아래라 큰 배율에서는 화면 밖일 수 있다: 알림도 띄운다
+            Context.Toasts.Show(ToastKind.Success, "리포트를 내보냈습니다", lastExport.FileName ?? "");
             Context.Log.Write("reportExported", new { bytes = written.Bytes, masked = doc.Options.Masked });
         }
         else
         {
             lastExport = new ExportOutcome(false, 0, doc.Options.Masked, written?.Problem, null, null);
+            Context.Toasts.Show(ToastKind.Error, "리포트를 내보내지 못했습니다", written?.Problem ?? "파일을 쓰지 못했습니다.");
             Context.Log.Write("reportExportFailed", new { error = written?.Error.ToString() });
         }
         Rerender();

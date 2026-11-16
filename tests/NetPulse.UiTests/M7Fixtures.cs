@@ -38,6 +38,8 @@ internal static class M7Fixtures
             }
             case "rec-mixed": Synthetic(userData, Kst.AddMinutes(-40), mixed: true); return true;
             case "rec-sparse": Synthetic(userData, Kst.AddMinutes(-40), mixed: false, deadTarget: true); return true;
+            case "rec-short": Synthetic(userData, Kst.AddMinutes(-40), mixed: false, rounds: 40); return true;   // M8: 관측 부족 (1분 미만)
+            case "rec-undecidable": Synthetic(userData, Kst.AddMinutes(-40), mixed: false, rounds: 300, allLost: true); return true;   // M8: 응답이 한 번도 없음 → 판단 불가
             case "rec-damaged":
             {
                 var id = Ok(userData);
@@ -203,7 +205,7 @@ internal static class M7Fixtures
     /// 합성 기록 (20분, 1초). mixed: 외부 둘 함께 손실 3회차 → 이어서 하나만 손실 2회차 (판정이 바뀌는 끊김) + 그 안의 증상 표시.
     /// deadTarget: 외부 B가 한 번도 응답하지 않음 (지연 추세 "값이 적어 추세 없음").
     /// </summary>
-    public static string Synthetic(string userData, DateTimeOffset start, bool mixed, bool deadTarget = false, int rounds = 1200)
+    public static string Synthetic(string userData, DateTimeOffset start, bool mixed, bool deadTarget = false, int rounds = 1200, bool allLost = false)
     {
         M5Fixtures.SaveProfile(userData, "steady");
         var id = RecordLocation.NewId(start);
@@ -228,12 +230,14 @@ internal static class M7Fixtures
             bool aDown = mixed && at400 is >= 403 and < 405;
             double drift = 18 + (r % 7200) / 120.0;   // 서서히 오르는 지연 (추세가 보이게)
             TargetResult Ext(string tid, bool down, bool dead) => down || dead ? new(tid, ProbeOutcome.Lost, null, null) : new(tid, ProbeOutcome.Success, drift + rng.NextDouble() * 4, null);
-            var results = new[]
-            {
-                new TargetResult("gateway", ProbeOutcome.Success, 2 + rng.NextDouble(), null),
-                Ext("ext-a", bothDown || aDown, false),
-                Ext("ext-b", bothDown, deadTarget),
-            };
+            var results = allLost
+                ? targets.Select(t => new TargetResult(t.Id, ProbeOutcome.Lost, null, null)).ToArray()
+                : new[]
+                {
+                    new TargetResult("gateway", ProbeOutcome.Success, 2 + rng.NextDouble(), null),
+                    Ext("ext-a", bothDown || aDown, false),
+                    Ext("ext-b", bothDown, deadTarget),
+                };
             long at = r * 1000L;
             lines.Add(RecordSchema.RoundLine(id, new RoundData(r, at, at + 3, start.AddMilliseconds(at), 0, false, results, at + 40)));
         }
