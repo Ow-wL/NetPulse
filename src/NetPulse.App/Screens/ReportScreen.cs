@@ -39,6 +39,7 @@ public sealed class ReportScreen : Screen
     private string? key;
     private ReportOptions options = new();
     private bool exporting, syncing;
+    private volatile bool exportHolding;   // 시험: 임시 파일에 절반을 쓰고 멈춘 곳에 닿음 (G4 M8 3라운드 b8)
     private ExportOutcome? lastExport;
     private IReadOnlyList<string> leakKinds = [];
     private string? lastAction;
@@ -566,7 +567,14 @@ public sealed class ReportScreen : Screen
         var fault = Context.Options.ReportFail switch { "write" => ReportFault.Write, "move" => ReportFault.Move, "leak" => ReportFault.Leak, _ => ReportFault.None };
         bool slow = Context.Options.ReportFail == "slow";
         // 시험: 임시 파일에 절반을 쓴 뒤 멈춰 있는다 (쓰는 중 닫기, G4 M8 2라운드 b1)
-        Action<CancellationToken>? hold = Context.Options.ReportFail == "hold" ? t => t.WaitHandle.WaitOne(Waits.ReportSlowTest) : null;
+        // hold: 취소되면 곧 풀림. hold-long: 취소를 무시하고 닫기의 공통 한도보다 오래 멈춤 (닫기가 한도 없이 정리를 기다리는지 시험)
+        exportHolding = false;
+        Action<CancellationToken>? hold = Context.Options.ReportFail switch
+        {
+            "hold" => t => { exportHolding = true; t.WaitHandle.WaitOne(Waits.ReportSlowTest); },
+            "hold-long" => _ => { exportHolding = true; Thread.Sleep(Waits.ReportHoldPastClose); },
+            _ => null,
+        };
         // 내보내기는 앱 종료 절차가 기다린다 (StopExportAsync): 취소를 보내면 쓰기 전이든 쓰는 중이든 멈추고 임시 파일을 지운다 (G4 M8 1·2라운드 b1)
         exportCts = new CancellationTokenSource();
         var token = exportCts.Token;
@@ -687,6 +695,7 @@ public sealed class ReportScreen : Screen
             highContrast = drawnHighContrast,
             exportEnabled = exportButton.IsEnabled && !exporting,
             exporting,
+            exportHolding,
             export = lastExport is { } e ? new { e.Ok, e.Bytes, e.Masked, e.FileName, problem = e.Problem } : null,
             leak = leakKinds,
             failure = requests.Failure?.ToString(),

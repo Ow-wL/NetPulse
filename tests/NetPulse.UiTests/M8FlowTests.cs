@@ -261,13 +261,47 @@ public sealed class M8FlowTests
             using var app = Launch(userData, "--screen", "report", "--report-out", outDir, "--report-fail", "hold");
             WaitReady(app);
             app.Invoke("report.export");
-            // 임시 파일이 생겨 쓰는 중임을 확인한 뒤 닫는다
-            var until = DateTime.UtcNow + TimeSpan.FromSeconds(3);
-            while (Directory.GetFiles(outDir, ReportFile.TempPrefix + "*").Length == 0 && DateTime.UtcNow < until) Thread.Sleep(20);
-            Assert.Single(Directory.GetFiles(outDir, ReportFile.TempPrefix + "*"));
+            HoldingWithHalfWritten(app, outDir);
             Assert.Equal(0, app.Close());
             Assert.Empty(Directory.GetFiles(outDir));   // 임시 파일 정리가 끝난 뒤 프로세스가 끝남, 결과 파일도 없음
             Assert.Contains(app.ReadLog(), e => e.GetProperty("kind").GetString() == "reportExportCancelled");
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
+    /// <summary>앱이 임시 파일에 절반을 쓰고 멈춘 곳에 닿았음(진단 신호)과 그 임시 파일에 내용이 있음을 확인 (G4 M8 3라운드 b8).</summary>
+    private static void HoldingWithHalfWritten(AppDriver app, string outDir)
+    {
+        app.WaitDiag(d => Has(d, "exportHolding") && Sd(d).GetProperty("exportHolding").GetBoolean(), b => b, "임시 파일에 절반 쓰고 멈춤");
+        var temp = Assert.Single(Directory.GetFiles(outDir, ReportFile.TempPrefix + "*"));
+        Assert.True(new FileInfo(temp).Length > 0, "임시 파일이 비어 있음");
+    }
+
+    /// <summary>
+    /// 쓰기가 닫기의 공통 한도(9초)보다 오래 멈춰도 닫기는 정리가 끝날 때까지 기다린다: 프로세스가 한도 뒤까지 살아 있고, 끝난 뒤 폴더가 비어 있다
+    /// (G4 M8 2·3라운드 b1·b8).
+    /// </summary>
+    [Fact]
+    public void ClosingWaitsPastTheCommonLimitUntilTheTempFileIsGone()
+    {
+        var userData = AppDriver.NewUserData();
+        var outDir = OutDir("close-hold-long");
+        try
+        {
+            M5Fixtures.SaveProfile(userData, "outage-long");
+            M5Fixtures.MakeRecord(userData, "outage-long", M5Fixtures.DemoNow.AddHours(-2), 3);
+            using var app = Launch(userData, "--screen", "report", "--report-out", outDir, "--report-fail", "hold-long");
+            WaitReady(app);
+            app.Invoke("report.export");
+            HoldingWithHalfWritten(app, outDir);
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            Assert.Equal(0, app.Close());
+            watch.Stop();
+            Assert.True(watch.Elapsed > NetPulse.Design.Tokens.Waits.CloseWrites * 3, "닫기가 공통 한도 전에 끝남: " + watch.Elapsed);
+            Assert.Empty(Directory.GetFiles(outDir));
+            var log = app.ReadLog().Select(e => e.GetProperty("kind").GetString()).ToArray();
+            Assert.Contains("reportCloseWait", log);
+            Assert.Contains("reportExportCancelled", log);
         }
         finally { AppDriver.DeleteUserData(userData); }
     }
@@ -342,8 +376,7 @@ public sealed class M8FlowTests
                 var notes = Values(fields, "link.notes");
                 Assert.Equal(2, notes.Length);
                 Assert.Equal($"관측 범위 {LiveSummary.Percent(0.5)} · 일부만 관측 · 알림이 넘쳐 일부 빠짐", notes[0]);
-                Assert.DoesNotContain("log-denied", notes[1]);
-                Assert.NotEqual("없음", notes[1]);
+                Assert.Equal("링크 기록을 읽을 권한이 없습니다", notes[1]);   // 사유 코드 log-denied의 고정 문구 (원문 코드 없음)
                 Assert.DoesNotContain(Nic, html);   // 어댑터 이름은 가림
 
                 // 손상: 망가진 회차 줄과 누락 조각 → 알림 개수와 각 알림 글이 파일·미리 보기에 있다

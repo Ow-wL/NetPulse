@@ -103,13 +103,18 @@ public sealed partial class Redactor
     [GeneratedRegex(@"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")]
     private static partial Regex EmailPattern();
 
+    // 따옴표로 둘러싼 경로는 닫는 따옴표까지 통째로 (이름에 쉼표·세미콜론이 있어도, G4 M8 3라운드 a2)
+    [GeneratedRegex(@"""(?:\\\\|[A-Za-z]:[\\/])[^""\r\n]*""|'(?:\\\\|[A-Za-z]:[\\/])[^'\r\n]*'")]
+    private static partial Regex QuotedPathPattern();
+
     // 경로는 이름에 공백·괄호·대괄호가 들 수 있어 (사용자 폴더 "Hong Gil-Dong", "Shared (Sales)", "Hong[work]") 그 줄의 마지막 경로 구분자까지
-    // 통째로 가리고, 마지막 이름은 쉼표·세미콜론·따옴표·꺾쇠나 줄 끝까지 가린다 (G4 M8 2라운드 a1).
+    // 통째로 가리고 (G4 M8 2라운드 a1), 마지막 이름은 따옴표·꺾쇠나 줄 끝, 또는 뒤에 공백이 오는 쉼표·세미콜론까지 가린다
+    // ("report;Alice Smith.txt"는 이름 안의 세미콜론, "a.txt; 다음 글"은 끝, G4 M8 3라운드 a2).
     // 경로 뒤의 같은 줄 글이 함께 가려질 수 있다 (덜 가리는 것보다 낫다)
-    [GeneratedRegex(@"\\\\(?:[^\r\n""<>]*[\\/])?[^\\/,;""'<>\r\n]*")]
+    [GeneratedRegex(@"\\\\(?:[^\r\n""<>]*[\\/])?(?:[^\\/,;""'<>\r\n]|[,;](?![\s,;]|$))*")]
     private static partial Regex UncPattern();
 
-    [GeneratedRegex(@"(?<![A-Za-z0-9])[A-Za-z]:[\\/](?:[^\r\n""<>]*[\\/])?[^\\/,;""'<>\r\n]*")]
+    [GeneratedRegex(@"(?<![A-Za-z0-9])[A-Za-z]:[\\/](?:[^\r\n""<>]*[\\/])?(?:[^\\/,;""'<>\r\n]|[,;](?![\s,;]|$))*")]
     private static partial Regex DrivePattern();
 
     [GeneratedRegex(@"(?<![0-9A-Fa-f:\-])[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(?:\1[0-9A-Fa-f]{2}){4}(?![0-9A-Fa-f])|(?<![0-9A-Fa-f.])[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}(?![0-9A-Fa-f])")]
@@ -128,9 +133,32 @@ public sealed partial class Redactor
     private static partial Regex Ipv4Pattern();
 
     // 전화번호 꼴: +나 0으로 시작해 숫자 9~15개가 공백·점·줄표로만 이어진 것 (날짜 "2026-11-13 13시"는 2로 시작해 걸리지 않음).
-    // 시각·날짜의 한 마디(":05", "-01")에서는 시작하지 않고, 시각의 앞 마디("09:")에서 끝나지 않는다 (G4 M8 2라운드 a2: "13:20:05 2026-11-13")
-    [GeneratedRegex(@"(?<![\d:.\-/])(?:\+\d|0)(?:[ .\-]?\d){8,14}(?![\d]|:\d)")]
+    // 앞 글자는 숫자만 막는다 ("contact:010-…", "…/02-…"도 가림, G4 M8 3라운드 a1). 시각·날짜는 이 패턴 전에 따로 감싸 둔다 (아래 MaskPhones)
+    [GeneratedRegex(@"(?<![\d])(?:\+\d|0)(?:[ .\-]?\d){8,14}(?![\d])")]
     private static partial Regex PhonePattern();
+
+    // 시각(13:20, 13:20:05)과 날짜(2026-11-13, 2026.11.13, 2026/11/13): 전화번호 패턴이 이들을 이어 붙여 가리지 않게 (G4 M8 2라운드 a2)
+    [GeneratedRegex(@"(?<![\d:])\d{1,2}:\d{2}(?::\d{2})?(?![\d])|(?<![\d])\d{4}([-./])\d{1,2}\1\d{1,2}(?![\d])")]
+    private static partial Regex DateTimePattern();
+
+    private const char ShieldBase = '\uE100', ShieldEnd = '\uF8FF';
+
+    /// <summary>시각·날짜를 사용자 영역 문자 하나씩으로 감싸 두고 전화번호를 가린 뒤 되돌린다 (메모에 사용자 영역 문자가 있으면 감싸지 않음).</summary>
+    private static string MaskPhones(string s)
+    {
+        if (s.Any(c => c is >= '\uE000' and <= '\uF8FF')) return PhonePattern().Replace(s, ReportTexts.Masked);
+        var kept = new List<string>();
+        var shielded = DateTimePattern().Replace(s, m =>
+        {
+            if (ShieldBase + kept.Count > ShieldEnd) return m.Value;
+            kept.Add(m.Value);
+            return ((char)(ShieldBase + kept.Count - 1)).ToString();
+        });
+        shielded = PhonePattern().Replace(shielded, ReportTexts.Masked);
+        var sb = new StringBuilder(shielded.Length);
+        foreach (var c in shielded) sb.Append(c >= ShieldBase && c - ShieldBase < kept.Count ? kept[c - ShieldBase] : c.ToString());
+        return sb.ToString();
+    }
 
     /// <summary>메모 패턴 가림 (가리기를 켠 문서에서 메모를 넣을 때). 기록의 식별 값도 가린다 (긴 것부터, 3글자 이하는 단어 경계).</summary>
     public string MaskMemo(string memo)
@@ -138,13 +166,14 @@ public sealed partial class Redactor
         string s = memo;
         s = UrlPattern().Replace(s, m => m.Value[..(m.Value.IndexOf("://", StringComparison.Ordinal) + 3)] + ReportTexts.Masked);
         s = EmailPattern().Replace(s, ReportTexts.Masked);
+        s = QuotedPathPattern().Replace(s, m => m.Value[0] + ReportTexts.Masked + m.Value[0]);
         s = UncPattern().Replace(s, ReportTexts.Masked);
         s = DrivePattern().Replace(s, ReportTexts.Masked);
         s = MacPattern().Replace(s, ReportTexts.Masked);
         s = Ipv6With4Pattern().Replace(s, ReportTexts.Masked);
         s = Ipv6Pattern().Replace(s, m => m.Value.Count(c => c == ':') >= 2 ? ReportTexts.Masked : m.Value);
         s = Ipv4Pattern().Replace(s, ReportTexts.Masked);
-        s = PhonePattern().Replace(s, ReportTexts.Masked);
+        s = MaskPhones(s);
         foreach (var id in Identities.Where(i => i.Kind != "측정 ID").OrderByDescending(i => i.Value.Length))
             s = ReplaceIdentity(s, id.Value);
         return s;

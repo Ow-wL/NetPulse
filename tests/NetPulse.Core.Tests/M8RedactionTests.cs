@@ -157,6 +157,14 @@ public sealed class M8RedactionTests
     [InlineData(@"\\nas\Shared (Sales)\private.txt", "private.txt")]
     [InlineData(@"\\nas\Shared (Sales)\private.txt", "Sales")]
     [InlineData(@"(D:\Data (2026)\a b.txt) 확인", "a b.txt")]
+    // G4 M8 3라운드 a1·a2: 콜론·슬래시 뒤 전화번호, 이름에 쉼표·세미콜론이 든 경로 (따옴표 있음·없음)
+    [InlineData("contact:010-9876-5432", "9876")]
+    [InlineData("contact:+82-10-9876-5432", "9876")]
+    [InlineData("010-9876-5432/02-3456-7890", "3456")]
+    [InlineData("\"D:\\logs\\report;Alice Smith.txt\"", "Alice")]
+    [InlineData("\"\\\\nas\\logs\\report,Alice Smith.txt\"", "Alice")]
+    [InlineData(@"D:\logs\report;Alice Smith.txt 확인", "Alice")]
+    [InlineData(@"\\nas\logs\report,Alice Smith.txt", "Alice")]
     public void MemoPatternsCatchValuesNextToKoreanTextAndPathsWithSpaces(string memo, string leaked)
     {
         var d = Build(Typical(memo), new ReportOptions(IncludeMemos: true));
@@ -183,6 +191,7 @@ public sealed class M8RedactionTests
     [InlineData("13:20:05 2026-11-13")]
     [InlineData("2026-11-13 09:00 2026-11-14 09:00")]
     [InlineData("2026-01-05 08:00~2026-01-05 09:30 0.5초")]
+    [InlineData("2026/11/13 09:00:15 2026.11.14 10:00")]
     public void ClockTimesAndDatesStayInMemos(string memo)
     {
         var text = Build(Typical(memo), new ReportOptions(IncludeMemos: true)).Fields().Single(f => f.Field == "mark.memo").Value;
@@ -192,6 +201,8 @@ public sealed class M8RedactionTests
     [Theory]
     [InlineData("13:20 010-9876-5432 연락", "13:20 [가림] 연락")]
     [InlineData("2026-11-13 +82 10 9876 5432", "2026-11-13 [가림]")]
+    [InlineData("13:20:05 010-9876-5432", "13:20:05 [가림]")]
+    [InlineData("문의:010-9876-5432, 2026-11-13", "문의:[가림], 2026-11-13")]
     public void PhoneNumbersNextToTimesAreStillMasked(string memo, string expected)
     {
         var text = Build(Typical(memo), new ReportOptions(IncludeMemos: true)).Fields().Single(f => f.Field == "mark.memo").Value;

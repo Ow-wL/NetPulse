@@ -471,7 +471,9 @@ public static class ReportBuilder
             var core = v[..end].TrimEnd('.');
             var parts = core.Split('.');
             bool shape = core.Length > 0 && parts.Length <= 4 && parts.All(p => p.Length is > 0 and <= 5);
-            return shape && !red.Identities.Any(i => i.Value.Trim().Length > 0 && core.Contains(i.Value.Trim(), StringComparison.OrdinalIgnoreCase)) ? core : "알 수 없음";
+            // 비교는 안전망과 같은 정리(전각 → 반각, 소문자)를 양쪽에 (G4 M8 3라운드 a3: 사업자 이름 "１．０")
+            var folded = Redactor.Fold(core);
+            return shape && !red.Identities.Any(i => Redactor.Fold(i.Value.Trim()) is { Length: > 0 } id && folded.Contains(id, StringComparison.Ordinal)) ? core : "알 수 없음";
         }
 
         private static IReadOnlyList<ReportRun> Cols(params string[] names) => names.Select(ReportRun.Gen).ToArray();

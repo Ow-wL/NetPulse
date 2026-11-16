@@ -96,7 +96,7 @@ public sealed record StartupOptions
                 "--hold-list" => o with { HoldList = true },
                 "--open-record" => o with { OpenRecord = Next() },
                 "--report-out" => o with { ReportOut = Next() },
-                "--report-fail" => o with { ReportFail = Next() is "write" or "move" or "leak" or "slow" or "hold" ? args[i] : throw new ArgumentException("write, move, leak, slow, hold 중 하나") },
+                "--report-fail" => o with { ReportFail = Next() is "write" or "move" or "leak" or "slow" or "hold" or "hold-long" ? args[i] : throw new ArgumentException("write, move, leak, slow, hold, hold-long 중 하나") },
                 "--hold-start" => o with { HoldStart = true },
                 "--demo-mark" => o with { DemoMark = long.Parse(Next(), CultureInfo.InvariantCulture) },
                 "--motion-hold" => o with { MotionHold = double.Parse(Next(), CultureInfo.InvariantCulture) },

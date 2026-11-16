@@ -72,6 +72,9 @@ public static class Waits
     public static readonly TimeSpan CloseWrites = TimeSpan.FromSeconds(3);
     /// <summary>시험 주입 <c>--report-fail slow</c>: 내보내기를 이만큼 늦춘다 (M8 "내보내는 중" 장면)</summary>
     public static readonly TimeSpan ReportSlowTest = TimeSpan.FromSeconds(4);
+
+    /// <summary>시험용: 쓰는 중 멈춤이 닫기의 공통 한도(CloseWrites 세 번 = 9초)보다 길게 이어진다 (G4 M8 3라운드 b8).</summary>
+    public static readonly TimeSpan ReportHoldPastClose = TimeSpan.FromSeconds(11);
 }
 
 /// <summary>측정 화면 bench 구간 (M5 설계 5절 재현 절차).</summary>
