@@ -253,6 +253,58 @@ internal static class M7Fixtures
         return id;
     }
 
+    /// <summary>
+    /// M8 최악 사례 (설계 5절): 대상 8개, 12시간, 회차마다 성공·손실이 번갈아 끊김 약 2만 개, 판정이 수천 번 바뀌는 혼합 끊김 하나,
+    /// 증상 표시 100개(메모), 경로 변경 500번.
+    /// </summary>
+    public static string Worst(string userData, DateTimeOffset start)
+    {
+        var id = RecordLocation.NewId(start);
+        var folder = Folder(userData, id);
+        Directory.CreateDirectory(folder);
+        var targets = Enumerable.Range(0, 8).Select(i => i == 0
+            ? new Target("gateway", "공유기", IPAddress.Parse("192.0.2.1"), TargetRole.Local, null, ProbeMethod.Icmp)
+            : new Target("ext-" + i, "외부 " + i, IPAddress.Parse("198.51.100." + (10 + i)), TargetRole.External, "예시 통신사 " + (char)('A' + i % 3), ProbeMethod.Icmp)).ToArray();
+        const int n = 12 * 3600;
+        var header = new RecordHeader(id, 0, "test", start, 540, targets, 1000, 800, (long)n * 1000, "primary", ExpectedConnection.Any);
+        File.WriteAllText(Path.Combine(folder, "measurement.json"), RecordSchema.HeaderJson(header));
+        var lines = new List<string>(n);
+        for (int r = 0; r < n; r++)
+        {
+            bool mixedZone = r is >= 20000 and < 24000;
+            bool lost = mixedZone || r % 2 == 1;
+            var results = targets.Select((t, i) => i == 0 ? new TargetResult(t.Id, ProbeOutcome.Success, 2, null)
+                : lost && (!mixedZone || r % 2 == 0 || i == 1) ? new TargetResult(t.Id, ProbeOutcome.Lost, null, null)
+                : new TargetResult(t.Id, ProbeOutcome.Success, 20 + r % 9, null)).ToArray();
+            long at = r * 1000L;
+            lines.Add(RecordSchema.RoundLine(id, new RoundData(r, at, at + 3, start.AddMilliseconds(at), 0, false, results, at + 40)));
+        }
+        File.WriteAllLines(Path.Combine(folder, "rounds.jsonl"), lines);
+        var events = new List<string>();
+        for (int k = 0; k < 500; k++)
+            foreach (var t in targets)
+                events.Add(RecordSchema.EventLine(id, "route", k * 86, k * 86_000L, start.AddSeconds(k * 86), new JsonObject
+                {
+                    ["target"] = t.Id, ["status"] = "ok", ["interfaceIndex"] = 7, ["kind"] = k % 2 == 0 ? "wired" : "wireless",
+                }));
+        for (int k = 0; k < 100; k++)
+            events.Add(RecordSchema.EventLine(id, SymptomMarks.MarkType, k * 400 + 1, k * 400_000L + 500, start.AddMilliseconds(k * 400_000L + 500),
+                new JsonObject { ["mark"] = "m" + k, ["memo"] = "메모 " + k }));
+        File.WriteAllLines(Path.Combine(folder, "events.jsonl"), events);
+        File.WriteAllText(Path.Combine(folder, "summary.json"), RecordSchema.SummaryJson(
+            new RecordSummary(id, EndReason.Completed, start.AddSeconds(n), n, n, 0, 0, 0, n - 1, false, null, 0, (long)n * 1000)));
+        return id;
+    }
+
+    /// <summary>리포트 bench 준비 (M8 설계 5절): 12시간 기록(보통, M7 bench와 같은 합성) + 최악 사례.</summary>
+    public static (string Typical, string Worst) BenchReport(string userData)
+    {
+        M5Fixtures.SaveProfile(userData, "steady");
+        var typical = Synthetic(userData, Kst.AddDays(-3), mixed: true, rounds: 12 * 3600);
+        var worst = Worst(userData, Kst.AddDays(-2));
+        return (typical, worst);
+    }
+
     /// <summary>기록 화면 bench 준비 (설계 5절): 짧은 기록 38개(가장 최근 것에 증상 표시) + 합성 12시간 기록 2개.</summary>
     public static void BenchRecords(string userData)
     {

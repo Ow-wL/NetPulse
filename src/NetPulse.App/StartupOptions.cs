@@ -56,6 +56,8 @@ public sealed record StartupOptions
     public bool Bench { get; init; }
     /// <summary>기록 화면 bench (M7 설계 5절): 미리 만든 기록 40개(12시간 2개 포함)로 목록·상세·비교·재진입·메모 뒤 갱신과 메모리</summary>
     public bool BenchRecords { get; init; }
+    /// <summary>리포트 화면 bench (M8 설계 5절 report-preview): 12시간 기록과 최악 사례의 미리 보기 프레임.</summary>
+    public bool BenchReport { get; init; }
     public string? SelfTest { get; init; }
     /// <summary>원형 전환을 이 진행도(0~1)에서 멈춘다 (캡처용)</summary>
     public double? RevealHold { get; init; }
@@ -115,6 +117,7 @@ public sealed record StartupOptions
                 "--hide-measured-text" => o with { HideMeasuredText = true },
                 "--bench" => o with { Bench = true },
                 "--bench-records" => o with { BenchRecords = true },
+                "--bench-report" => o with { BenchReport = true },
                 "--selftest" => o with { SelfTest = Next() },
                 "--reveal-hold" => o with { RevealHold = double.Parse(Next(), CultureInfo.InvariantCulture) },
                 "--alt-pattern" => o with { AltPattern = true },

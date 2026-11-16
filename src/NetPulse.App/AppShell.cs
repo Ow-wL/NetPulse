@@ -154,6 +154,7 @@ public sealed partial class AppShell : Window
             if (options.SelfTest is not null) selfTestTimer.Start();
             if (options.Bench) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, RunBench);
             if (options.BenchRecords) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, RunRecordsBench);
+            if (options.BenchReport) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, RunReportBench);
             if (options.OpenRecord is { } folder) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => OpenExternal(folder));
         };
         if (options.RunSeconds > 0)

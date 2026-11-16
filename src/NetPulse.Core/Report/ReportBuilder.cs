@@ -184,8 +184,8 @@ public static class ReportBuilder
             {
                 shown = indexed.OrderByDescending(x => x.Episode.MinDurationMs).ThenBy(x => x.Episode.FirstRound).Take(ListLimit)
                     .OrderBy(x => x.Episode.FirstRound).ToArray();
-                caption = ReportTexts.ListCapTitle(ListLimit, indexed.Length);
-                blocks.Add(new ReportHeading(ReportRun.Gen(caption)));
+                blocks.Add(new ReportHeading(ReportRun.Gen(ReportTexts.ListCapTitle(ListLimit, indexed.Length))));
+                caption = "끊김 목록 (시간순)";
                 blocks.Add(new ReportParagraph(ReportTexts.ListCapNote(indexed.Length, ListLimit), ParagraphKind.Note));
             }
             var rows = new List<ReportRow>();

@@ -111,53 +111,111 @@ public static class ReportParts
         return grid;
     }
 
+    /// <summary>큰 표는 이만큼씩 나눠 붙인다 (한 프레임에 수백 줄을 만들지 않게, M8 bench).</summary>
+    public const int RowsPerPiece = 10;
+
     private static FrameworkElement Table(ReportTable t, ReportLook look)
+    {
+        var (whole, rows) = TableShell(t, look);
+        for (int r = 0; r < t.Rows.Count; r += RowsPerPiece) rows.Children.Add(Rows(t, r, Math.Min(RowsPerPiece, t.Rows.Count - r), look));
+        return whole;
+    }
+
+    /// <summary>표 껍데기: 이름, 테두리, 머리 줄. 몸통 줄 묶음은 돌려준 패널에 붙인다.</summary>
+    private static (FrameworkElement Whole, StackPanel Rows) TableShell(ReportTable t, ReportLook look)
     {
         var stack = new StackPanel { Spacing = Space.S1 };
         stack.Children.Add(Fonts.Wrapped(t.Caption, Typography.Label, look.Ink));
-        var grid = new Grid();
         int columns = Math.Max(1, t.Columns.Count);
-        for (int c = 0; c < columns; c++) grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var cellPadding = new Thickness(Space.S2, Space.S1, Space.S2, Space.S1);
-        void Band(int row, Brush brush)
-        {
-            var bg = new Border { Background = brush };
-            Grid.SetRow(bg, row);
-            Grid.SetColumnSpan(bg, columns);
-            grid.Children.Add(bg);
-        }
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        Band(0, look.Head);
+        var head = Columns(columns);
+        var band = new Border { Background = look.Head };
+        Grid.SetColumnSpan(band, columns);
+        head.Children.Add(band);
         for (int c = 0; c < t.Columns.Count; c++)
         {
             var h = Fonts.Wrapped(t.Columns[c].Text, Typography.Caption, look.Ink);
-            h.Padding = cellPadding;
+            h.Padding = CellPadding;
             Grid.SetColumn(h, c);
-            grid.Children.Add(h);
+            head.Children.Add(h);
         }
-        for (int r = 0; r < t.Rows.Count; r++)
+        var rows = new StackPanel();
+        rows.Children.Add(head);
+        stack.Children.Add(new Border { BorderBrush = look.Edge, BorderThickness = new Thickness(Size.Hairline), Child = rows });
+        return (stack, rows);
+    }
+
+    private static Thickness CellPadding => new(Space.S2, Space.S1, Space.S2, Space.S1);
+
+    private static Grid Columns(int columns)
+    {
+        var g = new Grid();
+        for (int c = 0; c < columns; c++) g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        return g;
+    }
+
+    /// <summary>몸통 줄 묶음 하나 (열 너비는 머리와 같은 비율이라 줄이 맞는다).</summary>
+    private static Grid Rows(ReportTable t, int from, int count, ReportLook look)
+    {
+        int columns = Math.Max(1, t.Columns.Count);
+        var grid = Columns(columns);
+        for (int k = 0; k < count; k++)
         {
-            var row = t.Rows[r];
-            int y = r + 1;
+            var row = t.Rows[from + k];
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var line = new Rectangle { Height = Size.Hairline, Fill = look.Edge, VerticalAlignment = VerticalAlignment.Top };
-            Grid.SetRow(line, y);
+            Grid.SetRow(line, k);
             Grid.SetColumnSpan(line, columns);
             grid.Children.Add(line);
             var brush = row.Kind == RowKind.Normal ? look.Ink : look.Muted;
             for (int c = 0; c < row.Cells.Count; c++)
             {
                 var cell = Fonts.Wrapped(row.Cells[c].Value.Text, Typography.Caption, brush);
-                cell.Padding = cellPadding;
+                cell.Padding = row.Kind == RowKind.Sub && c == 0 ? new Thickness(Space.S5, Space.S1, Space.S2, Space.S1) : CellPadding;
                 if (row.Kind == RowKind.Note) Grid.SetColumnSpan(cell, columns);
-                if (row.Kind == RowKind.Sub && c == 0) cell.Padding = new Thickness(Space.S5, Space.S1, Space.S2, Space.S1);
-                Grid.SetRow(cell, y);
+                Grid.SetRow(cell, k);
                 Grid.SetColumn(cell, Math.Min(c, columns - 1));
                 grid.Children.Add(cell);
             }
         }
-        stack.Children.Add(new Border { BorderBrush = look.Edge, BorderThickness = new Thickness(Size.Hairline), Child = grid });
-        return stack;
+        return grid;
+    }
+
+    /// <summary>
+    /// 절 하나를 붙이는 조각들 (차례대로 부른다): 절 머리, 블록마다 하나, 큰 표는 머리 + 줄 묶음마다 하나.
+    /// 화면이 한 프레임에 몇 조각씩만 붙여 큰 문서에서도 프레임 예산을 지킨다 (M8 bench).
+    /// </summary>
+    public static IEnumerable<Action> Pieces(ReportSection s, ReportLook look, Panel paper)
+    {
+        StackPanel stack = null!;
+        yield return () =>
+        {
+            var group = new GroupPanel("report.preview." + s.Id, s.Title);
+            stack = new StackPanel { Spacing = Space.S3 };
+            var title = Fonts.Wrapped(s.Title, Typography.Headline, look.Ink);
+            AutomationProperties.SetHeadingLevel(title, AutomationHeadingLevel.Level2);
+            stack.Children.Add(title);
+            stack.Children.Add(new Rectangle { Height = Size.Hairline, Fill = look.Edge, HorizontalAlignment = HorizontalAlignment.Stretch });
+            group.Children.Add(stack);
+            paper.Children.Add(group);
+        };
+        foreach (var b in s.Blocks)
+        {
+            if (b is ReportTable t && t.Rows.Count > RowsPerPiece)
+            {
+                StackPanel rows = null!;
+                yield return () => { var (whole, r) = TableShell(t, look); rows = r; stack.Children.Add(whole); };
+                for (int from = 0; from < t.Rows.Count; from += RowsPerPiece)
+                {
+                    int start = from;
+                    yield return () => rows.Children.Add(Rows(t, start, Math.Min(RowsPerPiece, t.Rows.Count - start), look));
+                }
+            }
+            else
+            {
+                var block = b;
+                yield return () => stack.Children.Add(Block(block, look));
+            }
+        }
     }
 
     /// <summary>그림: 제목 → 설명 → 값 눈금 → 시각 눈금 → 범례 (SVG와 같은 글 순서). 960×300 화면을 폭에 맞춰 줄인다.</summary>

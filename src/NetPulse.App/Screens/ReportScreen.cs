@@ -26,7 +26,9 @@ public sealed class ReportScreen : Screen
     private readonly TextBlock pickedText, statusText;
     private readonly GroupPanel optionsCard, previewCard;
     private readonly StackPanel statusArea = new() { Spacing = Space.S3 };
-    private readonly StackPanel paperStack = new() { Spacing = Space.S6 };
+    private StackPanel paperStack = new() { Spacing = Space.S6 };
+    private readonly Grid paperHost = new();
+    private readonly StackPanel messageHost = new() { Spacing = Space.S5 };
     private readonly Border paper;
     private readonly StackPanel content = new() { Spacing = Space.S5 };
     private readonly StackPanel body = new() { Spacing = Space.S5 };
@@ -105,7 +107,8 @@ public sealed class ReportScreen : Screen
         optionsCard.Children.Add(Ui.Glass.Surface(GlassLevel.Content, optionStack, Radius.Outer, new Thickness(Space.S6)));
 
         // 미리 보기: 종이 면
-        paper = new Border { Padding = new Thickness(Space.S7), CornerRadius = new CornerRadius(Radius.Inner), BorderThickness = new Thickness(Size.Hairline), Child = paperStack };
+        paperHost.Children.Add(paperStack);
+        paper = new Border { Padding = new Thickness(Space.S7), CornerRadius = new CornerRadius(Radius.Inner), BorderThickness = new Thickness(Size.Hairline), Child = paperHost };
         previewCard = new GroupPanel("report.preview", "미리 보기");
         var previewStack = new StackPanel { Spacing = Space.S3 };
         previewStack.Children.Add(Fonts.Text("미리 보기 (내보낼 파일과 같은 내용)", Typography.Label, Ui.Brushes.Ink));
@@ -117,6 +120,10 @@ public sealed class ReportScreen : Screen
         content.Children.Add(optionsCard);
         content.Children.Add(statusArea);
         content.Children.Add(body);
+        // 미리 보기 카드는 몸통에 늘 둔다 (보이기만 바꿈): 상태가 바뀔 때마다 수천 요소의 종이 면을 빼고 다시 넣으면 한 프레임이 100 ms를 넘었다 (M8 bench)
+        body.Children.Add(messageHost);
+        body.Children.Add(previewCard);
+        previewCard.Visibility = Visibility.Collapsed;
         scroll = new ScrollViewer { Content = content, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, Space.S3, Space.S5) };
         AutomationProperties.SetAutomationId(scroll, "report.scroll");
         Grid.SetRow(scroll, 1);
@@ -245,7 +252,7 @@ public sealed class ReportScreen : Screen
     private void Rerender()
     {
         // 옵션 카드는 빼지 않는다: 빼고 다시 넣으면 그 안의 초점(가리기 단추 등)이 탐색 막대로 튀었다 (M8 G5 캡처)
-        body.Children.Clear();
+        messageHost.Children.Clear();
         statusArea.Children.Clear();
         var list = Candidates();
         bool listed = Context.Records.Listed;
@@ -259,7 +266,8 @@ public sealed class ReportScreen : Screen
             stack.Children.Add(go);
             body.Set(stack, "empty");
             optionsCard.Visibility = Visibility.Collapsed;
-            this.body.Children.Add(card);
+            previewCard.Visibility = Visibility.Collapsed;
+            messageHost.Children.Add(card);
             SetExport();
             Context.QueueDiag();
             return;
@@ -291,25 +299,28 @@ public sealed class ReportScreen : Screen
 
         if (state == ReportState.Failed)
         {
-            this.body.Children.Add(ErrorCard("report.failed", "리포트를 만들지 못했습니다", FailureText(requests.Failure), records: true));
+            messageHost.Children.Add(ErrorCard("report.failed", "리포트를 만들지 못했습니다", FailureText(requests.Failure), records: true));
+            previewCard.Visibility = Visibility.Collapsed;
             ClearPaper();
         }
         else if (leakKinds.Count > 0)
         {
-            this.body.Children.Add(ErrorCard("report.redaction", "식별 정보가 남아 있어 내보내지 않았습니다",
+            messageHost.Children.Add(ErrorCard("report.redaction", "식별 정보가 남아 있어 내보내지 않았습니다",
                 $"가린 리포트에서 원본 값이 발견됐습니다 ({string.Join(", ", leakKinds)}). 다시 만들어 보세요.", records: false));
+            previewCard.Visibility = Visibility.Collapsed;
             ClearPaper();
         }
         else if (requests.Published is { } doc)
         {
-            this.body.Children.Add(previewCard);
+            previewCard.Visibility = Visibility.Visible;
             Draw(doc);
         }
         else
         {
             var (card, body) = ScreenParts.Card(Ui, "report.building", "리포트를 만드는 중");
             body.Set(GlassCard.Skeleton(Ui), "loading");
-            this.body.Children.Add(card);
+            messageHost.Children.Add(card);
+            previewCard.Visibility = Visibility.Collapsed;
             ClearPaper();
         }
         SetExport();
@@ -396,9 +407,23 @@ public sealed class ReportScreen : Screen
     {
         drawn = null;
         drawGen++;
-        paperStack.Children.Clear();
         drawnSections = 0;
         drawComplete = false;
+        if (paperStack.Children.Count == 0) return;
+        // 지난 종이 면은 숨기고 프레임마다 조금씩 뗀다: 수천 요소를 한 번에 떼면 한 프레임이 길어졌다 (M8 bench)
+        var old = paperStack;
+        old.Visibility = Visibility.Collapsed;
+        paperStack = new StackPanel { Spacing = Space.S6 };
+        paperHost.Children.Add(paperStack);
+        void OnFrame(object? sender, object e)
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            while (old.Children.Count > 0 && watch.Elapsed < FrameBudget.PieceSlice) old.Children.RemoveAt(old.Children.Count - 1);
+            if (old.Children.Count > 0 && !Context.IsClosing()) return;
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFrame;
+            paperHost.Children.Remove(old);
+        }
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnFrame;
     }
 
     /// <summary>
@@ -412,25 +437,37 @@ public sealed class ReportScreen : Screen
         drawn = doc;
         drawnHighContrast = hc;
         var look = hc ? ReportLook.System(Ui.Brushes) : ReportLook.Document(documentBrushes);
+        if (Context.Options.HideMeasuredText) look = look with { Ink = Ui.Brushes.Transparent };   // G5 실측 대비: 글자 없는 바탕 캡처
         paper.Background = look.Paper;
         paper.BorderBrush = look.Edge;
         paperStack.Children.Add(ReportParts.Head(doc, look));
+        // 조각(절 머리·블록·표 줄 묶음)을 프레임마다 몇 ms 안에서만 붙인다: 절 하나를 통째로 만들면 최악 사례에서 한 프레임이 170 ms였다 (M8 bench)
         int gen = drawGen;
-        int i = 0;
-        void Next()
+        var pieces = doc.Sections.Select((s, k) => (s, k))
+            .SelectMany(x => ReportParts.Pieces(x.s, look, paperStack).Select((a, n) => (Action)(() => { a(); if (n == 0) drawnSections = x.k + 1; })))
+            .GetEnumerator();
+        void OnFrame(object? sender, object e)
         {
-            if (gen != drawGen || Context.IsClosing()) return;
-            if (i >= doc.Sections.Count)
+            if (gen != drawGen || Context.IsClosing())
             {
-                drawComplete = true;
-                Context.QueueDiag();
+                Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFrame;
                 return;
             }
-            paperStack.Children.Add(ReportParts.Section(doc.Sections[i++], look));
-            drawnSections = i;
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, Next);
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            do
+            {
+                if (!pieces.MoveNext())
+                {
+                    Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFrame;
+                    drawComplete = true;
+                    Context.QueueDiag();
+                    return;
+                }
+                pieces.Current();
+            }
+            while (watch.Elapsed < FrameBudget.PieceSlice);
         }
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, Next);
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnFrame;
     }
 
     private void SetExport()
@@ -516,7 +553,13 @@ public sealed class ReportScreen : Screen
     // ---------------- 시험 ----------------
 
     /// <summary>미리 보기가 다 그려짐 (bench·시험).</summary>
-    public bool PreviewReady => drawn is not null && drawComplete;
+    public bool PreviewReady => drawn is not null && drawComplete && requests.State == ReportState.Ready;
+
+    /// <summary>bench: 옵션을 바로 바꾼다 (화면 조작 없이).</summary>
+    public void BenchOptions(ReportOptions next) => SetOptions(next);
+
+    /// <summary>bench: 미리 보기를 세로 비율로 스크롤.</summary>
+    public void BenchScroll(double fraction) => scroll.ChangeView(null, scroll.ScrollableHeight * fraction, null, true);
 
     public override object? Diag()
     {

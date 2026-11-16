@@ -126,7 +126,9 @@ public static class RecordView
     {
         if (rounds <= 1) return maxMs is long m1 ? $"1회차 · 최대 약 {TimelineModel.Seconds(m1)}" : "1회차";
         if (maxMs is not long max) return $"{TimelineModel.Seconds(minMs)} 이상";
-        return max == minMs ? $"약 {TimelineModel.Seconds(minMs)}" : $"약 {TimelineModel.Seconds(minMs)}~{TimelineModel.Seconds(max)}";
+        // 반올림한 두 값이 같으면 범위로 쓰지 않는다 ("약 1시간 6분~1시간 6분", M8 Edge 확인)
+        string lo = TimelineModel.Seconds(minMs), hi = TimelineModel.Seconds(max);
+        return lo == hi ? $"약 {lo}" : $"약 {lo}~{hi}";
     }
 
     public static string Duration(Episode e) => Duration(e.MinDurationMs, e.MaxDurationMs, e.Parts.Sum(p => p.Count));
