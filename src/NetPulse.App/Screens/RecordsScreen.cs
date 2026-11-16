@@ -25,7 +25,7 @@ public sealed class RecordsScreen : Screen
 
     private readonly PageHeader header;
     private readonly SegmentedChoice tabs;
-    private readonly GlassButton compareButton, openButton, back;
+    private readonly GlassButton compareButton, openButton, back, reportButton;
     private readonly StackPanel content = new() { Spacing = Space.S5 };
     private readonly ScrollViewer scroll;
     private Mode mode = Mode.List;
@@ -90,6 +90,8 @@ public sealed class RecordsScreen : Screen
         openButton.Click += async (_, _) => await PickExternalAsync();
         back = new GlassButton(Ui, ButtonKind.Secondary, "records.back", "목록으로", Icons.Back);
         back.Click += (_, _) => GoBack();
+        reportButton = new GlassButton(Ui, ButtonKind.Secondary, "records.report", "리포트 만들기", Icons.Report);
+        reportButton.Click += (_, _) => { if (detailKey is { } k) Context.OpenReport(k); };
         header = new PageHeader(Ui, "records.header", null, "기록", tabs, compareButton, openButton);
         Children.Add(header);
 
@@ -514,8 +516,13 @@ public sealed class RecordsScreen : Screen
     private StackPanel BackBar()
     {
         backBar?.Children.Remove(back);
+        backBar?.Children.Remove(reportButton);
         backBar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
         backBar.Children.Add(back);
+        // 끝난 측정의 상세에서만: 그 측정이 골라진 리포트 화면으로 (M8 설계 4.1)
+        var item = Context.Records.Items.FirstOrDefault(i => i.Key == detailKey);
+        if (mode == Mode.Detail && detail is { Record.Header: not null } && item is not null && item.Entry.Lifecycle != RecordLifecycle.Running)
+            backBar.Children.Add(reportButton);
         return backBar;
     }
 

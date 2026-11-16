@@ -102,7 +102,7 @@ public sealed partial class AppShell : Window
         {
             Ui = ui, Host = host, Recent = recent, Toasts = toasts, Dialog = dialog, Options = options, Log = log,
             Diagnosis = diagnosis, Navigate = Navigate, QueueDiag = QueueDiag, SetRevealOrigin = SetRevealOrigin, IsClosing = () => closing,
-            Memos = memos, OpenRecord = OpenRecord, WindowHandle = () => WinRT.Interop.WindowNative.GetWindowHandle(this),
+            Memos = memos, OpenRecord = OpenRecord, OpenReport = OpenReport, WindowHandle = () => WinRT.Interop.WindowNative.GetWindowHandle(this),
         };
         screens.Register("home", () => new HomeScreen(context));
         screens.Register("measure", () => new MeasureScreen(context));
@@ -111,7 +111,7 @@ public sealed partial class AppShell : Window
         screens.Register("settings", () => new SettingsScreen(context));
         screens.Register("diagnose", () => new DiagnoseScreen(context));
         screens.Register("records", () => new RecordsScreen(context));
-        screens.Register("report", () => new PendingScreen(context, "report", "리포트", "통신사에 전달할 리포트를 이 화면에서 만들게 됩니다."));
+        screens.Register("report", () => new ReportScreen(context));
 
         BuildLayout();
         var scaled = ScaleHost();
@@ -172,6 +172,13 @@ public sealed partial class AppShell : Window
     {
         Navigate("records", null);
         if (screens.Get("records") is RecordsScreen r) r.Show(key);
+    }
+
+    /// <summary>리포트 화면에서 그 기록을 고른다 (M8 설계 4.1).</summary>
+    private void OpenReport(string key)
+    {
+        Navigate("report", null);
+        if (screens.Get("report") is ReportScreen r) r.Show(key);
     }
 
     /// <summary>다른 위치의 기록 열기 (시작 인수, M7 3.7). 경로는 앱 기록에 남기지 않는다.</summary>

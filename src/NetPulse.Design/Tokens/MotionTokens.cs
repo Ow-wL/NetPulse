@@ -65,6 +65,8 @@ public static class Waits
     public static readonly TimeSpan ThemeCleanup = TimeSpan.FromSeconds(2);
     /// <summary>창을 닫을 때 메모·노트 쓰기를 기다리는 한도 (M5 설계 4.5)</summary>
     public static readonly TimeSpan CloseWrites = TimeSpan.FromSeconds(3);
+    /// <summary>시험 주입 <c>--report-fail slow</c>: 내보내기를 이만큼 늦춘다 (M8 "내보내는 중" 장면)</summary>
+    public static readonly TimeSpan ReportSlowTest = TimeSpan.FromSeconds(4);
 }
 
 /// <summary>측정 화면 bench 구간 (M5 설계 5절 재현 절차).</summary>

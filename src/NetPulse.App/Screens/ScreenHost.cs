@@ -21,6 +21,8 @@ public sealed class ScreenContext
     public required RecordMemos Memos { get; init; }
     /// <summary>기록 화면으로 가서 그 항목 상세를 연다 (null이면 목록).</summary>
     public required Action<string?> OpenRecord { get; init; }
+    /// <summary>리포트 화면으로 가서 그 기록을 고른다 (M8, 기록 상세의 "리포트 만들기").</summary>
+    public required Action<string> OpenReport { get; init; }
     /// <summary>창 핸들 (폴더 선택 대화상자 연결용).</summary>
     public required Func<nint> WindowHandle { get; init; }
     public required ToastHost Toasts { get; init; }

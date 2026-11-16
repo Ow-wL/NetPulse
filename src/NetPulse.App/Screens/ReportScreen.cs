@@ -1,0 +1,537 @@
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
+using Microsoft.UI.Xaml.Controls;
+using NetPulse.App.Design;
+using NetPulse.App.Design.Controls;
+using NetPulse.Core.Live;
+using NetPulse.Core.Presentation;
+using NetPulse.Core.Records;
+using NetPulse.Core.Report;
+using NetPulse.Design.Tokens;
+
+namespace NetPulse.App.Screens;
+
+/// <summary>
+/// 리포트 (M8 설계 4): 측정 고르기 · 가리기 · 메모·진단 넣기 · 끊김 상세 수 → 미리 보기 → 내보내기.
+/// 화면은 게시된 불변 문서 하나를 그리고, 내보내기는 그 문서 그대로 (<see cref="ReportRequests"/>, 설계 3.6).
+/// 앱 기록에는 내보냄 여부·크기·가리기 여부만 남긴다 (경로 없음).
+/// </summary>
+public sealed class ReportScreen : Screen
+{
+    private readonly PageHeader header;
+    private readonly GlassButton exportButton, exportingButton, prevButton, nextButton;
+    private readonly SegmentedChoice maskChoice, detailsChoice;
+    private readonly SettingToggle memosToggle, diagnosesToggle;
+    private readonly TextBlock pickedText, statusText;
+    private readonly GroupPanel optionsCard, previewCard;
+    private readonly StackPanel statusArea = new() { Spacing = Space.S3 };
+    private readonly StackPanel paperStack = new() { Spacing = Space.S6 };
+    private readonly Border paper;
+    private readonly StackPanel content = new() { Spacing = Space.S5 };
+    private readonly ScrollViewer scroll;
+    private readonly ReportRequests requests = new();
+    private readonly DocumentBrushes documentBrushes;
+    private readonly string version = typeof(App).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+    private string? key;
+    private ReportOptions options = new();
+    private bool exporting, syncing;
+    private ExportOutcome? lastExport;
+    private IReadOnlyList<string> leakKinds = [];
+    private string? lastAction;
+    private ReportDocument? drawn;
+    private bool drawnHighContrast;
+    private int drawGen, drawnSections;
+    private bool drawComplete;
+
+    /// <summary>마지막 내보내기 (앱 기록·진단 값에는 경로 없이).</summary>
+    private sealed record ExportOutcome(bool Ok, long Bytes, bool Masked, string? Problem, string? FileName, string? Folder);
+
+    public ReportScreen(ScreenContext context) : base(context, "report")
+    {
+        documentBrushes = new DocumentBrushes(ReportPalette.Document);
+        RowSpacing = Space.S4;
+        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+        exportButton = new GlassButton(Ui, ButtonKind.Primary, "report.export", "내보내기", Icons.Check);
+        exportButton.Click += async (_, _) => await ExportAsync();
+        exportingButton = new GlassButton(Ui, ButtonKind.Primary, "report.exporting", "내보내는 중…", Icons.Refresh) { IsEnabled = false };
+        header = new PageHeader(Ui, "report.header", null, "리포트", exportButton);
+        Children.Add(header);
+
+        // 옵션
+        prevButton = new GlassButton(Ui, ButtonKind.Icon, "report.older", "이전 측정", Icons.Back);
+        nextButton = new GlassButton(Ui, ButtonKind.Icon, "report.newer", "다음 측정", Icons.Chevron);
+        prevButton.Click += (_, _) => Step(+1);
+        nextButton.Click += (_, _) => Step(-1);
+        pickedText = Fonts.Wrapped("", Typography.Body, Ui.Brushes.Ink);
+        AutomationProperties.SetAutomationId(pickedText, "report.picked");
+        var pickRow = new Grid { ColumnSpacing = Space.S3 };
+        pickRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        pickRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        pickRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        pickRow.Children.Add(prevButton);
+        pickedText.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(pickedText, 1);
+        pickRow.Children.Add(pickedText);
+        Grid.SetColumn(nextButton, 2);
+        pickRow.Children.Add(nextButton);
+
+        maskChoice = new SegmentedChoice(Ui, "report.mask", "가리기", [("masked", "통신사에 보낼 때 (가리기)"), ("unmasked", "가리지 않음 (내가 볼 때)")], "masked");
+        maskChoice.Changed += v => SetOptions(options with { Masked = v == "masked" });
+        detailsChoice = new SegmentedChoice(Ui, "report.details", "끊김 상세", [("0", "없음"), ("3", "3개"), ("5", "5개"), ("10", "10개")], "5");
+        detailsChoice.Changed += v => SetOptions(options with { EpisodeDetails = int.Parse(v, System.Globalization.CultureInfo.InvariantCulture) });
+        memosToggle = new SettingToggle(Ui, "report.memos", "증상 메모 넣기 (주소·전화번호 같은 꼴만 가립니다)", false);
+        memosToggle.Click += (_, _) => SetOptions(options with { IncludeMemos = memosToggle.IsChecked == true });
+        diagnosesToggle = new SettingToggle(Ui, "report.diagnoses", "측정 중 진단 넣기", true);
+        diagnosesToggle.Click += (_, _) => SetOptions(options with { IncludeDiagnoses = diagnosesToggle.IsChecked == true });
+
+        var optionStack = new StackPanel { Spacing = Space.S4 };
+        optionStack.Children.Add(pickRow);
+        optionStack.Children.Add(Labeled("가리기", maskChoice));
+        optionStack.Children.Add(memosToggle);
+        optionStack.Children.Add(diagnosesToggle);
+        optionStack.Children.Add(Labeled("끊김 상세", detailsChoice));
+        statusText = Fonts.Wrapped("", Typography.Caption, Ui.Brushes.Muted);
+        AutomationProperties.SetAutomationId(statusText, "report.status");
+        AutomationProperties.SetLiveSetting(statusText, AutomationLiveSetting.Polite);
+        optionStack.Children.Add(statusText);
+        optionsCard = new GroupPanel("report.options", "리포트 옵션");
+        optionsCard.Children.Add(Ui.Glass.Surface(GlassLevel.Content, optionStack, Radius.Outer, new Thickness(Space.S6)));
+
+        // 미리 보기: 종이 면
+        paper = new Border { Padding = new Thickness(Space.S7), CornerRadius = new CornerRadius(Radius.Inner), BorderThickness = new Thickness(Size.Hairline), Child = paperStack };
+        previewCard = new GroupPanel("report.preview", "미리 보기");
+        var previewStack = new StackPanel { Spacing = Space.S3 };
+        previewStack.Children.Add(Fonts.Text("미리 보기 (내보낼 파일과 같은 내용)", Typography.Label, Ui.Brushes.Ink));
+        previewStack.Children.Add(paper);
+        previewCard.Children.Add(previewStack);
+
+        scroll = new ScrollViewer { Content = content, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, Space.S3, Space.S5) };
+        AutomationProperties.SetAutomationId(scroll, "report.scroll");
+        Grid.SetRow(scroll, 1);
+        Children.Add(scroll);
+
+        requests.Changed += () => DispatcherQueue.TryEnqueue(() => { if (!Context.IsClosing()) Rerender(); });
+        Context.Records.Changed += () => DispatcherQueue.TryEnqueue(() => { if (!Context.IsClosing()) OnLibraryChanged(); });
+        Ui.Effects.Changed += (_, _) => { if (Visibility == Visibility.Visible) Rerender(); };
+    }
+
+    private FrameworkElement Labeled(string label, FrameworkElement control)
+    {
+        var stack = new StackPanel { Spacing = Space.S1 };
+        stack.Children.Add(Fonts.Text(label, Typography.Caption, Ui.Brushes.Muted));
+        stack.Children.Add(control);
+        return stack;
+    }
+
+    public override IReadOnlyList<UIElement> Parts => [header, scroll];
+
+    public override void Render(HostSnapshot snapshot) { }
+
+    public override void Entered()
+    {
+        _ = Context.Records.RefreshAsync(Context.Host.RunningId);
+        OnLibraryChanged();
+        Rerender();
+    }
+
+    /// <summary>기록 상세의 "리포트 만들기" (그 측정이 골라진 채로).</summary>
+    public void Show(string recordKey)
+    {
+        if (key != recordKey)
+        {
+            key = recordKey;
+            Request();
+        }
+        Rerender();
+    }
+
+    // ---------------- 고르기 ----------------
+
+    /// <summary>끝난 측정 (최신순). 측정 중인 기록은 만들지 않는다 (설계 3.1).</summary>
+    private IReadOnlyList<LibraryItem> Candidates() => Context.Records.Items.Where(i => i.Entry.Lifecycle != RecordLifecycle.Running).ToArray();
+
+    private void OnLibraryChanged()
+    {
+        if (!Context.Records.Listed) return;
+        var list = Candidates();
+        if (key is null || list.All(i => i.Key != key))
+        {
+            // 기본: 가장 최근에 끝난 측정
+            string? next = list.FirstOrDefault()?.Key;
+            if (next != key)
+            {
+                key = next;
+                if (key is not null) Request();
+            }
+        }
+        else if (list.First(i => i.Key == key).Stamp is var stamp && requests.Latest is { } latest && latest.Key == key && latest.Stamp != stamp)
+        {
+            // 도장이 바뀜 (메모 저장 등): 게시 문서를 오래됨으로 두고 다시 만든다 (설계 3.6)
+            requests.StampChanged(key, stamp);
+            Request();
+        }
+        if (Visibility == Visibility.Visible) Rerender();
+    }
+
+    private void Step(int by)
+    {
+        var list = Candidates();
+        int i = list.ToList().FindIndex(x => x.Key == key);
+        int j = Math.Clamp(i + by, 0, list.Count - 1);
+        if (list.Count == 0 || j == i) return;
+        key = list[j].Key;
+        Request();
+        Rerender();
+    }
+
+    private void SetOptions(ReportOptions next)
+    {
+        if (syncing || next == options) return;
+        options = next;
+        Request();
+        Rerender();
+    }
+
+    // ---------------- 만들기 ----------------
+
+    private void Request()
+    {
+        if (key is null) return;
+        var item = Context.Records.Items.FirstOrDefault(i => i.Key == key);
+        if (item is null) return;
+        leakKinds = [];
+        lastExport = null;
+        var req = requests.Begin(key, item.Stamp, options);
+        _ = BuildAsync(req);
+    }
+
+    private async Task BuildAsync(ReportRequest req)
+    {
+        try
+        {
+            var opened = await Context.Records.OpenAsync(req.Key);
+            if (opened is null) { requests.Fail(req, ReportError.Unreadable); return; }
+            var store = Context.Diagnosis.Store;
+            var now = Context.Now;
+            var doc = await Task.Run(() =>
+            {
+                IReadOnlyList<NetPulse.Core.Diagnostics.StoredDiagnosis> diags = req.Options.IncludeDiagnoses ? store.List().Items.Select(x => x.Stored).ToArray() : [];
+                return ReportBuilder.Build(new ReportInput(req.Key, req.Stamp, opened.Record, opened.Analysis, opened.Lifecycle, diags, req.Options, now, version));
+            });
+            requests.Complete(req, doc);
+        }
+        catch (ReportException ex) { requests.Fail(req, ex.Error); }
+        catch (Exception ex)
+        {
+            Context.Log.Write("reportBuildFailed", new { type = ex.GetType().Name });
+            requests.Fail(req, "build");
+        }
+    }
+
+    // ---------------- 그리기 ----------------
+
+    private void Rerender()
+    {
+        content.Children.Clear();
+        statusArea.Children.Clear();
+        var list = Candidates();
+        bool listed = Context.Records.Listed;
+        if (listed && list.Count == 0)
+        {
+            var (card, body) = ScreenParts.Card(Ui, "report.empty", "끝난 측정이 없습니다");
+            var stack = new StackPanel { Spacing = Space.S3 };
+            stack.Children.Add(Fonts.Wrapped("측정을 한 번 마치면 그 기록으로 통신사에 보낼 리포트를 만들 수 있습니다.", Typography.Body, Ui.Brushes.Muted));
+            var go = new GlassButton(Ui, ButtonKind.Secondary, "report.empty.measure", "측정 화면으로", Icons.Pulse) { HorizontalAlignment = HorizontalAlignment.Left };
+            go.Click += (_, _) => Context.Navigate("measure", null);
+            stack.Children.Add(go);
+            body.Set(stack, "empty");
+            content.Children.Add(card);
+            SetExport();
+            Context.QueueDiag();
+            return;
+        }
+
+        int index = list.ToList().FindIndex(i => i.Key == key);
+        var item = index >= 0 ? list[index] : null;
+        pickedText.Text = item is null ? "기록 목록을 읽는 중…" : Picked(item);
+        AutomationProperties.SetName(pickedText, pickedText.Text);
+        prevButton.IsEnabled = index >= 0 && index < list.Count - 1;
+        nextButton.IsEnabled = index > 0;
+        SyncOptions();
+        content.Children.Add(optionsCard);
+        content.Children.Add(statusArea);
+
+        var state = requests.State;
+        statusText.Text = state switch
+        {
+            ReportState.Building => "만드는 중… 끝나면 내보낼 수 있습니다.",
+            ReportState.Stale => "기록이 바뀌어 다시 만드는 중입니다.",
+            ReportState.Failed => "만들지 못했습니다.",
+            ReportState.Ready when !options.Masked => "가리지 않은 리포트입니다. 주소와 이름이 그대로 들어갑니다.",
+            ReportState.Ready => "미리 보기는 내보낼 파일과 같은 내용입니다.",
+            _ => "",
+        };
+        AutomationProperties.SetName(statusText, statusText.Text);
+
+        if (!options.Masked) statusArea.Children.Add(new Banner(Ui, "report.unmasked", BannerKind.Warn, ReportTexts.UnmaskedNote));
+        if (lastExport is { } done) statusArea.Children.Add(ExportBanner(done));
+
+        if (state == ReportState.Failed)
+        {
+            content.Children.Add(ErrorCard("report.failed", "리포트를 만들지 못했습니다", FailureText(requests.Failure), records: true));
+            ClearPaper();
+        }
+        else if (leakKinds.Count > 0)
+        {
+            content.Children.Add(ErrorCard("report.redaction", "식별 정보가 남아 있어 내보내지 않았습니다",
+                $"가린 리포트에서 원본 값이 발견됐습니다 ({string.Join(", ", leakKinds)}). 다시 만들어 보세요.", records: false));
+            ClearPaper();
+        }
+        else if (requests.Published is { } doc)
+        {
+            content.Children.Add(previewCard);
+            Draw(doc);
+        }
+        else
+        {
+            var (card, body) = ScreenParts.Card(Ui, "report.building", "리포트를 만드는 중");
+            body.Set(GlassCard.Skeleton(Ui), "loading");
+            content.Children.Add(card);
+            ClearPaper();
+        }
+        SetExport();
+        Context.QueueDiag();
+    }
+
+    private static string Picked(LibraryItem i)
+    {
+        var when = i.Entry.StartedAt is { } st ? st.ToLocalTime().ToString("M월 d일 tt h:mm", ScreenParts.Ko) : "시작 시각 없음";
+        var grade = i.Summary.Grade is { } g ? " · 등급 " + NetPulse.Core.Analysis.Sentences.GradeName(g) : "";
+        var life = i.Entry.Lifecycle == RecordLifecycle.NoSummary ? " · 끝 기록 없음" : "";
+        return $"측정: {when} · {RecordView.TargetsSummary(i.Entry.Targets)}{grade}{life}";
+    }
+
+    private void SyncOptions()
+    {
+        syncing = true;
+        try
+        {
+            maskChoice.Set(options.Masked ? "masked" : "unmasked");
+            detailsChoice.Set(options.EpisodeDetails.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            memosToggle.IsChecked = options.IncludeMemos;
+            diagnosesToggle.IsChecked = options.IncludeDiagnoses;
+        }
+        finally { syncing = false; }
+    }
+
+    private static string FailureText(object? failure) => failure switch
+    {
+        ReportError.Running => "측정 중인 기록으로는 리포트를 만들지 않습니다. 측정이 끝난 뒤에 만드세요.",
+        ReportError.Unsupported => "지원하지 않는 형식의 기록입니다.",
+        ReportError.Unreadable => "기록을 읽지 못했습니다. 기록 화면에서 상태를 확인하세요.",
+        _ => "리포트를 만드는 중에 문제가 생겼습니다. 다시 만들어 보세요.",
+    };
+
+    private GroupPanel ErrorCard(string id, string title, string text, bool records)
+    {
+        var (card, body) = ScreenParts.Card(Ui, id, title);
+        var stack = new StackPanel { Spacing = Space.S3 };
+        stack.Children.Add(Fonts.Wrapped(text, Typography.Body, Ui.Brushes.Ink));
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S2 };
+        var retry = new GlassButton(Ui, ButtonKind.Secondary, id + ".retry", "다시 만들기", Icons.Refresh);
+        retry.Click += (_, _) => { Request(); Rerender(); };
+        row.Children.Add(retry);
+        if (records)
+        {
+            var go = new GlassButton(Ui, ButtonKind.Ghost, id + ".records", "기록 화면으로", Icons.Menu);
+            go.Click += (_, _) => Context.OpenRecord(null);
+            row.Children.Add(go);
+        }
+        stack.Children.Add(row);
+        body.Set(stack, "error");
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { if (retry.IsLoaded) retry.Focus(FocusState.Programmatic); });
+        return card;
+    }
+
+    private FrameworkElement ExportBanner(ExportOutcome done)
+    {
+        if (!done.Ok) return new Banner(Ui, "report.export.failed", BannerKind.Error, "내보내지 못했습니다. " + (done.Problem ?? "") + " 미리 보기는 그대로입니다.");
+        var group = new GroupPanel("report.export.done", "내보냄");
+        var row = new Grid { ColumnSpacing = Space.S3 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var text = Fonts.Wrapped($"내보냈습니다: {done.FileName} ({Kb(done.Bytes)}, {(done.Masked ? "가린 리포트" : "가리지 않은 리포트")})", Typography.Body, Ui.Brushes.Ink);
+        text.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(text);
+        var folder = new GlassButton(Ui, ButtonKind.Ghost, "report.export.folder", "폴더에서 보기", Icons.Layers);
+        folder.Click += (_, _) =>
+        {
+            if (done.Folder is not { } f) return;
+            var r = Context.Diagnosis.World.Actions.OpenFolder(f, [f]);
+            lastAction = "folder" + (r.Ok ? "" : ":" + r.Code);
+            Context.QueueDiag();
+        };
+        Grid.SetColumn(folder, 1);
+        row.Children.Add(folder);
+        group.Children.Add(Ui.Glass.Surface(GlassLevel.Content, row, Radius.Inner, new Thickness(Space.S4, Space.S3, Space.S4, Space.S3)));
+        return group;
+    }
+
+    private static string Kb(long bytes) => bytes < 1024 ? $"{bytes} B" : $"{Math.Round(bytes / 1024.0):0} KB";
+
+    private void ClearPaper()
+    {
+        drawn = null;
+        drawGen++;
+        paperStack.Children.Clear();
+        drawnSections = 0;
+        drawComplete = false;
+    }
+
+    /// <summary>
+    /// 문서를 종이 면에 그린다. 같은 문서·같은 색이면 다시 만들지 않는다. 절마다 한 차례씩 (큰 문서를 한 프레임에 만들지 않게).
+    /// </summary>
+    private void Draw(ReportDocument doc)
+    {
+        bool hc = Ui.Effects.Mode.HighContrast;
+        if (ReferenceEquals(doc, drawn) && hc == drawnHighContrast) return;
+        ClearPaper();
+        drawn = doc;
+        drawnHighContrast = hc;
+        var look = hc ? ReportLook.System(Ui.Brushes) : ReportLook.Document(documentBrushes);
+        paper.Background = look.Paper;
+        paper.BorderBrush = look.Edge;
+        paperStack.Children.Add(ReportParts.Head(doc, look));
+        int gen = drawGen;
+        int i = 0;
+        void Next()
+        {
+            if (gen != drawGen || Context.IsClosing()) return;
+            if (i >= doc.Sections.Count)
+            {
+                drawComplete = true;
+                Context.QueueDiag();
+                return;
+            }
+            paperStack.Children.Add(ReportParts.Section(doc.Sections[i++], look));
+            drawnSections = i;
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, Next);
+        }
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, Next);
+    }
+
+    private void SetExport()
+    {
+        bool can = requests.ForExport() is not null && leakKinds.Count == 0 && !exporting;
+        exportButton.IsEnabled = can;
+        header.Actions.Children.Clear();
+        header.Actions.Children.Add(exporting ? exportingButton : exportButton);
+    }
+
+    // ---------------- 내보내기 ----------------
+
+    private async Task ExportAsync()
+    {
+        var doc = requests.ForExport();
+        if (doc is null || exporting) return;
+        if (!doc.Options.Masked && !await ConfirmUnmaskedAsync()) { lastAction = "unmasked-cancel"; Context.QueueDiag(); return; }
+        string? path = Context.Options.ReportOut is { } outFolder ? System.IO.Path.Combine(outFolder, doc.FileName) : await PickAsync(doc.FileName);
+        if (path is null || Context.IsClosing()) { lastAction = "cancel"; Context.QueueDiag(); return; }   // 취소: 아무 일도 하지 않는다
+        exporting = true;
+        SetExport();
+        Context.QueueDiag();
+        var fault = Context.Options.ReportFail switch { "write" => ReportFault.Write, "move" => ReportFault.Move, "leak" => ReportFault.Leak, _ => ReportFault.None };
+        bool slow = Context.Options.ReportFail == "slow";
+        var (rendered, written) = await Task.Run(async () =>
+        {
+            var r = ReportExport.Render(doc, fault == ReportFault.Leak ? ReportFault.Leak : ReportFault.None);
+            if (!r.Ok) return (r, (ReportWriteResult?)null);
+            if (slow) await Task.Delay(Waits.ReportSlowTest);
+            return (r, ReportFile.Write(path, r.Html!, overwrite: true, fault is ReportFault.Write or ReportFault.Move ? fault : ReportFault.None));
+        });
+        if (Context.IsClosing()) return;
+        exporting = false;
+        if (!rendered.Ok)
+        {
+            leakKinds = rendered.LeakKinds.Count > 0 ? rendered.LeakKinds : ["문서 검사"];
+            Context.Log.Write("reportLeak", new { kinds = rendered.LeakKinds, problems = rendered.Problems.Count });
+        }
+        else if (written is { Ok: true })
+        {
+            lastExport = new ExportOutcome(true, written.Bytes, doc.Options.Masked, null, System.IO.Path.GetFileName(path), System.IO.Path.GetDirectoryName(path));
+            Context.Log.Write("reportExported", new { bytes = written.Bytes, masked = doc.Options.Masked });
+        }
+        else
+        {
+            lastExport = new ExportOutcome(false, 0, doc.Options.Masked, written?.Problem, null, null);
+            Context.Log.Write("reportExportFailed", new { error = written?.Error.ToString() });
+        }
+        Rerender();
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (leakKinds.Count == 0 && exportButton.IsLoaded) exportButton.Focus(FocusState.Programmatic);
+        });
+    }
+
+    private Task<bool> ConfirmUnmaskedAsync()
+    {
+        var done = new TaskCompletionSource<bool>();
+        void Closed(bool ok)
+        {
+            Context.Dialog.Closed -= Closed;
+            done.TrySetResult(ok);
+        }
+        Context.Dialog.Closed += Closed;
+        Context.Dialog.Open(exportButton, "가리지 않은 리포트를 내보낼까요?", "대상 주소와 이름, 사업자 이름이 그대로 들어갑니다. 내가 볼 때만 쓰세요.", "내보내기", "취소");
+        return done.Task;
+    }
+
+    private async Task<string?> PickAsync(string fileName)
+    {
+        var picker = new Windows.Storage.Pickers.FileSavePicker();
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, Context.WindowHandle());
+        picker.SuggestedFileName = System.IO.Path.GetFileNameWithoutExtension(fileName);
+        picker.FileTypeChoices.Add("HTML 문서", [".html"]);
+        picker.SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary;
+        try { return (await picker.PickSaveFileAsync())?.Path; }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or UnauthorizedAccessException) { return null; }
+    }
+
+    // ---------------- 시험 ----------------
+
+    /// <summary>미리 보기가 다 그려짐 (bench·시험).</summary>
+    public bool PreviewReady => drawn is not null && drawComplete;
+
+    public override object? Diag()
+    {
+        var list = Candidates();
+        var item = list.FirstOrDefault(i => i.Key == key);
+        var doc = requests.Published;
+        return new
+        {
+            listed = Context.Records.Listed,
+            candidates = list.Count,
+            index = list.ToList().FindIndex(i => i.Key == key),
+            id = item?.Entry.Id,
+            state = requests.State.ToString(),
+            masked = options.Masked, memos = options.IncludeMemos, diagnoses = options.IncludeDiagnoses, details = options.EpisodeDetails,
+            published = doc is null ? null : new
+            {
+                masked = doc.Options.Masked, sections = doc.Sections.Select(s => s.Id).ToArray(), fileName = doc.FileName,
+                fields = doc.Fields().Count(),
+            },
+            drawnSections,
+            previewReady = PreviewReady,
+            highContrast = drawnHighContrast,
+            exportEnabled = exportButton.IsEnabled && !exporting,
+            exporting,
+            export = lastExport is { } e ? new { e.Ok, e.Bytes, e.Masked, e.FileName, problem = e.Problem } : null,
+            leak = leakKinds,
+            failure = requests.Failure?.ToString(),
+            lastAction,
+        };
+    }
+}
