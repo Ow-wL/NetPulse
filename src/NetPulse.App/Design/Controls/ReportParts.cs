@@ -269,13 +269,14 @@ public static class ReportParts
         }
         void Lines(IReadOnlyList<IReadOnlyList<FigurePoint>> series, Brush brush, bool dashed)
         {
+            // 한 점짜리 구간은 점으로 (SVG와 같음, G4 M8 1라운드 a5). 최악 사례에는 수백 개라 요소 하나(경로)에 모은다 (M8 bench)
+            var dots = new GeometryGroup();
             foreach (var seg in series)
             {
                 if (seg.Count == 0) continue;
                 if (seg.Count == 1)
                 {
-                    // 한 점짜리 구간은 점으로 (SVG와 같음, G4 M8 1라운드 a5)
-                    Place(new Ellipse { Width = Space.S1, Height = Space.S1, Fill = brush }, TimelineFigure.X(seg[0].Column) - Space.S0, f.Y(seg[0].ValueMs) - Space.S0);
+                    dots.Children.Add(new EllipseGeometry { Center = new Point(TimelineFigure.X(seg[0].Column), f.Y(seg[0].ValueMs)), RadiusX = Space.S0, RadiusY = Space.S0 });
                     continue;
                 }
                 var line = new Polyline { Stroke = brush, StrokeThickness = ChartStyle.Line2 };
@@ -283,6 +284,7 @@ public static class ReportParts
                 foreach (var p in seg) line.Points.Add(new Point(TimelineFigure.X(p.Column), f.Y(p.ValueMs)));
                 canvas.Children.Add(line);
             }
+            if (dots.Children.Count > 0) canvas.Children.Add(new Microsoft.UI.Xaml.Shapes.Path { Data = dots, Fill = brush });
         }
         Lines(f.Router, look.Muted, true);
         Lines(f.Internet, look.Accent, false);
