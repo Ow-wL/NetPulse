@@ -198,12 +198,17 @@ public sealed class DiagnoseScreen : Screen
 
     private bool startDisplaced, siteDisplaced;
     private long startBaseline = -1, siteBaseline = -1;
+    // 시험 고리: 사이트 점검 요청 수와 마지막 응답 (Enter가 앱에 닿았는지 확인, M6 G4 4라운드 이월 2)
+    private long siteRequests;
+    private DiagnosisRequest? lastSiteRequest;
     private string? erroredInput;
 
     private void CheckSite()
     {
         bool had = siteRun.FocusState != FocusState.Unfocused;
         var r = Context.Diagnosis.CheckSite(siteInput.Text);
+        siteRequests++;
+        lastSiteRequest = r;
         if (r == DiagnosisRequest.Invalid && Context.Diagnosis.Snapshot.Site.InputError is { } code)
         {
             erroredInput = siteInput.Text;
@@ -625,7 +630,7 @@ public sealed class DiagnoseScreen : Screen
             scrollY = (int)scroll.VerticalOffset,
             focus = FocusedId(),
             // 완료 처리의 사용자 조작 기준 (수: 지금까지의 조작 수, 기준 -1 = 아직 없음)
-            guard = new { inputs = userActions, start = startBaseline, site = siteBaseline },
+            guard = new { inputs = userActions, start = startBaseline, site = siteBaseline, siteRequests, lastSiteRequest = lastSiteRequest?.ToString() },
         };
     }
 }

@@ -195,10 +195,12 @@ public sealed class AppDriver : IDisposable
         Find(automationId).SetFocus();
         var hwnd = new IntPtr(Window.Current.NativeWindowHandle);
         WaitFor(() => Native.GetForegroundWindow() == hwnd, f => f, "앱 창이 앞에 옴");
-        const byte VkReturn = 0x0D;
-        const uint KeyUp = 0x0002;
-        Native.keybd_event(VkReturn, 0, 0, UIntPtr.Zero);
-        Native.keybd_event(VkReturn, 0, KeyUp, UIntPtr.Zero);
+        // 누름·뗌을 한 번에 보낸다 (두 호출 사이에 전경이 바뀌는 틈을 없앤다). 보낸 개수도 확인한다.
+        // 동시 사용자 입력과 완전히 떼어 놓는 것은 격리 세션만 할 수 있다. 앱이 받았는지는 시험이 앱 쪽 기록으로 확인한다.
+        const ushort VkReturn = 0x0D;
+        var inputs = new[] { Native.Key(VkReturn, false), Native.Key(VkReturn, true) };
+        if (Native.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Native.INPUT>()) != inputs.Length)
+            throw new InvalidOperationException("Enter를 보내지 못했습니다.");
     }
 
     public bool Exists(string automationId) =>
@@ -210,7 +212,10 @@ public sealed class AppDriver : IDisposable
         // 닫는 사이 새 알림이 올 수 있어 몇 번 되풀이한다
         for (int attempt = 0; attempt < 5; attempt++)
         {
-            var all = Window.FindAll(TreeScope.Descendants, Condition.TrueCondition);
+            AutomationElementCollection all;
+            // 훑는 사이 화면이 바뀌면(초점이 가며 지우기 단추가 생김 등) 요소가 사라져 던진다: 다시 훑는다 (M7 UI 시험 2차)
+            try { all = Window.FindAll(TreeScope.Descendants, Condition.TrueCondition); }
+            catch (ElementNotAvailableException) when (attempt < 4) { Thread.Sleep(100); continue; }
             foreach (AutomationElement e in all)
             {
                 string id;
@@ -295,35 +300,38 @@ public sealed class AppDriver : IDisposable
 
     public void Dispose()
     {
-        // 시험이 닫지 않았으면: 살아 있으면 끝내고(강제 종료 시도), 실제로 회수됐는지 확인한다 (G4 2·3라운드).
-        // 강제 종료가 받아들여졌으면 -1(Kill)과 0만 정상, 그렇지 않으면(스스로 끝남) 0 밖은 모두 비정상(-1 포함).
-        // 회수되지 않으면 증거를 남기고 실패시킨다 (살아 있는 앱을 둔 채 성공처럼 끝내지 않는다).
+        // 시험이 닫지 않았으면: 살아 있으면 시험 전용 종료 코드로 끝내고, 실제로 회수됐는지 확인한다 (G4 2·3라운드).
+        // 정상은 0과 그 시험 전용 코드뿐이다. Kill()은 이미 끝난 프로세스에 예외 없이 돌아올 수 있어 "요청이 받아들여짐"이
+        // 시험이 끝냈다는 증거가 못 된다. 종료 코드는 먼저 끝난 쪽의 것이 남으므로, 스스로 -1로 끝났으면 -1이 남아 비정상이 된다
+        // (M6 G4 4라운드 이월 3). 회수되지 않으면 증거를 남기고 실패시킨다 (살아 있는 앱을 둔 채 성공처럼 끝내지 않는다).
         // 시험 본문이 이미 실패해 이 예외가 그것을 덮을 수 있지만, 그때도 원인은 대개 이 종료라 증거 경로를 앞에 둔다.
         string? crashed = null;
         bool alive = false;
         if (!closed)
         {
-            // killed: 강제 종료 요청이 예외 없이 받아들여졌을 때만 참. 관찰 뒤 Kill 전에 스스로 끝나 Kill이 예외를 낸 경우는
-            // 시험이 끝낸 것이 아니므로 -1도 정상으로 면제하지 않는다 (G4 3라운드 3)
-            bool killed = false;
-            string? killError = null;
-            if (!process.HasExited)
-            {
-                try { process.Kill(); killed = true; }
-                catch (InvalidOperationException) { }                                   // 그 사이 스스로 끝남: 아래 회수에서 확인
-                catch (System.ComponentModel.Win32Exception e) { killError = e.NativeErrorCode.ToString("X", System.Globalization.CultureInfo.InvariantCulture); }
-            }
+            string? killError = process.HasExited ? null : TerminateForTest(process);
             bool reaped = process.WaitForExit(10000);
             alive = !reaped;
             if (!reaped)
-                crashed = $"앱을 끝내지 못했습니다 (강제 종료 {(killError is null ? "요청함" : "실패 0x" + killError)}, 10초 안에 회수 안 됨). 증거: {CrashEvidence.Collect(process, UserData, "not-reaped", startedUtc)}";
-            else if (killed ? process.ExitCode is not (0 or -1) : process.ExitCode != 0)
-                crashed = $"앱이 시험 도중 비정상 종료했습니다 (종료 코드 0x{process.ExitCode:X8}{(killed ? "" : ", 스스로 끝남")}). 증거: {CrashEvidence.Collect(process, UserData, "during-test", startedUtc)}";
+                crashed = $"앱을 끝내지 못했습니다 (강제 종료 {(killError is null ? "요청함" : "실패 " + killError)}, 10초 안에 회수 안 됨). 증거: {CrashEvidence.Collect(process, UserData, "not-reaped", startedUtc)}";
+            else if (ExitProblem(process.ExitCode) is { } problem)
+                crashed = $"앱이 시험 도중 비정상 종료했습니다 ({problem}). 증거: {CrashEvidence.Collect(process, UserData, "during-test", startedUtc)}";
         }
         process.Dispose();
         if (ownsUserData && !alive) DeleteUserData(UserData);   // 살아 있는 앱의 폴더는 지우지 않는다 (증거·사용 중)
         if (crashed is not null) throw new AppCrashedException(crashed);
     }
+
+    /// <summary>시험이 강제로 끝낸 프로세스만 갖는 종료 코드 (앱은 이 값으로 끝나지 않는다).</summary>
+    internal const int TestKillCode = 0x7E57C0DE;
+
+    /// <summary>시험 전용 코드로 강제 종료를 요청한다. 실패면 그 오류 (이미 끝났으면 거부될 수 있고, 그래도 판정은 종료 코드로 한다).</summary>
+    internal static string? TerminateForTest(Process p) =>
+        Native.TerminateProcess(p.SafeHandle, unchecked((uint)TestKillCode)) ? null : "0x" + Marshal.GetLastWin32Error().ToString("X", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>회수된 종료 코드 판정: 0(스스로 정상 종료)과 시험 전용 코드(시험이 끝냄)만 정상. 그 밖은 이유 글.</summary>
+    internal static string? ExitProblem(int exitCode) =>
+        exitCode is 0 or TestKillCode ? null : $"종료 코드 0x{exitCode:X8}, 스스로 끝남";
 
     public static void DeleteUserData(string folder)
     {
@@ -339,6 +347,12 @@ public sealed class AppDriver : IDisposable
         [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
         [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-        [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+        [StructLayout(LayoutKind.Sequential)] public struct KEYBDINPUT { public ushort wVk, wScan; public uint dwFlags, time; public IntPtr dwExtraInfo; }
+        [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public IntPtr dwExtraInfo; }
+        [StructLayout(LayoutKind.Explicit)] public struct InputUnion { [FieldOffset(0)] public KEYBDINPUT ki; [FieldOffset(0)] public MOUSEINPUT mi; }
+        [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public InputUnion u; }
+        public static INPUT Key(ushort vk, bool up) => new() { type = 1, u = new InputUnion { ki = new KEYBDINPUT { wVk = vk, dwFlags = up ? 2u : 0u } } };
+        [DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint n, INPUT[] inputs, int size);
+        [DllImport("kernel32.dll", SetLastError = true)] public static extern bool TerminateProcess(Microsoft.Win32.SafeHandles.SafeProcessHandle h, uint exitCode);
     }
 }

@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -464,7 +464,10 @@ public sealed class MeasureScreen : Screen
         if (f.Result.SealFailed)
             stack.Children.Add(new Banner(Ui, "measure.result.sealfailed", BannerKind.Error, "기록을 제때 마감하지 못했습니다. 기록 끝 일부가 빠졌을 수 있습니다."));
         if (f.Record?.MissingNotice is { } notice) stack.Children.Add(new Banner(Ui, "measure.result.notice", BannerKind.Warn, notice));
-        stack.Children.Add(Fonts.Wrapped("기록 화면에서 자세히 보기는 다음 단계에서 만듭니다.", Typography.Caption, Ui.Brushes.Muted));
+        var more = new GlassButton(Ui, ButtonKind.Secondary, "measure.result.records", "기록에서 자세히 보기", Icons.Chevron) { HorizontalAlignment = HorizontalAlignment.Left };
+        string finishedId = f.Result.Id;
+        more.Click += (_, _) => Context.OpenRecord(Context.Records.KeyOf(finishedId));   // 목록에 아직 없으면 목록 (M7 4.2)
+        stack.Children.Add(more);
         var panel = new GroupPanel("measure.result", "측정 결과");
         panel.Children.Add(Ui.Glass.Surface(GlassLevel.Content, stack, Radius.Outer, new Thickness(Space.S6)));
         resultHost.Content = panel;

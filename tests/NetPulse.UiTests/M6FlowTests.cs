@@ -163,7 +163,7 @@ public sealed class M6FlowTests
         var saved = ClipboardText.Save();
         if (saved.Blocked) Assert.Skip("미완료: 클립보드에 그대로 되돌릴 수 없는 형식이 있어 덮어쓰지 않았습니다.");
         var userData = AppDriver.NewUserData();
-        string? ours = null;   // 시험(앱)이 클립보드에 쓴 글. null이면 쓰지 않았다 → 되돌리지 않는다
+        uint? owned = null;   // 앱이 쓴 뒤 자리 잡은 클립보드 번호. null이면 시험의 내용이 아니다 → 되돌리지 않는다
         try
         {
             using var app = Open(userData, "profile", "--demo tests:diag-dns --screen diagnose");
@@ -172,16 +172,17 @@ public sealed class M6FlowTests
             var d = WaitRun(app);
             // 보관한 뒤 다른 곳에서 클립보드를 바꿨으면 (사용자가 새로 복사) 덮어쓰지 않고 미완료 (G4 3라운드 2)
             if (ClipboardText.Sequence() != saved.Sequence) Assert.Skip("미완료: 시험 중 클립보드가 바뀌어 덮어쓰지 않았습니다.");
-            ours = S(d, "copyText");
             app.Invoke("diagnose.copy");
             app.WaitDiag(d2 => S(d2, "copyState"), s => s.Length > 0, "복사 결과");
+            owned = ClipboardText.Claim(S(d, "copyText"));
+            Assert.True(owned is not null, "앱이 쓴 클립보드로 확인하지 못함 (형식: " + ClipboardText.LastFormats + ")");
             Assert.Equal("ok", S(app.Diag(), "copyState"));
             Assert.Equal(S(d, "copyText"), ClipboardText.Read());
             Assert.Equal(0, app.Close());
         }
         finally
         {
-            ClipboardText.Restore(saved, ours);
+            ClipboardText.Restore(saved, owned);
             AppDriver.DeleteUserData(userData);
         }
     }
@@ -241,9 +242,13 @@ public sealed class M6FlowTests
             var running = app.WaitDiag(x => x, x => Sd(x).GetProperty("site").GetProperty("Running").GetBoolean()
                 && Sd(x).GetProperty("guard").GetProperty("site").GetInt64() >= 0, "점검 중, 기준 잡힘");
             long baseline = Sd(running).GetProperty("guard").GetProperty("site").GetInt64();
+            long requests = Sd(running).GetProperty("guard").GetProperty("siteRequests").GetInt64();
             app.SetText("diagnose.site.input", "shop.example");   // 진행 중 입력 수정
             app.PressEnter("diagnose.site.input");                 // 진행 중 Enter → 바쁨
-            var after = app.WaitDiag(x => x, x => Sd(x).GetProperty("guard").GetProperty("inputs").GetInt64() > baseline, "조작이 세어짐");
+            // Enter가 앱에 닿았다는 증거: 점검 요청이 하나 늘고 그 응답이 바쁨 (입력 수정만으로는 늘지 않는다)
+            var after = app.WaitDiag(x => x, x => Sd(x).GetProperty("guard").GetProperty("siteRequests").GetInt64() > requests, "Enter가 점검 요청으로 닿음");
+            Assert.Equal(requests + 1, Sd(after).GetProperty("guard").GetProperty("siteRequests").GetInt64());
+            Assert.Equal("Busy", M5Fixtures.Str(Sd(after).GetProperty("guard"), "lastSiteRequest"));
             Assert.True(Sd(after).GetProperty("site").GetProperty("Running").GetBoolean(), "앞 점검이 아직 진행 중이어야 한다 (시나리오 시간 부족)");
             Assert.Equal(baseline, Sd(after).GetProperty("guard").GetProperty("site").GetInt64());
             var done = app.WaitDiag(x => x, x => !Sd(x).GetProperty("site").GetProperty("Running").GetBoolean(), "앞 점검 끝남");
@@ -513,18 +518,60 @@ internal static class ClipboardText
 
     public static string Read() => Sta(() => System.Windows.Forms.Clipboard.GetText());
 
+    /// <summary>앱의 글 복사(WinRT <c>DataPackage.SetText</c>)가 남기는 형식: 글 형식과 그 합성, OLE 내부 형식.</summary>
+    private static readonly HashSet<string> TextFormats = new(StringComparer.OrdinalIgnoreCase) { "UnicodeText", "Text", "OEMText", "Locale", "System.String", "Ole Private Data" };
+
+    /// <summary>내용이 아니라 클립보드 기록·관리 도구가 붙이는 표시 형식.</summary>
+    private static bool MarkerFormat(string f) =>
+        f.StartsWith("Clipboard Viewer Ignore", StringComparison.OrdinalIgnoreCase)
+        || f.StartsWith("ExcludeClipboardContentFromMonitorProcessing", StringComparison.OrdinalIgnoreCase)
+        || f.StartsWith("CanIncludeInClipboardHistory", StringComparison.OrdinalIgnoreCase)
+        || f.StartsWith("CanUploadToCloudClipboard", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>마지막 <see cref="Claim"/>이 본 형식 (실패 문장용).</summary>
+    public static string LastFormats { get; private set; } = "";
+
     /// <summary>
-    /// 시험이 쓴 글(<paramref name="ours"/>)이 아직 그대로 있을 때만 보관한 것을 되돌린다 (G4 3라운드 2).
-    /// 시험이 쓰지 않았거나(null), 그 뒤 다른 곳에서 바꿨으면(사용자가 새로 복사) 그 내용을 지우거나 덮지 않는다.
+    /// 앱이 <paramref name="text"/>를 실제로 썼는지 확인하고, 그 쓰기가 자리 잡은(번호가 잠시 그대로인) 클립보드 번호를 돌려준다.
+    /// 클립보드 관리 도구가 복사에 반응해 표시 형식을 덧붙이는 것은 자리 잡는 동안이면 시험의 내용으로 본다.
+    /// 글이 다르거나, 글 형식·표시 형식 밖의 형식(서식 있는 글, 그림 등)이 있으면 null: 그 사이 누가 같은 글을 서식째 복사했을 수 있다
+    /// (시험의 내용이 아니다 → 되돌리지 않는다). M6 G4 4라운드 이월 1, M7 G4 1라운드 b8.
+    /// 같은 글을 서식 없이 복사한 경우만은 구별하지 못한다: 그때 되돌리면 사용자의 같은 글이 시험 전 내용으로 바뀐다 (격리 세션만 막음).
     /// </summary>
-    public static void Restore(Saved saved, string? ours)
+    public static uint? Claim(string text)
     {
-        if (saved.Blocked || ours is null) return;
+        var limit = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+        uint seq = Sequence();
+        var stableSince = DateTime.UtcNow;
+        while (DateTime.UtcNow < limit)
+        {
+            Thread.Sleep(50);
+            uint now = Sequence();
+            if (now != seq) { seq = now; stableSince = DateTime.UtcNow; continue; }
+            if (DateTime.UtcNow - stableSince >= TimeSpan.FromMilliseconds(400)) break;
+        }
+        bool ours = Sta(() =>
+        {
+            var formats = System.Windows.Forms.Clipboard.GetDataObject()?.GetFormats(autoConvert: false) ?? [];
+            LastFormats = string.Join(", ", formats);
+            return formats.All(f => TextFormats.Contains(f) || MarkerFormat(f))
+                && System.Windows.Forms.Clipboard.ContainsText() && System.Windows.Forms.Clipboard.GetText() == text;
+        });
+        // 확인하는 사이에 바뀌었으면 누구의 것인지 모른다
+        return ours && Sequence() == seq ? seq : null;
+    }
+
+    /// <summary>
+    /// 클립보드 번호가 시험이 확인한 그대로(<paramref name="owned"/>)일 때만 보관한 것을 되돌린다.
+    /// 그 뒤 누가 무엇이든 썼으면 (같은 글에 다른 서식을 붙인 복사 포함) 번호가 바뀌므로 지우거나 덮지 않는다.
+    /// 확인과 쓰기 사이의 아주 짧은 틈은 남는다: 동시 사용자 내용의 완전한 보존은 격리된 시험 세션만 보장한다.
+    /// </summary>
+    public static void Restore(Saved saved, uint? owned)
+    {
+        if (saved.Blocked || owned is null) return;
         Sta(() =>
         {
-            // 글이 시험의 글 그대로인지로 본다 (클립보드 관리 도구가 표시 형식을 덧붙여도 시험의 내용이다)
-            bool stillOurs = System.Windows.Forms.Clipboard.ContainsText() && System.Windows.Forms.Clipboard.GetText() == ours;
-            if (!stillOurs) return false;
+            if (Sequence() != owned) return false;
             if (saved.Items.Count == 0) { System.Windows.Forms.Clipboard.Clear(); return true; }
             var o = new System.Windows.Forms.DataObject();
             foreach (var (f, v) in saved.Items) o.SetData(f, false, v is byte[] bytes ? new MemoryStream(bytes) : v);

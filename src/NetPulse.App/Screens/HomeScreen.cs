@@ -41,7 +41,7 @@ public sealed class HomeScreen : Screen
     private readonly GroupPanel heroCard, mapCard, chartCard, recentCard, diagCard;
     private readonly Grid side = new() { RowSpacing = Space.S5 };
     private readonly CardBody diagBody;
-    private long diagVersion = -1;
+    private string diagKey = "";
     private readonly FrameworkElement chartEmpty;
     private readonly StackPanel recentList = new() { Spacing = Space.S1 };
     private string recentState = "";
@@ -212,9 +212,11 @@ public sealed class HomeScreen : Screen
     private void RenderDiagnosis()
     {
         var d = Context.Diagnosis.Snapshot;
-        if (d.Version == diagVersion) return;
-        diagVersion = d.Version;
         var now = Context.Now;
+        // 날짜도 열쇠에 넣는다: 진단이 그대로여도 자정을 넘기면 "오늘"이 "어제"로 바뀌어야 한다 (M6 G4 4라운드 이월 4)
+        string key = $"{d.Version}|{now.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture)}";
+        if (key == diagKey) return;
+        diagKey = key;
         (int Conclusion, DateTimeOffset At)? latest = d.Last is { } l ? (l.Result.Main.Number, l.Result.EndedAt) : d.Recent is { } r ? (r.Conclusion, r.StartedAt) : null;
         if (d.Operation != DiagnosisOperation.None)
         {
@@ -326,15 +328,16 @@ public sealed class HomeScreen : Screen
 
     private void RenderRecent()
     {
-        var items = Context.Recent.Items;
-        string state = !Context.Recent.Listed ? "loading" : items.Count == 0 ? "empty" : items.Any(i => i.Error is not null) ? "error" : items.Any(i => i.Analyzing) ? "loading" : "normal";
+        var entries = Context.Recent.Entries;   // 열쇠와 요약을 같은 순간에 읽는다
+        var items = entries.Select(e => e.Summary).ToArray();
+        string state = !Context.Recent.Listed ? "loading" : items.Length == 0 ? "empty" : items.Any(i => i.Error is not null) ? "error" : items.Any(i => i.Analyzing) ? "loading" : "normal";
         if (!Context.Recent.Listed)
         {
             recentBody.Set(GlassCard.Skeleton(Ui), "loading");
             recentState = state;
             return;
         }
-        if (items.Count == 0)
+        if (items.Length == 0)
         {
             recentBody.Set(ScreenParts.Message(Ui, "home.recent.empty", Icons.Info, Ui.Brushes.Muted, "아직 측정 기록이 없습니다", "측정을 마치면 여기에 결과가 쌓입니다."), "empty");
             recentState = state;
@@ -342,13 +345,13 @@ public sealed class HomeScreen : Screen
         }
         recentList.Children.Clear();
         var now = Context.Now;
-        for (int i = 0; i < items.Count; i++) recentList.Children.Add(Row(items[i], i, now));
+        for (int i = 0; i < items.Length; i++) recentList.Children.Add(Row(items[i], i, now, entries[i].Key));
         recentBody.Set(recentList, state);
         AutomationProperties.SetItemStatus(recentBody, state);
         recentState = state;
     }
 
-    private UIElement Row(RecentItem item, int index, DateTimeOffset now)
+    private UIElement Row(RecentItem item, int index, DateTimeOffset now, string key)
     {
         var grid = new Grid { ColumnSpacing = Space.S4 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -385,7 +388,7 @@ public sealed class HomeScreen : Screen
         grid.Children.Add(right);
         string name = $"{title}, 등급 {item.Badge?.Name ?? (item.Analyzing ? "분석 중" : "없음")}, 끊김 {item.Outages?.ToString() ?? "모름"}회" + (sub.Count > 0 ? ", " + string.Join(", ", sub) : "");
         var row = new RowButton(Ui, $"home.recent.{index}", name, grid);
-        row.Click += (_, _) => Context.Navigate("records", null);
+        row.Click += (_, _) => Context.OpenRecord(key);   // 그 기록 상세 (측정 중이면 기록 화면이 측정 화면으로 보낸다, M7 4.2)
         AutomationProperties.SetItemStatus(row, item.Analyzing ? "analyzing" : item.Error is not null ? "error" : "ready");
         return row;
     }

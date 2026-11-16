@@ -136,52 +136,104 @@ public static class RecordSchema
 
     public enum LineProblem { None, Malformed, WrongId, UnknownTarget, BadCombination, UnknownValue }
 
-    /// <summary>회차 한 줄을 검증하며 읽는다 (M3 설계 6.7). 문제가 있으면 null과 종류.</summary>
+    /// <summary>
+    /// 회차 한 줄을 검증하며 읽는다 (M3 설계 6.7). 문제가 있으면 null과 종류.
+    /// JsonDocument로 읽는다: JsonNode는 줄마다 사전과 노드를 만들어 12시간 기록(4만 줄)을 열 때 GC가 화면 프레임을 멈췄다
+    /// (M7 UI 시험 1차 bench). 판정은 JsonNode 때와 같고, 예외로 새던 두 경우(같은 이름 속성, wall 없음)는 깨진 줄로 센다.
+    /// </summary>
     public static (RoundData? Round, LineProblem Problem) ParseRound(string line, string id, IReadOnlySet<string> targetIds)
     {
-        JsonObject o;
-        try { o = JsonNode.Parse(line)?.AsObject() ?? throw new JsonException(); }
-        catch (Exception ex) when (ex is JsonException or InvalidOperationException) { return (null, LineProblem.Malformed); }
-        try
+        JsonDocument doc;
+        try { doc = JsonDocument.Parse(line); }
+        catch (JsonException) { return (null, LineProblem.Malformed); }
+        using (doc)
         {
-            if ((string?)o["id"] != id) return (null, LineProblem.WrongId);
-            long r = (long)o["r"]!, due = (long)o["due"]!, at = (long)o["at"]!;
-            var wall = DateTimeOffset.Parse((string)o["wall"]!, CultureInfo.InvariantCulture);
-            long skipped = o["skipped"] is JsonNode s ? (long)s : 0;
-            bool gap = o["gap"] is JsonNode g && (bool)g;
-            long? end = o["end"] is JsonNode en ? (long)en : null;
-            var results = new List<TargetResult>();
-            foreach (var n in o["results"]!.AsArray())
+            var o = doc.RootElement;
+            try
             {
-                var x = n!.AsObject();
-                string t = (string)x["t"]!;
-                if (!targetIds.Contains(t)) return (null, LineProblem.UnknownTarget);
-                ProbeOutcome outcome;
-                switch ((string)x["s"]!)
+                if (o.ValueKind != JsonValueKind.Object || HasDuplicateNames(o)) return (null, LineProblem.Malformed);
+                if (!Is(o, "id", id)) return (null, LineProblem.WrongId);
+                long r = Num(o, "r"), due = Num(o, "due"), at = Num(o, "at");
+                if (Str(o, "wall") is not { } wallText) return (null, LineProblem.Malformed);
+                var wall = DateTimeOffset.Parse(wallText, CultureInfo.InvariantCulture);
+                long skipped = Opt(o, "skipped") is { } s ? s.GetInt64() : 0;
+                bool gap = Opt(o, "gap") is { } g && g.GetBoolean();
+                long? end = Opt(o, "end") is { } en ? en.GetInt64() : null;
+                if (Opt(o, "results") is not { ValueKind: JsonValueKind.Array } list) return (null, LineProblem.Malformed);
+                // 결과는 정확한 크기의 배열, 대상 이름은 대상 목록의 같은 문자열을 쓴다 (4만 회차 × 대상마다 새 문자열·리스트가
+                // 오래 살아남아 1세대 수집이 길어졌다)
+                var results = new TargetResult[list.GetArrayLength()];
+                int count = 0;
+                foreach (var x in list.EnumerateArray())
                 {
-                    case "ok": outcome = ProbeOutcome.Success; break;
-                    case "lost": outcome = ProbeOutcome.Lost; break;
-                    case "error": outcome = ProbeOutcome.Error; break;
-                    default: return (null, LineProblem.UnknownValue);
+                    if (x.ValueKind != JsonValueKind.Object || HasDuplicateNames(x)) return (null, LineProblem.Malformed);
+                    string? t = Known(x, "t", targetIds);
+                    if (t is null) return (null, LineProblem.UnknownTarget);
+                    ProbeOutcome outcome;
+                    if (Is(x, "s", "ok")) outcome = ProbeOutcome.Success;
+                    else if (Is(x, "s", "lost")) outcome = ProbeOutcome.Lost;
+                    else if (Is(x, "s", "error")) outcome = ProbeOutcome.Error;
+                    else return (null, LineProblem.UnknownValue);
+                    double? ms = Opt(x, "ms") is { } m ? m.GetDouble() : null;
+                    string? e = Str(x, "e");
+                    bool consistent = outcome switch
+                    {
+                        ProbeOutcome.Success => ms is >= 0,
+                        ProbeOutcome.Lost => ms is null,
+                        _ => ms is null && !string.IsNullOrEmpty(e),
+                    };
+                    if (!consistent) return (null, LineProblem.BadCombination);
+                    results[count++] = new TargetResult(t, outcome, ms, e);
                 }
-                double? ms = x["ms"] is JsonNode m ? (double)m : null;
-                string? e = (string?)x["e"];
-                bool consistent = outcome switch
-                {
-                    ProbeOutcome.Success => ms is >= 0,
-                    ProbeOutcome.Lost => ms is null,
-                    _ => ms is null && !string.IsNullOrEmpty(e),
-                };
-                if (!consistent) return (null, LineProblem.BadCombination);
-                results.Add(new TargetResult(t, outcome, ms, e));
+                if (r < 0 || skipped < 0 || results.GroupBy(x => x.TargetId).Any(gr => gr.Count() > 1)) return (null, LineProblem.BadCombination);
+                if (end is long e2 && e2 < at) return (null, LineProblem.BadCombination);   // 끝이 시작보다 이름
+                return (new RoundData(r, due, at, wall, skipped, gap, results, end), LineProblem.None);
             }
-            if (r < 0 || skipped < 0 || results.GroupBy(x => x.TargetId).Any(gr => gr.Count() > 1)) return (null, LineProblem.BadCombination);
-            if (end is long e2 && e2 < at) return (null, LineProblem.BadCombination);   // 끝이 시작보다 이름
-            return (new RoundData(r, due, at, wall, skipped, gap, results, end), LineProblem.None);
+            catch (Exception ex) when (ex is InvalidOperationException or FormatException or JsonException or KeyNotFoundException)
+            {
+                return (null, LineProblem.Malformed);
+            }
         }
-        catch (Exception ex) when (ex is NullReferenceException or InvalidOperationException or FormatException or JsonException or KeyNotFoundException)
+    }
+
+    /// <summary>값이 있고 null이 아니면 그 값 (JsonNode에서 null 값과 없는 속성이 같았던 것과 맞춘다).</summary>
+    private static JsonElement? Opt(JsonElement o, string name) =>
+        o.TryGetProperty(name, out var v) && v.ValueKind != JsonValueKind.Null ? v : null;
+
+    /// <summary>글 값이 <paramref name="expected"/>와 같은가 (새 문자열을 만들지 않는다). 글이 아니면 InvalidOperationException → 깨진 줄.</summary>
+    private static bool Is(JsonElement o, string name, string expected) =>
+        Opt(o, name) is { } v && (v.ValueKind == JsonValueKind.String ? v.ValueEquals(expected) : throw new InvalidOperationException(name));
+
+    /// <summary>대상 목록에 있는 이름이면 그 목록의 문자열, 없으면(또는 값 없음) null. 글이 아니면 InvalidOperationException.</summary>
+    private static string? Known(JsonElement o, string name, IReadOnlySet<string> names)
+    {
+        if (Opt(o, name) is not { } v) return null;
+        if (v.ValueKind != JsonValueKind.String) throw new InvalidOperationException(name);
+        foreach (var n in names) if (v.ValueEquals(n)) return n;
+        return null;
+    }
+
+    /// <summary>글 값 (없거나 null이면 null, 글이 아니면 InvalidOperationException → 깨진 줄).</summary>
+    private static string? Str(JsonElement o, string name) => Opt(o, name)?.GetString();
+
+    /// <summary>꼭 있어야 하는 정수 (없거나 null이면 깨진 줄).</summary>
+    private static long Num(JsonElement o, string name) =>
+        Opt(o, name) is { } v ? v.GetInt64() : throw new InvalidOperationException(name);
+
+    private static bool HasDuplicateNames(JsonElement o)
+    {
+        // 속성이 몇 개뿐이라 단순 비교로 충분하다
+        int count = 0;
+        foreach (var _ in o.EnumerateObject()) count++;
+        if (count < 2) return false;
+        var names = new string[count];
+        int i = 0;
+        foreach (var p in o.EnumerateObject())
         {
-            return (null, LineProblem.Malformed);
+            string n = p.Name;
+            for (int k = 0; k < i; k++) if (names[k] == n) return true;
+            names[i++] = n;
         }
+        return false;
     }
 }

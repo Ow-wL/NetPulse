@@ -31,6 +31,7 @@ public sealed partial class AppShell : Window
     private readonly MeasurementHost host;
     private readonly DiagnosisHost diagnosis;
     private readonly RecentRecords recent;
+    private readonly RecordMemos memos;
     private readonly Func<Task> beforeClose;
     private readonly GroupPanel root;
     private readonly Grid appGrid = new() { ColumnSpacing = Space.S5 };
@@ -50,7 +51,7 @@ public sealed partial class AppShell : Window
     private bool lastStorageFailing;
     private UIElement liveContent = null!;
 
-    public AppShell(StartupOptions options, AppLog log, AppSettings settings, MeasurementHost host, RecentRecords recent, DiagnosisHost diagnosis, Func<Task> beforeClose)
+    public AppShell(StartupOptions options, AppLog log, AppSettings settings, MeasurementHost host, RecentRecords recent, RecordMemos memos, DiagnosisHost diagnosis, Func<Task> beforeClose)
     {
         this.options = options;
         this.log = log;
@@ -58,6 +59,7 @@ public sealed partial class AppShell : Window
         this.diagnosis = diagnosis;
         this.recent = recent;
         this.beforeClose = beforeClose;
+        this.memos = memos;
         Title = "NetPulse";
         AppWindow.ResizeClient(new SizeInt32(Size.WindowWidth, Size.WindowHeight));
         ui = new Ui(this, options, log, settings);
@@ -100,6 +102,7 @@ public sealed partial class AppShell : Window
         {
             Ui = ui, Host = host, Recent = recent, Toasts = toasts, Dialog = dialog, Options = options, Log = log,
             Diagnosis = diagnosis, Navigate = Navigate, QueueDiag = QueueDiag, SetRevealOrigin = SetRevealOrigin, IsClosing = () => closing,
+            Memos = memos, OpenRecord = OpenRecord, WindowHandle = () => WinRT.Interop.WindowNative.GetWindowHandle(this),
         };
         screens.Register("home", () => new HomeScreen(context));
         screens.Register("measure", () => new MeasureScreen(context));
@@ -107,7 +110,7 @@ public sealed partial class AppShell : Window
         screens.Register("profile", () => new ProfileEditor(context));
         screens.Register("settings", () => new SettingsScreen(context));
         screens.Register("diagnose", () => new DiagnoseScreen(context));
-        screens.Register("records", () => new PendingScreen(context, "records", "기록", "측정 목록, 끊김 목록과 통계, 분석, 비교를 이 화면에서 보게 됩니다."));
+        screens.Register("records", () => new RecordsScreen(context));
         screens.Register("report", () => new PendingScreen(context, "report", "리포트", "통신사에 전달할 리포트를 이 화면에서 만들게 됩니다."));
 
         BuildLayout();
@@ -141,11 +144,17 @@ public sealed partial class AppShell : Window
             _ = recent.RefreshAsync(host.RunningId);
             _ = Task.Run(diagnosis.LoadRecent);
             StartScreen();
-            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => { if (!closing) foreach (var id in new[] { "home", "measure", "diagnose" }) screens.Prepare(id); });   // 진단도 미리 (M6 bench diag-enter 40 ms대)
+            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => { if (!closing) foreach (var id in new[] { "home", "measure", "diagnose", "records" }) screens.Prepare(id); });   // 진단도 미리 (M6 bench diag-enter 40 ms대), 기록도 (M7 bench records-enter 50 ms대)
+            // 기록 화면이 처음 쓰는 메서드는 백그라운드에서 미리 컴파일 (첫 상세 열기의 컴파일 시간, M7 bench records-open)
+            _ = Design.JitWarmup.Start(typeof(RecordsScreen), typeof(Design.Controls.TimelinePanel), typeof(Design.Controls.TrendChart),
+                typeof(Core.Presentation.RecordView), typeof(Core.Presentation.TimelineModel), typeof(Core.Analysis.EpisodeDetail),
+                typeof(Core.Records.SymptomMarks), typeof(Core.Analysis.MeasurementComparison));
             RenderStatus(host.Snapshot);
             QueueDiag();
             if (options.SelfTest is not null) selfTestTimer.Start();
             if (options.Bench) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, RunBench);
+            if (options.BenchRecords) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, RunRecordsBench);
+            if (options.OpenRecord is { } folder) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => OpenExternal(folder));
         };
         if (options.RunSeconds > 0)
         {
@@ -157,6 +166,21 @@ public sealed partial class AppShell : Window
     }
 
     public Ui Ui => ui;
+
+    /// <summary>기록 화면으로 가서 그 항목 상세를 연다 (null이면 목록, M7 4.2).</summary>
+    private void OpenRecord(string? key)
+    {
+        Navigate("records", null);
+        if (screens.Get("records") is RecordsScreen r) r.Show(key);
+    }
+
+    /// <summary>다른 위치의 기록 열기 (시작 인수, M7 3.7). 경로는 앱 기록에 남기지 않는다.</summary>
+    private void OpenExternal(string folder)
+    {
+        if (closing) return;
+        Navigate("records", null);
+        if (screens.Get("records") is RecordsScreen r) r.OpenExternal(folder);
+    }
 
     private void BuildLayout()
     {
@@ -306,7 +330,14 @@ public sealed partial class AppShell : Window
 
     private void OnFinished(FinishedMeasurement f)
     {
-        _ = recent.RefreshAsync(host.RunningId);
+        string? running = host.RunningId;
+        _ = Task.Run(async () =>
+        {
+            // 목록을 다시 읽고, 방금 끝난 기록은 호스트가 가진 원본·분석을 그대로 넘긴다 (다시 읽지 않음, M7 구현 중 결정 3)
+            await recent.Library.RefreshAsync(running).ConfigureAwait(false);
+            if (f.Record is { } record && f.Analysis is { } analysis) recent.Library.Share(f.Result.Id, record, analysis);
+            await recent.RefreshAsync(running).ConfigureAwait(false);
+        });
         string reason = f.Result.EndReason switch { EndReason.Completed => "계획한 시간을 마쳤습니다.", EndReason.Stopped => "측정을 멈추고 저장했습니다.", _ => "측정이 끝났습니다." };
         if (f.Result.Unsaved > 0 || f.Result.SealFailed)
             toasts.Show(ToastKind.Warning, "측정이 끝났습니다 · 일부 저장 안 됨", $"저장하지 못한 회차 {f.Result.Unsaved}개", autoClose: false);
@@ -329,9 +360,13 @@ public sealed partial class AppShell : Window
         try
         {
             await diagnosisStop;   // 진단을 먼저 멈춘다: 억제 → 취소 → 최대 3초 (M6 설계 3.4)
-            var shutdown = host.ShutdownAsync();
+            // 기록 화면의 메모 저장은 쓰기 큐에 들어가기 전(저장 시작 알림·앞 요청 대기)일 수 있어 호스트 종료와 함께 따로 기다린다
+            // (호스트는 쓰기 큐만 기다린다, G4 M7 3라운드 1). 둘은 세대로 서로의 옛 글을 건너뛰므로 동시에 해도 된다
+            var memoWrites = memos.DrainAsync(Waits.CloseWrites);
+            var shutdown = Task.WhenAll(host.ShutdownAsync(), memoWrites);
             if (await Task.WhenAny(shutdown, Task.Delay(Waits.CloseWrites + Waits.CloseWrites + Waits.CloseWrites)) != shutdown)
                 log.Write("closeTimeout", new { state = host.Snapshot.State.ToString() });
+            if (memoWrites.IsCompleted && !memoWrites.Result) log.Write("memoCloseTimeout", new { });
             var left = host.UnsavedDrafts();
             if (left.Count > 0) log.Write("memoUnsaved", new { marks = left });   // 메모 글은 남기지 않는다
             await beforeClose();

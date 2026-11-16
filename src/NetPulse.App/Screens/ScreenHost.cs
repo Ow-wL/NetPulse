@@ -15,6 +15,14 @@ public sealed class ScreenContext
     /// <summary>진단 수명 (M6).</summary>
     public required DiagnosisHost Diagnosis { get; init; }
     public required RecentRecords Recent { get; init; }
+    /// <summary>기록 목록과 분석 (M7). <see cref="RecentRecords"/>와 같은 캐시.</summary>
+    public RecordLibrary Records => Recent.Library;
+    /// <summary>끝난 측정의 메모 고치기 (M7, 측정 화면과 같은 쓰기 작업).</summary>
+    public required RecordMemos Memos { get; init; }
+    /// <summary>기록 화면으로 가서 그 항목 상세를 연다 (null이면 목록).</summary>
+    public required Action<string?> OpenRecord { get; init; }
+    /// <summary>창 핸들 (폴더 선택 대화상자 연결용).</summary>
+    public required Func<nint> WindowHandle { get; init; }
     public required ToastHost Toasts { get; init; }
     public required DialogHost Dialog { get; init; }
     public required StartupOptions Options { get; init; }

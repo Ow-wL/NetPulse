@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 using NetPulse.Core.Demo;
 using NetPulse.Core.Live;
@@ -109,7 +109,9 @@ internal static class M5Fixtures
                 SaveProfile(userData, "steady", TimeSpan.FromMinutes(60));
                 File.WriteAllText(Path.Combine(userData, "diagnoses"), "막음");   // 진단 기록 폴더 자리에 파일 → 저장 실패
                 break;
-            default: throw new ArgumentException("알 수 없는 준비: " + prep);
+            default:
+                if (!M7Fixtures.Prepare(userData, prep)) throw new ArgumentException("알 수 없는 준비: " + prep);
+                break;
         }
     }
 

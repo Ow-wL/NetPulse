@@ -93,16 +93,25 @@ public static class RecordReader
         {
             foreach (var file in PartFiles(folder, "rounds"))
             {
-                string text;
-                try { text = ReadShared(file); }
+                // 줄 단위로 읽는다: 12시간 기록(수 MB)을 한 문자열로 읽고 나누면 큰 객체 힙 할당이 2세대 수집을 일으켜
+                // 화면 프레임이 예산을 넘었다 (M7 UI 시험 1차 bench). 여는 데 실패하면 그 파일은 통째로 못 읽음.
+                StreamReader reader;
+                try { reader = OpenShared(file); }
                 catch (Exception ex) when (IsAccessFailure(ex)) { unreadable++; continue; }
-                var lines = text.Split('\n');
-                bool endsClean = text.Length == 0 || text.EndsWith('\n');
-                for (int i = 0; i < lines.Length; i++)
+                using var fileReader = reader;
+                using var lines = Lines(reader).GetEnumerator();
+                while (true)
                 {
-                    var line = lines[i].TrimEnd('\r');
+                    string raw;
+                    bool isTail;
+                    try
+                    {
+                        if (!lines.MoveNext()) break;
+                        (raw, isTail) = lines.Current;
+                    }
+                    catch (Exception ex) when (IsAccessFailure(ex)) { unreadable++; break; }   // 읽는 도중 실패: 앞부분만 쓴다
+                    var line = raw.TrimEnd('\r');
                     if (line.Length == 0) continue;
-                    bool isTail = i == lines.Length - 1 && !endsClean;
                     var (r, problem) = RecordSchema.ParseRound(line, header.Id, targetIds);
                     if (r is null)
                     {
@@ -227,9 +236,33 @@ public static class RecordReader
     /// <summary>쓰는 중인 파일도 읽는다 (측정 중 보기, 마감 실패로 처리 작업이 아직 쥔 파일).</summary>
     internal static string ReadShared(string path)
     {
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
+        using var reader = OpenShared(path);
         return reader.ReadToEnd();
+    }
+
+    private static StreamReader OpenShared(string path) =>
+        new(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete), System.Text.Encoding.UTF8);
+
+    /// <summary>'\n'으로만 나눈 줄 (Split('\n')과 같은 결과). 마지막 줄이 줄바꿈 없이 끝났으면 Tail (쓰다 끊긴 줄).</summary>
+    internal static IEnumerable<(string Line, bool Tail)> Lines(TextReader reader)
+    {
+        var line = new System.Text.StringBuilder();
+        var buffer = new char[16 * 1024];
+        int n;
+        while ((n = reader.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            int start = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (buffer[i] != '\n') continue;
+                line.Append(buffer, start, i - start);
+                yield return (line.ToString(), false);
+                line.Clear();
+                start = i + 1;
+            }
+            line.Append(buffer, start, n - start);
+        }
+        if (line.Length > 0) yield return (line.ToString(), true);
     }
 
     /// <summary>조각 파일: base.jsonl, base-2.jsonl, … (되돌리기 실패 뒤 이어 쓴 파일, M3 설계 6.5).</summary>

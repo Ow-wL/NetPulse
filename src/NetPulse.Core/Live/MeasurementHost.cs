@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text.Json.Nodes;
 using NetPulse.Core.Analysis;
 using NetPulse.Core.Detection;
@@ -67,6 +67,11 @@ public sealed class MeasurementHost : IAsyncDisposable
     private readonly NotesWriter notes = new();
     /// <summary>메모 초안. 자기 잠금으로 지킨다 (화면이 그릴 때마다 읽으므로 장면 게시 잠금을 기다리지 않게). 잠금 순서: gate → drafts.</summary>
     private readonly Dictionary<(string Session, string Mark), string> drafts = [];
+    /// <summary>
+    /// (측정, 표시)별 메모 세대 (drafts 잠금). 기록 화면이 그 표시를 저장하기 시작하면 올라간다: 그 전에 잡은 초안 쓰기는
+    /// 직렬 작업에서 실행될 때 건너뛴다 (G4 M7 1라운드 a1).
+    /// </summary>
+    private readonly Dictionary<(string Session, string Mark), long> memoEpochs = [];
     private HostState state;
     private ProfileSet? profiles;
     private MeasurementSession? session;
@@ -272,17 +277,62 @@ public sealed class MeasurementHost : IAsyncDisposable
 
     public string? Draft(string sessionId, string mark) { lock (drafts) return drafts.GetValueOrDefault((sessionId, mark)); }
 
+    /// <summary>노트 쓰기 직렬 작업 (기록 화면의 메모 고치기도 같은 인스턴스를 쓴다, M7 구현 중 결정 4).</summary>
+    public NotesWriter Notes => notes;
+
+    /// <summary>
+    /// 기록 화면이 그 표시의 메모를 쓰기 시작한다 (쓰기를 넣기 직전, UI 밖): 이 호스트가 아는 그 측정의 노트 폴더와 같을 때만
+    /// 측정 화면에 남은 옛 초안을 버리고 세대를 올린다. 이미 넣은 옛 초안 쓰기도 실행 때 건너뛴다 (M7 구현 중 결정 4, G4 M7 1라운드 a1·a2).
+    /// </summary>
+    public void MemoSavingElsewhere(string folder, string sessionId, string mark)
+    {
+        if (!SameFolder(NotesFolder(sessionId), folder)) return;   // 같은 ID의 다른 위치 복사본
+        lock (drafts)
+        {
+            drafts.Remove((sessionId, mark));
+            memoEpochs[(sessionId, mark)] = memoEpochs.GetValueOrDefault((sessionId, mark)) + 1;
+        }
+        Publish();
+    }
+
+    /// <summary>기록 화면에서 그 표시의 메모를 저장했다: 방금 끝난 측정(같은 폴더)이면 결과 카드의 메모를 다시 읽는다.</summary>
+    public void MemoSavedElsewhere(string folder, string sessionId, string mark)
+    {
+        if (!SameFolder(NotesFolder(sessionId), folder)) return;
+        RefreshFinishedMarks(sessionId);
+        Publish();
+    }
+
+    private static bool SameFolder(string? a, string? b)
+    {
+        if (a is null || b is null) return false;
+        static string N(string p) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(p));
+        try { return string.Equals(N(a), N(b), StringComparison.OrdinalIgnoreCase); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
+    }
+
+    private long MemoEpoch(string sessionId, string mark) { lock (drafts) return memoEpochs.GetValueOrDefault((sessionId, mark)); }
+
     /// <summary>
     /// 메모 저장 (설계 4.5 [2-5]): 측정 중이면 세션 입력 통로, 끝났으면 노트. 결과가 저장이면 초안을 지운다.
     /// 같은 함수를 반복 표시·저장 버튼·중지·창 닫기가 모두 쓴다.
     /// </summary>
-    public async Task<EventWriteState> SaveMemoAsync(string sessionId, string mark, string? memo)
+    public Task<EventWriteState> SaveMemoAsync(string sessionId, string mark, string? memo) => SaveMemoAsync(sessionId, mark, memo, null);
+
+    /// <param name="epoch">초안을 잡을 때의 세대 (없으면 지금). 그 사이 기록 화면이 저장을 시작했으면 쓰지 않는다 (더 새 글이 있다)</param>
+    private async Task<EventWriteState> SaveMemoAsync(string sessionId, string mark, string? memo, long? epoch)
     {
         MeasurementSession? s;
         long atMs;
+        long mine;
         lock (gate)
         {
-            lock (drafts) drafts[(sessionId, mark)] = memo ?? "";
+            lock (drafts)
+            {
+                mine = epoch ?? memoEpochs.GetValueOrDefault((sessionId, mark));
+                if (mine != memoEpochs.GetValueOrDefault((sessionId, mark))) return EventWriteState.Saved;   // 이미 더 새 글: 할 일 없음
+                drafts[(sessionId, mark)] = memo ?? "";
+            }
             s = session is not null && session.Id == sessionId ? session : null;
             atMs = (snapshot.Marks.FirstOrDefault(m => m.Mark == mark) ?? finished?.Marks.FirstOrDefault(m => m.Mark == mark))?.AtMs ?? 0;
         }
@@ -293,7 +343,7 @@ public sealed class MeasurementHost : IAsyncDisposable
         {
             var folder = NotesFolder(sessionId);
             result = folder is null ? EventWriteState.Lost
-                : await notes.WriteAsync(folder, sessionId, mark, atMs, world.Now, memo).ConfigureAwait(false);
+                : await notes.WriteAsync(folder, sessionId, mark, atMs, world.Now, memo, () => MemoEpoch(sessionId, mark) == mine).ConfigureAwait(false);
         }
         // 저장한 그 글일 때만 초안을 지운다: 기다리는 동안 새로 쓴 글은 남긴다 (G4 M5 1라운드 A5)
         if (result == EventWriteState.Saved)
@@ -307,11 +357,12 @@ public sealed class MeasurementHost : IAsyncDisposable
     /// <summary>모든 메모 초안을 넣는다 (중지·창 닫기).</summary>
     public async Task FlushDraftsAsync(TimeSpan? limit = null)
     {
-        (string Session, string Mark, string Text)[] list;
-        lock (drafts) list = drafts.Select(d => (d.Key.Session, d.Key.Mark, d.Value)).ToArray();
+        (string Session, string Mark, string Text, long Epoch)[] list;
+        // 초안과 세대를 같은 잠금에서 잡는다: 그 뒤 기록 화면이 저장을 시작하면 이 쓰기는 건너뛴다 (G4 M7 1라운드 a1)
+        lock (drafts) list = drafts.Select(d => (d.Key.Session, d.Key.Mark, d.Value, memoEpochs.GetValueOrDefault(d.Key))).ToArray();
         // 모두 한 번에 넣고(측정 중이면 세션 통로, 끝났으면 노트 직렬 작업) 기한까지만 기다린다:
         // 저장이 막혀도 중지·종료는 진행하고, 못 끝낸 초안은 남는다 (G4 M5 1라운드 A6)
-        var all = Task.WhenAll(list.Select(d => SaveMemoAsync(d.Session, d.Mark, d.Text)));
+        var all = Task.WhenAll(list.Select(d => SaveMemoAsync(d.Session, d.Mark, d.Text, d.Epoch)));
         if (limit is { } l) await Task.WhenAny(all, Task.Delay(l)).ConfigureAwait(false);
         else await all.ConfigureAwait(false);
     }
@@ -548,7 +599,8 @@ public sealed class NotesWriter
     /// <summary>재시도 간격 (시험이 줄인다).</summary>
     public TimeSpan[] RetryDelays { get; init; } = [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3)];
 
-    public Task<EventWriteState> WriteAsync(string folder, string measurementId, string mark, long markAtMs, DateTimeOffset editedWall, string? memo)
+    /// <param name="stillWanted">직렬 작업에서 실행될 때 다시 묻는다: 거짓이면 쓰지 않고 저장으로 끝낸다 (더 새 글이 앞이나 뒤에 들어감, G4 M7 1라운드 a1)</param>
+    public Task<EventWriteState> WriteAsync(string folder, string measurementId, string mark, long markAtMs, DateTimeOffset editedWall, string? memo, Func<bool>? stillWanted = null)
     {
         var done = new TaskCompletionSource<EventWriteState>(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (gate)
@@ -557,6 +609,7 @@ public sealed class NotesWriter
             {
                 for (int attempt = 0; ; attempt++)
                 {
+                    if (stillWanted?.Invoke() == false) { done.TrySetResult(EventWriteState.Saved); return; }
                     try
                     {
                         RecordNotes.AppendMemo(folder, measurementId, mark, markAtMs, editedWall, memo);

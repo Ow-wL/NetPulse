@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using NetPulse.Core.Targets;
 
 namespace NetPulse.Core.Records;
@@ -60,6 +60,12 @@ public static class RecordCatalog
 
     /// <summary><c>yyyyMMddTHHmmssZ_xxxxxx</c> (RecordLocation.NewId) 또는 시험이 쓰는 같은 꼴.</summary>
     private static bool LooksLikeId(string id) => id.Length >= 16 && id.Length <= 64 && id.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-');
+
+    /// <summary>조각 폴더들로 항목 하나 (다른 위치에서 연 기록도 같은 규칙, M7 설계 3.7).</summary>
+    public static RecordEntry EntryFor(string id, IReadOnlyList<string> folders, string? runningId) => Entry(id, folders.ToList(), runningId);
+
+    /// <summary>폴더 이름이 측정 ID 꼴인지 (<c>id</c> 또는 <c>id~n</c>의 앞부분).</summary>
+    public static bool IsIdLike(string id) => LooksLikeId(id);
 
     private static RecordEntry Entry(string id, List<string> folders, string? runningId)
     {

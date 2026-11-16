@@ -1,0 +1,33 @@
+# M7 캡처 장면 목록 (설계 4.3 상태표의 장면 열, 7.4). 시험(M7MatrixTests)과 build/ui-test.ps1이 같은 파일을 읽는다. 형식은 m5-scenes.txt와 같다.
+# 준비: M7Fixtures (rec-*). 인수의 {userData}는 그 실행의 사용자 폴더.
+# 기다림 추가: recordsListed, recordsAnalyzed, detailReady, detailLoading, compareReady, diagnosesReady, memoState=글 앞부분
+# 빠진 장면: records-compare-failed (구현 중 결정 7) — 고르기 규칙상 읽지 못한 기록은 고를 수 없어 정해진 장면으로 만들 수 없다. DECISIONS "M7 구현 B단계"
+records-empty|profile|--demo steady --screen records|wait:screen=records;wait:recordsListed
+records-list-loading|rec-ok|--demo steady --screen records --hold-list|wait:screen=records
+records-list-analyzing|rec-mix|--demo steady --screen records --hold-analysis|wait:screen=records;wait:recordsListed
+records-list|rec-many|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed
+records-list-running|rec-ok|--demo steady --demo-speed 20 --start|wait:host=Measuring;select:nav.records;wait:screen=records;wait:recordsAnalyzed
+records-list-problems|rec-mix|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed
+records-detail-analyzing|rec-ok|--demo steady --screen records --hold-analysis|wait:screen=records;wait:recordsListed;invoke:records.row.0;wait:detailLoading
+records-detail-ok|rec-ok|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady
+records-detail-outages|rec-mixed|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady
+records-detail-episode|rec-mixed|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady;invoke:records.episode.0;wait:exists=records.episode.0.detail
+records-detail-trend-sparse|rec-sparse|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady;scroll:records.scroll=30
+records-detail-damaged|rec-damaged|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady
+records-detail-evidence-damaged|rec-evidence|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady
+records-detail-nosummary|rec-nosummary|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady
+records-detail-unreadable|rec-unreadable|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:exists=records.detail.error
+records-detail-memo-edit|rec-memo|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady;invoke:records.mark.0.edit;wait:exists=records.mark.0.text;wait:focused=records.mark.0.text
+records-detail-memo-saving|rec-memo-blocked|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady;invoke:records.mark.0.edit;text:records.mark.0.text=고친 메모;invoke:records.mark.0.save;wait:memoState=저장하는 중
+records-detail-memo-error|rec-memo-blocked|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady;invoke:records.mark.0.edit;text:records.mark.0.text=고친 메모;invoke:records.mark.0.save;wait:memoState=저장하지 못했습니다;wait:focused=records.mark.0.save
+records-detail-diagnoses|rec-diag|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady;scroll:records.scroll=100
+records-compare-pick|rec-compare|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.compare;invoke:records.row.0
+records-compare-analyzing|rec-compare|--demo steady --screen records --hold-analysis|wait:screen=records;wait:recordsListed;invoke:records.compare;invoke:records.row.0;invoke:records.row.1;wait:exists=records.compare.loading
+records-compare|rec-compare|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.compare;invoke:records.row.0;invoke:records.row.1;wait:compareReady
+records-compare-mismatch|rec-compare-mismatch|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.compare;invoke:records.row.0;invoke:records.row.1;wait:compareReady
+records-diagnoses-empty|rec-diag-empty|--demo steady --screen records|wait:screen=records;select:records.tabs.diagnoses;wait:diagnosesReady
+records-diagnoses|rec-diag|--demo steady --screen records|wait:screen=records;select:records.tabs.diagnoses;wait:diagnosesReady
+records-diagnosis-open|rec-diag|--demo steady --screen records|wait:screen=records;select:records.tabs.diagnoses;wait:diagnosesReady;invoke:records.diagnosis.0;wait:exists=records.diagnosis.head
+records-diagnosis-mismatch|rec-diag-mismatch|--demo steady --screen records|wait:screen=records;select:records.tabs.diagnoses;wait:diagnosesReady;invoke:records.diagnosis.0;wait:exists=records.diagnosis.mismatch
+records-external|rec-external|--demo steady --screen records --open-record {userData}\usb\picked|wait:screen=records;wait:detailReady
+measure-finished-link|profile-short|--demo steady --demo-speed 600 --start|wait:finished;wait:exists=measure.result.records

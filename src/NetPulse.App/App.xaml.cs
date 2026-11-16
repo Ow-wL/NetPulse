@@ -79,7 +79,11 @@ public partial class App : Application
         }
         else world = new LiveAppWorld(options.UserData);
         host = new MeasurementHost(world, options.UserData, new HostOptions { AppVersion = version, HoldStart = options.HoldStart });
-        var recent = new RecentRecords(() => world.RecordPaths, holdAnalysis: options.HoldAnalysis);
+        var recent = new RecentRecords(new RecordLibrary(() => world.RecordPaths, options.HoldAnalysis, options.HoldList));
+        var memos = new RecordMemos(host.Notes, () => world.Now);
+        memos.Saving += host.MemoSavingElsewhere;   // 측정 화면에 남은 옛 초안을 버리고 넣은 옛 쓰기도 건너뛴다 (M7 구현 중 결정 4, G4 M7 1라운드 a1)
+        memos.Saved += host.MemoSavedElsewhere;
+        memos.SavingFailed += ex => log?.Write("memoSavingFailed", new { type = ex.GetType().Name });   // 예외 종류만 (글·경로 없음, G4 M7 4라운드 3)
         var resources = new
         {
             fonts = File.Exists(Path.Combine(AppContext.BaseDirectory, "Fonts", "Pretendard-Bold.otf")),
@@ -88,11 +92,12 @@ public partial class App : Application
         log.Write("startup", new
         {
             mode = world.Kind, speed = options.DemoSpeed, version, resources, profiles = host.LoadStatus.ToString(),
-            replay = new { options.Screen, options.Start, options.DemoHold, speedAfter = options.DemoSpeedAfter?.ToString(), options.HoldAnalysis, options.HoldStart },
+            replay = new { options.Screen, options.Start, options.DemoHold, speedAfter = options.DemoSpeedAfter?.ToString(), options.HoldAnalysis, options.HoldStart,
+                options.HoldList, openRecord = options.OpenRecord is null ? null : "external" },   // 경로는 남기지 않는다
         });
         var mh = host;
         var diagnosis = new DiagnosisHost(world.Diagnostics, new DiagnosisStore(Path.Combine(options.UserData, "diagnoses")), () => mh.RunningId, () => world.Now, version);
-        window = new AppShell(options, log, settings, host, recent, diagnosis, ShutdownAsync);
+        window = new AppShell(options, log, settings, host, recent, memos, diagnosis, ShutdownAsync);
         window.Activate();
     }
 
