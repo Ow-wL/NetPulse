@@ -27,7 +27,7 @@ public sealed record TimelineFigure(
     IReadOnlyList<FigureBand> Bands, IReadOnlyList<FigureMark> Marks, IReadOnlyList<FigureTick> TimeTicks, IReadOnlyList<double> ValueTicks,
     string Title, string Description)
 {
-    public const int Width = 960, Height = 300, Columns = 900, PlotLeft = 48, PlotTop = 12, PlotHeight = 200;
+    public const int Width = 960, Height = 324, Columns = 900, PlotLeft = 48, PlotTop = 12, PlotHeight = 200;
     public const int TickTextY = PlotTop + PlotHeight + 18, LegendY = PlotTop + PlotHeight + 52;
 
     public static readonly string[] LegendLabels =
@@ -39,6 +39,12 @@ public sealed record TimelineFigure(
     public static double X(int column) => PlotLeft + column + 0.5;
 
     public static double Left(int column) => PlotLeft + column;
+
+    /// <summary>범례 한 줄에 셋 (글이 겹치지 않게).</summary>
+    public const int LegendPerRow = 3, LegendStep = 300, LegendRowHeight = 22;
+
+    /// <summary>오른쪽 끝 가까운 시각 눈금은 글 끝을 눈금에 맞춘다 (그림 밖으로 잘리지 않게).</summary>
+    public static bool AtRightEdge(FigureTick t) => t.Column >= Columns - 40;
 
     public double Y(double ms) => PlotTop + PlotHeight * (1 - Math.Clamp(ms / AxisMaxMs, 0, 1));
 
@@ -215,14 +221,14 @@ public static class TimelineSvg
                 .Append("\" text-anchor=\"end\" fill=\"").Append(p.Muted).Append("\">").Append(Markup.Text(TimelineFigure.ValueLabel(v))).Append("</text>");
         foreach (var t in f.TimeTicks)
             sb.Append("<text class=\"tick\" x=\"").Append(N(TimelineFigure.X(t.Column))).Append("\" y=\"").Append(TimelineFigure.TickTextY)
-                .Append("\" text-anchor=\"middle\" fill=\"").Append(p.Muted).Append("\">").Append(Markup.Text(t.Label)).Append("</text>");
+                .Append("\" text-anchor=\"").Append(TimelineFigure.AtRightEdge(t) ? "end" : "middle").Append("\" fill=\"").Append(p.Muted).Append("\">").Append(Markup.Text(t.Label)).Append("</text>");
 
         // 범례: 견본 + 글
         string[] swatches = [p.Accent, p.Muted, $"url(#{PatternNone})", $"url(#{PatternPartial})", p.Link, $"url(#{PatternGap})", p.Mark];
         for (int i = 0; i < TimelineFigure.LegendLabels.Length; i++)
         {
-            int col = i % 4, row = i / 4;
-            double x = TimelineFigure.PlotLeft + col * 228, y = TimelineFigure.LegendY + row * 22;
+            int col = i % TimelineFigure.LegendPerRow, row = i / TimelineFigure.LegendPerRow;
+            double x = TimelineFigure.PlotLeft + col * TimelineFigure.LegendStep, y = TimelineFigure.LegendY + row * TimelineFigure.LegendRowHeight;
             sb.Append("<rect class=\"swatch\" x=\"").Append(N(x)).Append("\" y=\"").Append(N(y - 10)).Append("\" width=\"14\" height=\"12\" fill=\"")
                 .Append(swatches[i]).Append("\" stroke=\"").Append(p.Edge).Append("\" />");
             sb.Append("<text class=\"legend\" x=\"").Append(N(x + 20)).Append("\" y=\"").Append(N(y)).Append("\" fill=\"").Append(p.Ink).Append("\">")

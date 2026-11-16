@@ -83,9 +83,12 @@ public sealed class ReportScreen : Screen
         detailsChoice = new SegmentedChoice(Ui, "report.details", "끊김 상세", [("0", "없음"), ("3", "3개"), ("5", "5개"), ("10", "10개")], "5");
         detailsChoice.Changed += v => SetOptions(options with { EpisodeDetails = int.Parse(v, System.Globalization.CultureInfo.InvariantCulture) });
         memosToggle = new SettingToggle(Ui, "report.memos", "증상 메모 넣기 (주소·전화번호 같은 꼴만 가립니다)", false);
-        memosToggle.Click += (_, _) => SetOptions(options with { IncludeMemos = memosToggle.IsChecked == true });
+        // UI 자동화의 바꾸기(Toggle)는 Click을 내지 않는다: 상태 변화로 받는다
+        memosToggle.Checked += (_, _) => SetOptions(options with { IncludeMemos = true });
+        memosToggle.Unchecked += (_, _) => SetOptions(options with { IncludeMemos = false });
         diagnosesToggle = new SettingToggle(Ui, "report.diagnoses", "측정 중 진단 넣기", true);
-        diagnosesToggle.Click += (_, _) => SetOptions(options with { IncludeDiagnoses = diagnosesToggle.IsChecked == true });
+        diagnosesToggle.Checked += (_, _) => SetOptions(options with { IncludeDiagnoses = true });
+        diagnosesToggle.Unchecked += (_, _) => SetOptions(options with { IncludeDiagnoses = false });
 
         var optionStack = new StackPanel { Spacing = Space.S4 };
         optionStack.Children.Add(pickRow);
@@ -105,7 +108,9 @@ public sealed class ReportScreen : Screen
         previewCard = new GroupPanel("report.preview", "미리 보기");
         var previewStack = new StackPanel { Spacing = Space.S3 };
         previewStack.Children.Add(Fonts.Text("미리 보기 (내보낼 파일과 같은 내용)", Typography.Label, Ui.Brushes.Ink));
-        previewStack.Children.Add(paper);
+        var paperGroup = new GroupPanel("report.paper", "리포트 미리 보기");   // 글 순서 대조(G3)가 이 아래만 읽는다
+        paperGroup.Children.Add(paper);
+        previewStack.Children.Add(paperGroup);
         previewCard.Children.Add(previewStack);
 
         scroll = new ScrollViewer { Content = content, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, Space.S3, Space.S5) };

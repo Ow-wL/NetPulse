@@ -217,12 +217,15 @@ public static class ReportParts
         foreach (var tick in f.TimeTicks)
         {
             var t = Fonts.Text(tick.Label, Typography.Caption, look.Muted);
-            Place(t, TimelineFigure.X(tick.Column) - Space.S5, TimelineFigure.TickTextY - Space.S4);
+            t.Width = Space.S8 + Space.S8;
+            t.TextAlignment = TimelineFigure.AtRightEdge(tick) ? TextAlignment.Right : TextAlignment.Center;
+            Place(t, TimelineFigure.X(tick.Column) - (TimelineFigure.AtRightEdge(tick) ? t.Width : t.Width / 2), TimelineFigure.TickTextY - Space.S2);
         }
         Brush[] swatches = [look.Accent, look.Muted, look.Bad, look.Warn, look.Link, look.Muted, look.Mark];
         for (int i = 0; i < TimelineFigure.LegendLabels.Length; i++)
         {
-            double x = TimelineFigure.PlotLeft + i % 4 * (TimelineFigure.Columns / 4.0), y = TimelineFigure.LegendY + i / 4 * Space.S5;
+            double x = TimelineFigure.PlotLeft + i % TimelineFigure.LegendPerRow * TimelineFigure.LegendStep,
+                y = TimelineFigure.LegendY + i / TimelineFigure.LegendPerRow * TimelineFigure.LegendRowHeight;
             Place(new Rectangle { Width = Space.S3, Height = Space.S3, Fill = swatches[i], Stroke = look.Edge, StrokeThickness = Size.Hairline }, x, y - Space.S3);
             Place(Fonts.Text(TimelineFigure.LegendLabels[i], Typography.Caption, look.Ink), x + Space.S4, y - Space.S4);
         }

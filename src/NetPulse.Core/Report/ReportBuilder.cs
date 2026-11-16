@@ -351,10 +351,10 @@ public static class ReportBuilder
                 }
                 blocks.Add(new ReportParagraph(routeRuns));
 
-                if (d.Links.Count == 0) blocks.Add(new ReportParagraph("앞뒤 3초 안의 링크 끊김 관측: 없음"));
+                if (d.Links.Count == 0) blocks.Add(new ReportParagraph("끊김 동안과 앞뒤 3초의 링크 끊김 관측: 없음"));
                 else
                 {
-                    var linkRuns = new List<ReportRun> { ReportRun.Gen($"앞뒤 3초 안의 링크 끊김 관측: {d.Links.Count + d.MoreLinks}건 (") };
+                    var linkRuns = new List<ReportRun> { ReportRun.Gen($"끊김 동안과 앞뒤 3초의 링크 끊김 관측: {d.Links.Count + d.MoreLinks}건 (") };
                     var seen = d.Links.Select(x => x.Adapter).Distinct().ToArray();
                     for (int k = 0; k < seen.Length; k++)
                     {
@@ -364,7 +364,7 @@ public static class ReportBuilder
                     linkRuns.Add(ReportRun.Gen(")"));
                     blocks.Add(new ReportParagraph(linkRuns));
                 }
-                blocks.Add(new ReportParagraph($"앞뒤 3초 안의 증상 표시: {(d.Marks.Count == 0 ? "없음" : $"{d.Marks.Count}개")}"));
+                blocks.Add(new ReportParagraph($"끊김 동안과 앞뒤 3초의 증상 표시: {(d.Marks.Count == 0 ? "없음" : $"{d.Marks.Count}개")}"));
                 if (d.EvidenceDamaged) blocks.Add(new ReportParagraph("근거 기록 일부를 읽지 못해 빠진 근거가 있을 수 있습니다.", ParagraphKind.Warning));
             }
             return blocks;
@@ -446,7 +446,7 @@ public static class ReportBuilder
                 new("측정 ID", red.Id(), "condition.id"),
                 new("측정 주기", ReportRun.Gen(ReportTexts.Sec(header.IntervalMs) + "초"), "condition.interval"),
                 new("응답 제한시간", ReportRun.Gen(ReportTexts.Sec(header.TimeoutMs) + "초"), "condition.timeout"),
-                new("예상 연결", ReportRun.Gen(RecordView.ExpectedText(header.Expected)), "condition.expected"),
+                new("예상 연결", ReportRun.Gen(ReportTexts.Expected(header.Expected)), "condition.expected"),
                 new("계획한 길이", ReportRun.Gen(TimelineModel.Seconds(header.PlannedMs)), "condition.planned"),
                 new("기록 상태", ReportRun.Gen(damage.Count == 0 ? "손상 없음" : $"알림 {damage.Count}건"), "condition.damage"),
                 new("측정한 앱", ReportRun.Gen("NetPulse " + header.AppVersion), "condition.appVersion"),

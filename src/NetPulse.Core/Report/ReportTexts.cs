@@ -133,6 +133,14 @@ public static class ReportTexts
         return text.Contains(code, StringComparison.Ordinal) ? "기타 사유" : text;
     }
 
+    public static string Expected(Targets.ExpectedConnection? e) => e switch
+    {
+        Targets.ExpectedConnection.Wired => "유선",
+        Targets.ExpectedConnection.Wireless => "Wi‑Fi",
+        Targets.ExpectedConnection.Any => "상관없음",
+        _ => "기록 없음",
+    };
+
     public static string RouteKind(string? kind) => kind switch { "wired" => "유선", "wireless" => "Wi‑Fi", null => "알 수 없음", _ => "기타" };
 
     public static string AdapterKind(string? kind) => kind switch { "wired" => "유선 어댑터", "wireless" => "무선 어댑터", _ => "기타 어댑터" };
