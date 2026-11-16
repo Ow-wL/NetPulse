@@ -104,7 +104,7 @@ public sealed partial class Redactor
     private static partial Regex EmailPattern();
 
     // 큰따옴표로 둘러싼 경로는 닫는 따옴표까지 (Windows 이름에는 큰따옴표가 들 수 없다). 작은따옴표는 이름에 들 수 있어("O'Brien") 경계로 쓰지 않는다
-    [GeneratedRegex(@"""(?:\\\\|[A-Za-z]:[\\/])[^""\r\n]*""")]
+    [GeneratedRegex(@"""(?:\\\\|//|[A-Za-z]:[\\/])[^""\r\n]*""")]
     private static partial Regex QuotedPathPattern();
 
     // 따옴표 없는 경로는 이름에 공백·괄호·대괄호·쉼표·세미콜론·작은따옴표가 모두 들 수 있어 어디서 끝나는지 알 수 없다.
@@ -112,6 +112,10 @@ public sealed partial class Redactor
     // 경로 뒤의 같은 줄 글이 함께 가려진다 — 덜 가리는 것보다 낫다
     [GeneratedRegex(@"\\\\[^\r\n""<>]*")]
     private static partial Regex UncPattern();
+
+    // 슬래시로 쓴 UNC (//nas/logs/…, Windows가 \\nas\logs로 다룸, G4 M8 5라운드 a2). URL의 "://"는 앞 글자 콜론으로 거른다 (URL은 먼저 가린다)
+    [GeneratedRegex(@"(?<![A-Za-z0-9:/])//[A-Za-z0-9._$\-]+(?:[\\/][^\r\n""<>]*)?")]
+    private static partial Regex SlashUncPattern();
 
     [GeneratedRegex(@"(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\r\n""<>]*")]
     private static partial Regex DrivePattern();
@@ -142,22 +146,39 @@ public sealed partial class Redactor
     private static partial Regex DateTimePattern();
 
     /// <summary>
-    /// 전화번호 가림. 지킬 시각·날짜의 글자를 같은 길이의 숫자 아닌 글자로 바꾼 사본에서 전화번호 위치를 찾고, 그 위치만 원문에서 가린다
-    /// (원문을 바꿔 끼우지 않아 메모에 어떤 글자가 있어도 같다, G4 M8 4라운드 a3).
+    /// 전화번호 가림 (위치 기반이라 메모에 어떤 글자가 있어도 같다, G4 M8 4라운드 a3). 가릴 곳은 두 찾기의 합:
+    /// (1) 지킬 시각·날짜를 숫자 아닌 글자로 바꾼 사본에서 찾은 번호 — 시각·날짜에 붙은 번호도 온전히 찾는다,
+    /// (2) 원문에서 찾은 번호 후보 가운데 지킬 시각·날짜 밖의 숫자(느슨한 숫자)가 있는 것 — 날짜 꼴이 든 번호("010 2026-11-13", "+82 2026-11-13")는
+    /// 날짜째 가린다 (G4 M8 5라운드 a1). 후보의 앞쪽 시각·날짜 숫자("13:20:05 010-…"의 "05")는 빼고 첫 느슨한 숫자부터,
+    /// 마지막 느슨한 숫자 뒤에 시각이 붙어 있으면("…5432 13:20"의 "13") 거기까지만 가린다. 시각·날짜 숫자만으로 된 후보는 남긴다.
     /// </summary>
     private static string MaskPhones(string s)
     {
         var copy = s.ToCharArray();
+        var kept = new bool[s.Length];
+        var clock = new bool[s.Length];
         foreach (Match m in DateTimePattern().Matches(s))
-            for (int k = m.Index; k < m.Index + m.Length; k++) copy[k] = 'x';
-        var sb = new StringBuilder(s.Length);
-        int last = 0;
+            for (int k = m.Index; k < m.Index + m.Length; k++) { copy[k] = 'x'; kept[k] = true; clock[k] = !m.Groups[1].Success; }
+        var hide = new bool[s.Length];
         foreach (Match m in PhonePattern().Matches(new string(copy)))
+            for (int k = m.Index; k < m.Index + m.Length; k++) hide[k] = true;
+        foreach (Match m in PhonePattern().Matches(s))
         {
-            sb.Append(s, last, m.Index - last).Append(ReportTexts.Masked);
-            last = m.Index + m.Length;
+            int first = -1, last = -1, end = m.Index + m.Length;
+            for (int k = m.Index; k < end; k++)
+                if (char.IsAsciiDigit(s[k]) && !kept[k]) { if (first < 0) first = k; last = k; }
+            if (first < 0) continue;
+            if (first > m.Index && s[first - 1] == '+') first--;
+            for (int k = last + 1; k < end; k++) if (clock[k]) { end = last + 1; break; }
+            for (int k = first; k < end; k++) hide[k] = true;
         }
-        sb.Append(s, last, s.Length - last);
+        var sb = new StringBuilder(s.Length);
+        for (int k = 0; k < s.Length;)
+        {
+            if (!hide[k]) { sb.Append(s[k++]); continue; }
+            sb.Append(ReportTexts.Masked);
+            while (k < s.Length && hide[k]) k++;
+        }
         return sb.ToString();
     }
 
@@ -169,6 +190,7 @@ public sealed partial class Redactor
         s = EmailPattern().Replace(s, ReportTexts.Masked);
         s = QuotedPathPattern().Replace(s, m => m.Value[0] + ReportTexts.Masked + m.Value[0]);
         s = UncPattern().Replace(s, ReportTexts.Masked);
+        s = SlashUncPattern().Replace(s, ReportTexts.Masked);
         s = DrivePattern().Replace(s, ReportTexts.Masked);
         s = MacPattern().Replace(s, ReportTexts.Masked);
         s = Ipv6With4Pattern().Replace(s, ReportTexts.Masked);

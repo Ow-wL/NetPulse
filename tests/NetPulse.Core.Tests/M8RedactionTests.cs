@@ -172,6 +172,16 @@ public sealed class M8RedactionTests
     [InlineData(@"\\nas\logs\report; Alice Smith.txt", "Alice")]
     [InlineData(@"D:\Home\O'Brien\x.txt", "Brien")]
     [InlineData(@"'D:\Home\O'Brien\x.txt' 확인", "Brien")]
+    // G4 M8 5라운드 a1·a2: 공백으로 이어진 번호 안의 날짜 꼴, 슬래시 UNC (따옴표 있음·없음)
+    [InlineData("010 2026-11-13", "010 2026")]
+    [InlineData("02 2026-11-13", "02 2026")]
+    [InlineData("+82 2026-11-13", "+82")]
+    [InlineData("010 2026.11.13", "2026.11.13")]
+    [InlineData("13:20:05 2026-11-13 010-1234-5678", "1234-5678")]
+    [InlineData("//nas/logs/Alice Smith.txt", "Alice")]
+    [InlineData("//nas/logs/Alice Smith.txt", "nas/logs")]
+    [InlineData("\"//nas/logs/Alice Smith.txt\"", "Alice")]
+    [InlineData("서버는 //nas-01 입니다", "nas-01")]
     public void MemoPatternsCatchValuesNextToKoreanTextAndPathsWithSpaces(string memo, string leaked)
     {
         var d = Build(Typical(memo), new ReportOptions(IncludeMemos: true));
@@ -211,6 +221,9 @@ public sealed class M8RedactionTests
     [InlineData("13:20 010-9876-5432 연락", "13:20 [가림] 연락")]
     [InlineData("2026-11-13 +82 10 9876 5432", "2026-11-13 [가림]")]
     [InlineData("13:20:05 010-9876-5432", "13:20:05 [가림]")]
+    // G4 M8 5라운드 a1: 번호 앞뒤에 붙은 시각은 남기고, 번호에 붙은 날짜 꼴은 함께 가린다
+    [InlineData("010-9876-5432 13:20 연락", "[가림] 13:20 연락")]
+    [InlineData("13:20:05 010 2026-11-13", "13:20:05 [가림]")]
     [InlineData("문의:010-9876-5432, 2026-11-13", "문의:[가림], 2026-11-13")]
     public void PhoneNumbersNextToTimesAreStillMasked(string memo, string expected)
     {
@@ -226,6 +239,13 @@ public sealed class M8RedactionTests
         var h = rec.Header!;
         rec = rec with { Header = h with { AppVersion = "1.0+X", Targets = h.Targets.Select(t => t.Id == "isp-a1" ? t with { Provider = "１．０" } : t).ToArray() } };
         Assert.Equal("NetPulse 알 수 없음", Build(rec).Fields().Single(f => f.Field == "condition.appVersion").Value);
+    }
+
+    [Fact]
+    public void AUrlKeepsItsSchemeAndIsNotTakenForASlashUnc()
+    {
+        var text = Build(Typical("링크 https://router.example.net 확인"), new ReportOptions(IncludeMemos: true)).Fields().Single(f => f.Field == "mark.memo").Value;
+        Assert.Equal("링크 https://[가림] 확인", text);
     }
 
     // ---------------- a4: 앱 버전 ----------------
