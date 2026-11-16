@@ -130,7 +130,8 @@ public sealed class ReportScreen : Screen
         Children.Add(scroll);
 
         requests.Changed += () => DispatcherQueue.TryEnqueue(() => { if (!Context.IsClosing()) Rerender(); });
-        Context.Records.Changed += () => DispatcherQueue.TryEnqueue(() => { if (!Context.IsClosing()) OnLibraryChanged(); });
+        // 들어온 적이 없으면 목록 변화에 반응하지 않는다: 시작 직후 미리 만든 화면이 기록을 읽어 문서를 만들지 않게 (들어올 때 Entered가 한다)
+        Context.Records.Changed += () => DispatcherQueue.TryEnqueue(() => { if (!Context.IsClosing() && entered && Visibility == Visibility.Visible) OnLibraryChanged(); });
         Ui.Effects.Changed += (_, _) => { if (Visibility == Visibility.Visible) Rerender(); };
     }
 
@@ -146,8 +147,11 @@ public sealed class ReportScreen : Screen
 
     public override void Render(HostSnapshot snapshot) { }
 
+    private bool entered;
+
     public override void Entered()
     {
+        entered = true;
         _ = Context.Records.RefreshAsync(Context.Host.RunningId);
         OnLibraryChanged();
         Rerender();

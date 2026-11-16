@@ -121,6 +121,7 @@ public sealed class M8G5Tests
 
     /// <summary>
     /// 리포트 화면 bench (설계 5절 report-preview): 12시간 기록과 최악 사례의 미리 보기 프레임. 기록 화면과 같은 프레임 기준, 최고 전용 메모리 400 MB.
+    /// 예외 하나: 최악 사례 열기(report-worst, 대상 8·12시간 기록을 캐시 없이 읽고 분석)는 최대 80 ms·33 ms 초과 6회 (사용자 결정, DECISIONS "M8 미리 보기 bench 기준").
     /// </summary>
     [Fact]
     public void ReportPreviewStaysWithinBudget()
@@ -145,7 +146,8 @@ public sealed class M8G5Tests
                 if (s.GetProperty("Samples").GetInt32() < 10) problems.Add($"{seg} 프레임 표본 {s.GetProperty("Samples").GetInt32()}개 (10개 미만)");
                 double max = s.GetProperty("Max").GetDouble();
                 int over = s.GetProperty("Over33").GetInt32();
-                if (max > FrameBudget.TransitionMax || over > FrameBudget.TransitionHitches) problems.Add($"{seg} 최대 {max:0.0} ms, 33 ms 초과 {over}회");
+                var (maxLimit, overLimit) = seg == "report-worst" ? (WorstOpenMax, WorstOpenHitches) : (FrameBudget.TransitionMax, FrameBudget.TransitionHitches);
+                if (max > maxLimit || over > overLimit) problems.Add($"{seg} 최대 {max:0.0} ms, 33 ms 초과 {over}회 (기준 {maxLimit} ms·{overLimit}회)");
             }
             long peak = bench.GetProperty("peakPrivateMb").GetInt64();
             if (peak > 400) problems.Add($"최고 전용 메모리 {peak} MB > 400 (실측값으로 기준을 다시 정할 것)");
@@ -153,6 +155,10 @@ public sealed class M8G5Tests
         }
         finally { AppDriver.DeleteUserData(userData); }
     }
+
+    /// <summary>최악 사례 열기 구간의 기준 (사용자 결정 2026-11-16 "최악만 80ms·6회로").</summary>
+    private const double WorstOpenMax = 80;
+    private const int WorstOpenHitches = 6;
 
     private static long PrivateMb() => Process.GetCurrentProcess().PrivateMemorySize64 / (1024 * 1024);
 

@@ -144,11 +144,13 @@ public sealed partial class AppShell : Window
             _ = recent.RefreshAsync(host.RunningId);
             _ = Task.Run(diagnosis.LoadRecent);
             StartScreen();
-            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => { if (!closing) foreach (var id in new[] { "home", "measure", "diagnose", "records" }) screens.Prepare(id); });   // 진단도 미리 (M6 bench diag-enter 40 ms대), 기록도 (M7 bench records-enter 50 ms대)
+            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => { if (!closing) foreach (var id in new[] { "home", "measure", "diagnose", "records", "report" }) screens.Prepare(id); });   // 진단도 미리 (M6 bench diag-enter 40 ms대), 기록도 (M7 bench records-enter 50 ms대), 리포트도 (M8 bench report-enter 64 ms 한 번)
             // 기록 화면이 처음 쓰는 메서드는 백그라운드에서 미리 컴파일 (첫 상세 열기의 컴파일 시간, M7 bench records-open)
             _ = Design.JitWarmup.Start(typeof(RecordsScreen), typeof(Design.Controls.TimelinePanel), typeof(Design.Controls.TrendChart),
                 typeof(Core.Presentation.RecordView), typeof(Core.Presentation.TimelineModel), typeof(Core.Analysis.EpisodeDetail),
-                typeof(Core.Records.SymptomMarks), typeof(Core.Analysis.MeasurementComparison));
+                typeof(Core.Records.SymptomMarks), typeof(Core.Analysis.MeasurementComparison),
+                typeof(ReportScreen), typeof(Design.Controls.ReportParts), typeof(Core.Report.ReportBuilder), typeof(Core.Report.ReportHtml),
+                typeof(Core.Report.TimelineSvg), typeof(Core.Report.Redactor), typeof(Core.Report.ReportRequests));
             RenderStatus(host.Snapshot);
             QueueDiag();
             if (options.SelfTest is not null) selfTestTimer.Start();
