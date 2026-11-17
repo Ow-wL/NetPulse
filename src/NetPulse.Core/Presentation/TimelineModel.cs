@@ -87,48 +87,71 @@ public static class TimelineModel
     {
         var externals = targets.Where(t => t.Role == TargetRole.External).Select(t => t.Id).ToArray();
         var all = targets.Select(t => t.Id).ToArray();
-        var ordered = rounds.OrderBy(r => r.Round).ToArray();
+        var ordered = InRoundOrder(rounds) ? rounds : rounds.OrderBy(r => r.Round).ToArray();
         var bands = new List<TimelineBand>();
 
+        // 회차마다 대상 결과를 훑는다 (대상은 몇 개뿐이고, 기록 읽기가 같은 대상의 결과 둘을 거부한다).
+        // 회차마다 사전을 만들던 것이 12시간 기록에서 리포트 문서 할당의 대부분이었다 (M8 게이트 bench, 2세대 수집)
         BandKind? Classify(RoundData r)
         {
             if (r.Gap) return null;
-            var byId = r.Results.ToDictionary(x => x.TargetId);
-            bool AllLost(IEnumerable<string> ids) => ids.All(id => byId.TryGetValue(id, out var x) && x.Outcome == ProbeOutcome.Lost);
-            if (externals.Length > 0 && AllLost(externals)) return BandKind.ExternalNone;
-            if (all.Any(id => byId.TryGetValue(id, out var x) && x.Outcome == ProbeOutcome.Lost)) return BandKind.PartialNone;
+            if (externals.Length > 0 && Every(r, externals, ProbeOutcome.Lost)) return BandKind.ExternalNone;
+            if (AnyOf(r, all, ProbeOutcome.Lost)) return BandKind.PartialNone;
             return null;
         }
-        bool Success(RoundData r, BandKind kind)
-        {
+        bool Success(RoundData r, BandKind kind) =>
             // 띠를 끝내는 "성공": 외부 띠면 외부 하나라도 응답, 일부 띠면 모든 대상 응답
-            var byId = r.Results.ToDictionary(x => x.TargetId);
-            return kind == BandKind.ExternalNone
-                ? externals.Any(id => byId.TryGetValue(id, out var x) && x.Outcome == ProbeOutcome.Success)
-                : all.All(id => byId.TryGetValue(id, out var x) && x.Outcome == ProbeOutcome.Success);
-        }
+            kind == BandKind.ExternalNone ? AnyOf(r, externals, ProbeOutcome.Success) : Every(r, all, ProbeOutcome.Success);
 
         int i = 0;
-        while (i < ordered.Length)
+        while (i < ordered.Count)
         {
             var kind = Classify(ordered[i]);
             if (kind is null) { i++; continue; }
             int j = i;
-            while (j + 1 < ordered.Length && ordered[j + 1].Round == ordered[j].Round + 1 && Classify(ordered[j + 1]) == kind) j++;
+            while (j + 1 < ordered.Count && ordered[j + 1].Round == ordered[j].Round + 1 && Classify(ordered[j + 1]) == kind) j++;
             var first = ordered[i];
             var last = ordered[j];
             long minMs = last.AtMs - first.AtMs;
             // 앞뒤 성공 표본 (바로 이웃한 회차가 성공일 때만. 누락·공백 너머의 표본은 쓰지 않는다)
             RoundData? before = i > 0 && ordered[i - 1].Round == first.Round - 1 && !ordered[i - 1].Gap && Success(ordered[i - 1], kind.Value) ? ordered[i - 1] : null;
-            RoundData? after = j + 1 < ordered.Length && ordered[j + 1].Round == last.Round + 1 && !ordered[j + 1].Gap && Success(ordered[j + 1], kind.Value) ? ordered[j + 1] : null;
+            RoundData? after = j + 1 < ordered.Count && ordered[j + 1].Round == last.Round + 1 && !ordered[j + 1].Gap && Success(ordered[j + 1], kind.Value) ? ordered[j + 1] : null;
             long? maxMs = before is not null && after is not null ? after.AtMs - before.AtMs : null;
             bands.Add(new TimelineBand(kind.Value, first.DueMs, last.DueMs + intervalMs, first.Round, last.Round, j - i + 1, minMs, maxMs,
-                OpenEnd: j == ordered.Length - 1, OpenStart: i == 0 && first.Round == 0 && before is null));
+                OpenEnd: j == ordered.Count - 1, OpenStart: i == 0 && first.Round == 0 && before is null));
             i = j + 1;
         }
         foreach (var g in gaps)
             bands.Add(new TimelineBand(BandKind.Gap, g.FromMs, g.ToMs, g.LastRoundBefore ?? -1, g.FirstRoundAfter ?? -1, 0, g.ToMs - g.FromMs, g.ToMs - g.FromMs, false, false));
         return bands.OrderBy(b => b.FromMs).ToArray();
+    }
+
+    /// <summary>회차 번호가 줄지 않는 순서인지. 그렇다면 안정 정렬해도 같은 순서라 복사하지 않는다.</summary>
+    internal static bool InRoundOrder(IReadOnlyList<RoundData> rounds)
+    {
+        for (int k = 1; k < rounds.Count; k++) if (rounds[k].Round < rounds[k - 1].Round) return false;
+        return true;
+    }
+
+    private static TargetResult? ResultOf(RoundData r, string targetId)
+    {
+        var results = r.Results;
+        for (int k = 0; k < results.Count; k++) if (results[k].TargetId == targetId) return results[k];
+        return null;
+    }
+
+    /// <summary>모든 대상의 결과가 있고 그 결과가 <paramref name="outcome"/>인지.</summary>
+    private static bool Every(RoundData r, string[] ids, ProbeOutcome outcome)
+    {
+        foreach (var id in ids) if (ResultOf(r, id) is not { } x || x.Outcome != outcome) return false;
+        return true;
+    }
+
+    /// <summary>결과가 <paramref name="outcome"/>인 대상이 하나라도 있는지.</summary>
+    private static bool AnyOf(RoundData r, string[] ids, ProbeOutcome outcome)
+    {
+        foreach (var id in ids) if (ResultOf(r, id) is { } x && x.Outcome == outcome) return true;
+        return false;
     }
 
     /// <summary>보기 창 하나의 장면. <paramref name="columns"/>는 그래프 폭(픽셀). 점은 계열마다 열 수의 두 배를 넘지 않는다.</summary>

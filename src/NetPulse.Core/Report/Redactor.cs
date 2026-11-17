@@ -14,7 +14,7 @@ public sealed record Identity(string Kind, string Value);
 /// 식별 정보 가리기 (M8 설계 3.3 [1-1, 1-2], 구현 중 결정 1·2).
 /// <list type="bullet">
 /// <item>필드별 규칙: 대상 이름 → 역할 + 순번, 주소 → 넣지 않음, 사업자 → "사업자 A·B", 어댑터 → 연결 유형 + 순번, 측정 ID → 시각 부분.</item>
-/// <item>메모(넣을 때만): 주소·MAC·이메일·전화번호 꼴·UNC·드라이브 경로·URL 호스트와 기록의 대상 이름·주소·사업자·대상 ID를 "[가림]"으로.</item>
+/// <item>증상 메모: 가린 리포트에는 넣지 않는다 (<see cref="ReportOptions.Memos"/>, DECISIONS "M8 메모: 가린 리포트에서 빼기"). 메모 글을 패턴으로 가리지 않는다.</item>
 /// <item>안전망 <see cref="Check(ReportDocument)"/>: 내보내기 전에 원본 값이 남았는지 본다.</item>
 /// </list>
 /// </summary>

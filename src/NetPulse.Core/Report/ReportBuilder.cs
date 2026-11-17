@@ -306,7 +306,7 @@ public static class ReportBuilder
             var top = a.Episodes.Select((e, i) => (Episode: e, Index: i)).OrderByDescending(x => x.Episode.MinDurationMs).ThenBy(x => x.Episode.FirstRound)
                 .Take(options.EpisodeDetails).ToArray();
             var names = targets.Select(red.TargetName).ToArray();
-            var shared = EpisodeDetail.Prepare(record, a);   // 상세마다 회차 정렬·경로 문맥·표시를 다시 만들지 않는다 (M8 bench)
+            var shared = EpisodeDetail.Prepare(record, a, rounds, marks);   // 상세마다(그리고 문서 앞에서 이미 만든) 회차 정렬·표시를 다시 만들지 않는다 (M8 bench)
             foreach (var (e, i) in top)
             {
                 blocks.Add(new ReportHeading(ReportRun.Gen($"끊김 {i + 1} · {ClockOf(e.FirstRound)} · {EpisodeDuration(e)}")));

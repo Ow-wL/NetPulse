@@ -42,11 +42,16 @@ public static class EpisodeDetail
     /// <summary>기록 하나에서 여러 끊김의 상세를 구할 때 한 번만 만드는 것 (정렬한 회차, 경로 문맥, 증상 표시). 리포트가 상세 10개를 만들 때 쓴다.</summary>
     public sealed record Shared(RoundData[] Rounds, JudgeContext Context, IReadOnlyList<SymptomMark> Marks);
 
-    public static Shared Prepare(MeasurementRecord record, AnalysisResult analysis)
+    public static Shared Prepare(MeasurementRecord record, AnalysisResult analysis) =>
+        Prepare(record, analysis, record.Rounds.OrderBy(r => r.Round).ToArray(), SymptomMarks.FromEvents(record.Events, record.NoteLines).Marks);
+
+    /// <summary>
+    /// 호출한 쪽이 이미 만든 회차 정렬(<c>Round</c> 순 안정 정렬)과 증상 표시를 그대로 쓴다. 리포트 문서 만들기가 같은 것을 두 번 만들지 않게 (M8 게이트 bench).
+    /// </summary>
+    public static Shared Prepare(MeasurementRecord record, AnalysisResult analysis, RoundData[] orderedRounds, IReadOnlyList<SymptomMark> marks)
     {
         var header = record.Header ?? throw new ArgumentException("머리가 없는 기록입니다.", nameof(record));
-        return new Shared(record.Rounds.OrderBy(r => r.Round).ToArray(), JudgeContext.From(header, record.Rounds, record.Events, analysis.Links),
-            SymptomMarks.FromEvents(record.Events, record.NoteLines).Marks);
+        return new Shared(orderedRounds, JudgeContext.From(header, record.Rounds, record.Events, analysis.Links), marks);
     }
 
     public static EpisodeDetailResult For(MeasurementRecord record, AnalysisResult analysis, Episode episode, Shared? shared = null)

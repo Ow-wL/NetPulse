@@ -121,7 +121,8 @@ public sealed class M8G5Tests
 
     /// <summary>
     /// 리포트 화면 bench (설계 5절 report-preview): 12시간 기록과 최악 사례의 미리 보기 프레임. 기록 화면과 같은 프레임 기준, 최고 전용 메모리 400 MB.
-    /// 예외 하나: 최악 사례 열기(report-worst, 대상 8·12시간 기록을 캐시 없이 읽고 분석)는 최대 80 ms·33 ms 초과 6회 (사용자 결정, DECISIONS "M8 미리 보기 bench 기준").
+    /// 예외 둘: 최악 사례 열기(report-worst, 대상 8·12시간 기록을 캐시 없이 읽고 분석)는 최대 80 ms·33 ms 초과 6회 (사용자 결정, DECISIONS "M8 미리 보기 bench 기준"),
+    /// 그 직후 스크롤(report-worst-scroll)은 최대 80 ms·2회 (사용자 결정, DECISIONS "M8 게이트 bench: 할당 줄이기와 최악 스크롤 기준").
     /// </summary>
     [Fact]
     public void ReportPreviewStaysWithinBudget()
@@ -146,7 +147,12 @@ public sealed class M8G5Tests
                 if (s.GetProperty("Samples").GetInt32() < 10) problems.Add($"{seg} 프레임 표본 {s.GetProperty("Samples").GetInt32()}개 (10개 미만)");
                 double max = s.GetProperty("Max").GetDouble();
                 int over = s.GetProperty("Over33").GetInt32();
-                var (maxLimit, overLimit) = seg == "report-worst" ? (WorstOpenMax, WorstOpenHitches) : (FrameBudget.TransitionMax, FrameBudget.TransitionHitches);
+                var (maxLimit, overLimit) = seg switch
+                {
+                    "report-worst" => (WorstOpenMax, WorstOpenHitches),
+                    "report-worst-scroll" => (WorstScrollMax, FrameBudget.TransitionHitches),
+                    _ => (FrameBudget.TransitionMax, FrameBudget.TransitionHitches),
+                };
                 if (max > maxLimit || over > overLimit) problems.Add($"{seg} 최대 {max:0.0} ms, 33 ms 초과 {over}회 (기준 {maxLimit} ms·{overLimit}회)");
             }
             long peak = bench.GetProperty("peakPrivateMb").GetInt64();
@@ -159,6 +165,12 @@ public sealed class M8G5Tests
     /// <summary>최악 사례 열기 구간의 기준 (사용자 결정 2026-11-16 "최악만 80ms·6회로").</summary>
     private const double WorstOpenMax = 80;
     private const int WorstOpenHitches = 6;
+
+    /// <summary>
+    /// 최악 사례를 연 직후 스크롤 구간의 최대 (사용자 결정 2026-11-17 "예외 80ms·2회로"). 33 ms 초과 횟수는 다른 구간과 같은 2회.
+    /// 최악 사례(전용 메모리 약 390 MB)를 연 뒤의 2세대 수집이 이 구간에 들면 한 프레임이 45~62 ms까지 튀었다 (C 이전 커밋에서도 관측). 원인을 확정한 예외가 아니라 받아들이는 범위다.
+    /// </summary>
+    private const double WorstScrollMax = 80;
 
     private static long PrivateMb() => Process.GetCurrentProcess().PrivateMemorySize64 / (1024 * 1024);
 
