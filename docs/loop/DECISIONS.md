@@ -1345,3 +1345,20 @@ X(`350b609`, G4 8라운드 APPROVE)에서 `build/build.ps1 -Gate` → `build/ui-
 - 2회차 bench: 측정 nav 33.4 ms·1회, 그 밖 23.6 ms 이하(idle-live 23.2 ms). 리포트 enter·scroll·options 32.7·41.1·27.9 ms (33 ms 초과 0·1·0회), worst 79.0 ms·1회(기준 80 ms·6회), worst-scroll **50.9 ms·1회** — 예전 50 ms 기준이면 0.9 ms 차이로 실패, 사용자 결정 80 ms·2회로 통과. 최고 전용 메모리 386 MB.
 - 1회차 결과는 `.loop/gate-m8b-run1`에 보관 (공개 안 함).
 - PR CI(pull_request)에서 Core 시험 `M7LibraryTests.OpenRequestsGoBeforeTheRestOfTheList`가 1번 실패했다("끝난 목록 분석 12", 3 이하 기대). 같은 커밋의 push CI는 통과했고, M7 병합 뒤 main CI(`573d24b`)도 같은 시험으로 실패했었다. 작은 기록 12개의 목록 분석이 열기 요청보다 먼저 다 끝나면 실패하는 시험의 시간 경쟁으로 보고(M7부터 있던 것, 이번 변경과 무관), 코드는 바꾸지 않고 CI를 다시 돌렸다. 다음 마일스톤에서 분석을 멈출 수 있는 fixture로 고친다 (STATE 미해결 지적).
+
+## 2026-11-18 · M8 게이트 (승인 코드 X `329c00e`)
+
+PR CI에서 되풀이해 실패한 Core 시험(`M7LibraryTests.OpenRequestsGoBeforeTheRestOfTheList`, 3번)을 사용자 지시("지금 고쳐")로 바로 고쳐 X가 `350b609` → `329c00e`로 바뀌었다. `RecordLibrary`에 시험 전용 훅(`BeforeAnalyzeForTest`, 잠금 밖에서 분석 직전)을 두고, 첫 목록 분석을 막아 둔 채 열기 요청을 넣은 뒤 풀어서 끝난 분석이 정확히 {첫 항목, 연 항목}인지 본다. 훅이 없을 때 제품 경로는 바뀌지 않는다. G4 9라운드 APPROVE (`.loop/reviews/m8-g4-r9-answer.md`, 사소 1건 → STATE 미해결 지적).
+
+X에서 `build/build.ps1 -Gate`는 한 번에 통과했다(Core 467, Design 111, Platform 29). UI 시험 게이트는 세 번째에 통과했다.
+
+| 회차 | 결과 | 판정 |
+| --- | --- | --- |
+| 1 | 631/635 | M2 G5 전환 bench 87.8·78.6 ms(기준 50 ms), 리포트 enter 67.9 ms·33 ms 초과 4회. 시험이 진단 중간 상태를 읽다 난 예외 2건(M5 매트릭스 `measure-startfail`의 빈 값, M8 흐름 `WaitReady`의 `GetBoolean`). 트레이에 Discord가 떠 있었다 |
+| 2 | 634/635 | 사용자가 Discord를 끈 뒤. M2 G5 전환 하나(transition-3) 81.65 ms만 실패 |
+| 3 | **635/635**, G5 통과 | 재부팅 뒤 자동 시작 앱(Overwolf·Riot·Steam)을 사용자가 닫고 `clip`으로 글 형식만 넣은 뒤 |
+
+- 2회차 뒤 이전 X(`350b609`)와 새 X를 번갈아 M2 G5 bench만 3회씩 돌렸다 (Release, 공개 안 함). 이전 X 3/3 실패(전환 최대 83.2·68.2·76.2 ms), 새 X 2/3 실패(74.0·74.4 ms, 1회는 23.4 ms). 이번에 바꾼 것은 Core 시험 훅뿐이고 이전 코드도 같이 실패해 **PC 상태로 판단**했다. 재부팅 뒤 새 X로 bench만 2회 돌려 둘 다 통과했다(전환 최대 23.4·22.5 ms).
+- 3회차 bench: M2 전환 최대 23.5 ms. 리포트 enter·scroll·options 32.9·34.6·35.3 ms (33 ms 초과 0·1·1회), worst 57.8 ms·2회, worst-scroll 14.8 ms·0회, 최고 전용 메모리 391 MB. 기록 최대 34.3 ms(open 1회), 측정 nav 36.0 ms·1회, 그 밖 측정·진단 구간 21.9 ms 이하.
+- 1회차의 시험 쪽 예외 2건은 3회차에 다시 나지 않았다. 다시 나면 진단 중간 상태를 읽는 시험 도우미를 고친다 (STATE 미해결 지적).
+- 1·2회차 결과는 `.loop/gate-m8c-run1`, `.loop/gate-m8c-run2`, A/B는 `.loop/shots/m8-g5ab-*`, 재부팅 뒤 bench는 `.loop/shots/m8-g5reboot-*`에 보관 (공개 안 함).
