@@ -42,19 +42,19 @@ public sealed partial class ShowcaseWindow : Window
     private readonly Dictionary<string, (string Label, string Icon, Func<IEnumerable<UIElement>> Build)> sections = [];
     private bool diagQueued, closing, closeAllowed;
 
-    public ShowcaseWindow(StartupOptions options, AppLog log, AppSettings settings, Func<Task> beforeClose)
+    public ShowcaseWindow(StartupOptions options, AppLog log, SettingsStore store, Func<Task> beforeClose)
     {
         this.options = options;
         this.log = log;
         this.beforeClose = beforeClose;
         Title = "NetPulse 부품 전시";
         AppWindow.ResizeClient(new SizeInt32(Size.WindowWidth, Size.WindowHeight));
-        ui = new Ui(this, options, log, settings);
+        ui = new Ui(this, options, log, store.Current.Look, App.PersistLook(store, log));
 
         root = new GroupPanel("showcase.root", "NetPulse 부품 전시") { Background = ui.Brushes.Bg };
         rail = new NavRail(ui, "showcase.nav", "NetPulse");
         sectionTitle = Fonts.Text("", Typography.Title, ui.Brushes.Ink);
-        themeChoice = new SegmentedChoice(ui, "toolbar.theme", "테마", [("dark", "다크"), ("light", "라이트"), ("system", "시스템")], ThemeValue(settings.Theme));
+        themeChoice = new SegmentedChoice(ui, "toolbar.theme", "테마", [("dark", "다크"), ("light", "라이트"), ("system", "시스템")], ThemeValue(store.Current.Look.Theme));
         stateChoice = new SegmentedChoice(ui, "toolbar.state", "상태", [("normal", "정상"), ("problem", "끊김")], options.Problem ? "problem" : "normal");
         scroll = new ScrollViewer { Content = sectionHost, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, Space.S3, Space.S5) };
         AutomationProperties.SetAutomationId(scroll, "showcase.scroll");

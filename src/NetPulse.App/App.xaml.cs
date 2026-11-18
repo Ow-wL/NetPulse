@@ -54,10 +54,14 @@ public partial class App : Application
         var options = StartupOptions.Parse(Environment.GetCommandLineArgs().Skip(1).ToArray());
         Directory.CreateDirectory(options.UserData);
         log = new AppLog(options.UserData);
-        var (settings, status, detail) = AppSettings.Load(options.UserData);
-        log.Write("settings", new { status = status.ToString().ToLowerInvariant(), detail });
-        if (options.Theme is { } t) settings = settings with { Theme = t };
-        if (options.Aurora is { } a) settings = settings with { Aurora = a };
+        var load = SettingsFormat.Load(options.UserData);
+        log.Write("settings", new { status = load.Status.ToString().ToLowerInvariant(), detail = load.Detail, repaired = load.Repaired });   // 칸 이름만, 값 없음
+        var settings = new SettingsStore(options.UserData, load);
+        // 이번 실행 인수는 저장하지 않는다 (메모리에만): 저장소를 거치지 않고 시작 값만 바꾼다
+        var look = settings.Current.Look;
+        if (options.Theme is { } t) look = look with { Theme = t };
+        if (options.Aurora is { } a) look = look with { Aurora = a };
+        if (look != settings.Current.Look) settings = new SettingsStore(options.UserData, load with { Settings = load.Settings with { Look = look } });
         if (options.Showcase)
         {
             LaunchShowcase(options, log, settings);
@@ -107,7 +111,7 @@ public partial class App : Application
     }
 
     /// <summary>부품 전시 화면 (M2). 측정 없이 뜬다. 이번 실행의 테마·오로라 인수는 저장하지 않는다.</summary>
-    private void LaunchShowcase(StartupOptions options, AppLog appLog, AppSettings settings)
+    private void LaunchShowcase(StartupOptions options, AppLog appLog, SettingsStore settings)
     {
         appLog.Write("startup", new { mode = "showcase", version = typeof(App).Assembly.GetName().Version?.ToString() });
         window = new ShowcaseWindow(options, appLog, settings, () =>
@@ -129,6 +133,12 @@ public partial class App : Application
         });
         return Task.CompletedTask;
     }
+
+    /// <summary>보기 설정 저장 (Effects가 부른다). 실패는 종류만 기록.</summary>
+    internal static Action<AppSettings> PersistLook(SettingsStore store, AppLog log) => look =>
+    {
+        if (store.Update(f => f with { Look = look }, out var why) == SettingsSaveResult.Failed) log.Write("settingsSaveFailed", new { what = "look", type = why });
+    };
 
     private static string ResolveScenario(string nameOrPath)
     {

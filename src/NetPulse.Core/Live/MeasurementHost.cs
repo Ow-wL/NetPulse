@@ -81,6 +81,17 @@ public sealed class MeasurementHost : IAsyncDisposable
     private long version;
     private FinishedMeasurement? finished;
     private string? startError;
+    /// <summary>종료가 시작되면 새 시작을 받지 않는다 (M9 설계 A1 종료 합류).</summary>
+    private bool startsBlocked;
+    /// <summary>진행 중인 시작이 끝나면(성공·실패) 풀린다. 시작 중이 아니면 끝난 작업.</summary>
+    private TaskCompletionSource startDone = Completed();
+
+    private static TaskCompletionSource Completed()
+    {
+        var t = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        t.SetResult();
+        return t;
+    }
 
     // 측정 중 모델 (loop 작업만 바꾼다)
     private AppendOnlyList<RoundData> rounds = new();
@@ -119,6 +130,21 @@ public sealed class MeasurementHost : IAsyncDisposable
 
     /// <summary>장면이 바뀜 (백그라운드 스레드).</summary>
     public event Action? Changed;
+
+    /// <summary>
+    /// 장면을 게시할 때마다 그 장면 (M9 설계 A1 [2-5]). 알림처럼 전환을 하나도 놓치면 안 되는 쪽이 쓴다:
+    /// <see cref="Changed"/>는 처리할 때 최신 장면을 읽어 중간 장면이 합쳐질 수 있다. 여러 스레드에서 올 수 있어
+    /// 받는 쪽은 <see cref="HostSnapshot.Version"/>으로 순서를 맞춘다.
+    /// </summary>
+    public event Action<HostSnapshot>? Published;
+
+    /// <summary>새 시작을 막는다 (종료·세션 종료 진입). 이미 막혀 있으면 그대로.</summary>
+    public void BlockStarts() { lock (gate) startsBlocked = true; }
+
+    /// <summary>세션 종료가 취소되면 다시 시작을 받는다.</summary>
+    public void UnblockStarts() { lock (gate) startsBlocked = false; }
+
+    public bool StartsBlocked { get { lock (gate) return startsBlocked; } }
     /// <summary>측정이 끝남 (최근 측정 목록을 다시 읽을 때).</summary>
     public event Action<FinishedMeasurement>? Finished;
 
@@ -165,14 +191,16 @@ public sealed class MeasurementHost : IAsyncDisposable
         Profile profile;
         lock (gate)
         {
-            if (state is not (HostState.Idle)) return false;
+            if (state is not (HostState.Idle) || startsBlocked) return false;
             profile = Current(profiles) ?? throw new InvalidOperationException("측정 구성이 없습니다.");
             state = HostState.Starting;
             startError = null;
             finished = null;
+            if (!options.HoldStart) startDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         }
         Publish();
         if (options.HoldStart) return true;   // 시험·캡처: 시작 중 화면에 멈춤
+        var done = startDone;
         try
         {
             var s = await Task.Run(() => world.StartSession(profile, options.AppVersion)).ConfigureAwait(false);
@@ -198,6 +226,7 @@ public sealed class MeasurementHost : IAsyncDisposable
             Publish();
             return false;
         }
+        finally { done.TrySetResult(); }
     }
 
     /// <summary>중지 (확인을 묻지 않는다). 메모 초안이 있으면 먼저 넣는다.</summary>
@@ -390,11 +419,25 @@ public sealed class MeasurementHost : IAsyncDisposable
 
     // ---------------- 끝 ----------------
 
-    /// <summary>창 닫기: 초안을 넣고, 측정을 멈추고 저장하고, 노트 쓰기를 최대 3초 기다린다.</summary>
+    /// <summary>
+    /// 앱 종료: 새 시작을 막고, 진행 중인 시작·중지에 합류해 측정을 끝까지 멈추고 저장한 뒤, 노트 쓰기를 최대 3초 기다린다
+    /// (M9 설계 A1 종료 합류 [1-3]: <see cref="StopAsync"/>는 시작 중·멈추는 중에 바로 돌아오므로 종료에서는 이 경로만 쓴다).
+    /// UI 문맥을 쓰지 않는다 (세션 종료가 UI 스레드를 막고 기다린다, A6).
+    /// </summary>
     public async Task ShutdownAsync()
     {
+        Task starting;
+        lock (gate)
+        {
+            startsBlocked = true;
+            starting = startDone.Task;
+        }
+        await starting.ConfigureAwait(false);   // 시작 중이면 성공·실패가 정해질 때까지
         await FlushDraftsAsync(options.DraftFlushLimit).ConfigureAwait(false);
-        await StopAsync().ConfigureAwait(false);
+        HostState now;
+        lock (gate) now = state;
+        if (now is HostState.Measuring || (now is HostState.Starting && options.HoldStart)) await StopAsync().ConfigureAwait(false);
+        else if (now is HostState.Stopping) await WaitIdleAsync().ConfigureAwait(false);   // 진행 중인 중지에 합류
         await notes.DrainAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
     }
 
@@ -516,6 +559,7 @@ public sealed class MeasurementHost : IAsyncDisposable
             next = Build();
             Volatile.Write(ref snapshot, next);
         }
+        Published?.Invoke(next);
         Changed?.Invoke();
     }
 

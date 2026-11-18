@@ -51,7 +51,10 @@ public sealed partial class AppShell : Window
     private bool lastStorageFailing;
     private UIElement liveContent = null!;
 
-    public AppShell(StartupOptions options, AppLog log, AppSettings settings, MeasurementHost host, RecentRecords recent, RecordMemos memos, DiagnosisHost diagnosis, Func<Task> beforeClose)
+    /// <summary>설정 저장 경계 (M9 설계 B1).</summary>
+    public SettingsStore Settings { get; }
+
+    public AppShell(StartupOptions options, AppLog log, SettingsStore settings, MeasurementHost host, RecentRecords recent, RecordMemos memos, DiagnosisHost diagnosis, Func<Task> beforeClose)
     {
         this.options = options;
         this.log = log;
@@ -62,7 +65,8 @@ public sealed partial class AppShell : Window
         this.memos = memos;
         Title = "NetPulse";
         AppWindow.ResizeClient(new SizeInt32(Size.WindowWidth, Size.WindowHeight));
-        ui = new Ui(this, options, log, settings);
+        Settings = settings;
+        ui = new Ui(this, options, log, settings.Current.Look, App.PersistLook(settings, log));
 
         root = new GroupPanel("app.root", "NetPulse") { Background = ui.Brushes.Bg };
         rail = new NavRail(ui, "app.nav", "NetPulse");
