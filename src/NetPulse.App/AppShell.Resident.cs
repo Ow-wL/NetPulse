@@ -277,14 +277,15 @@ public sealed partial class AppShell
 
     // ---------------- 세션 종료 (A6) ----------------
 
+    /// <summary>
+    /// 질의: 되돌릴 수 있는 것만 한다 — 새 시작을 막는다 (구현 중 결정: 종료가 취소되면 앱이 그대로 계속돼야 하므로
+    /// 진단 멈춤·내보내기 취소·단일 실행 종료 표시처럼 되돌릴 수 없는 것은 확정 때 먼저 한다, DECISIONS "M9 구현 중 결정").
+    /// </summary>
     private void OnQueryEndSession()
     {
-        if (sessionEnding) return;
+        if (sessionEnding || closing) return;
         sessionEnding = true;
-        instance?.MarkClosing();
         host.BlockStarts();
-        _ = diagnosis.ShutdownAsync();   // 억제·취소를 먼저 보낸다 (기다리지 않음)
-        if (screens.Prepared("report") is ReportScreen report) _ = report.StopExportAsync();   // 취소 토큰만 보냄 (UI 연속 작업은 기다리지 않음)
         log.Write("sessionEnd", new { step = "query" });
     }
 
@@ -292,12 +293,17 @@ public sealed partial class AppShell
     {
         if (!ending)
         {
+            if (!sessionEnding) return;
             sessionEnding = false;
-            host.UnblockStarts();
+            if (!closing) host.UnblockStarts();
             log.Write("sessionEnd", new { step = "cancelled" });
             return;
         }
         OnQueryEndSession();
+        // 확정: 취소부터 보낸다 (기다리지 않음) — 진단 억제, 리포트 내보내기 취소 토큰, 두 번째 실행에는 closing
+        instance?.MarkClosing();
+        _ = diagnosis.ShutdownAsync();
+        if (screens.Prepared("report") is ReportScreen report) _ = report.StopExportAsync();
         // UI 스레드는 데이터 작업이 끝나기를 막고 기다리기만 한다 (A6): 호스트·메모는 UI 문맥을 쓰지 않는다
         var watch = System.Diagnostics.Stopwatch.StartNew();
         var flush = Task.Run(async () =>

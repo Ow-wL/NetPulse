@@ -238,7 +238,8 @@ public sealed class M9ResidentTests
                 var before = Rounds(cancel.Diag());
                 cancel.WaitDiag(Rounds, r => r > before + 2, "취소 뒤에도 측정 계속");
                 Assert.Equal("Measuring", Host(cancel.Diag()));
-                Assert.Equal(0, cancel.Close());
+                Assert.Equal("added", M5Fixtures.Str(Resident(cancel.Diag()), "trayState"));
+                Assert.Equal((0, 0), cancel.Exit());                       // 취소 뒤에도 두 번째 실행 요청을 받는다 (closing 아님)
             }
             using var app = AppDriver.LaunchWith(userData, "--demo", "steady", "--demo-speed", "20", "--start", "--close-to-tray", "on");
             app.WaitDiag(Rounds, r => r >= 3, "3회차");
@@ -252,7 +253,7 @@ public sealed class M9ResidentTests
             var record = ReadRecord(userData, session);
             Assert.Equal(EndReason.Stopped, record.EndReason);
             Assert.False(record.Summary is null, "요약까지 봉인");
-            Assert.Equal((0, 0), app.Exit());                             // 실제 로그오프가 아니라 프로세스는 남아 있다
+            app.TerminateAfterSessionEnd();                               // 실제 로그오프에서는 Windows가 프로세스를 끝낸다
         }
         finally { AppDriver.DeleteUserData(userData); }
     }

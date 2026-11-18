@@ -311,6 +311,13 @@ public sealed class AppDriver : IDisposable
         return (second, process.ExitCode);
     }
 
+    /// <summary>세션 종료 확정 뒤 Windows가 하는 일을 흉내: 프로세스를 끝낸다 (종료 코드는 보지 않는다).</summary>
+    public void TerminateAfterSessionEnd()
+    {
+        if (!process.HasExited) { process.Kill(); process.WaitForExit(10000); }
+        closed = true;
+    }
+
     /// <summary>트레이 수신 창 (숨은 최상위 창, A3).</summary>
     public IntPtr TrayWindow() => WaitFor(() => Native.FindWindowW("NetPulse.Tray", "NetPulse.Tray." + process.Id), h => h != IntPtr.Zero, "트레이 수신 창");
 
