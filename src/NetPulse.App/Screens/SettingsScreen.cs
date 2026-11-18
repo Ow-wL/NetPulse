@@ -36,6 +36,8 @@ public sealed class SettingsScreen : Screen
     private (int Done, int Total) moved;
     private CancellationTokenSource? moveStop;
     private bool diagDirty;
+    /// <summary>칸마다 마지막으로 반영한 글 (저장 시도·기본값 때 다시 잡는다). 늦게 오는 TextChanged가 이미 반영한 글을 "고침"으로 되돌리지 않게.</summary>
+    private readonly Dictionary<GlassTextBox, string> diagSeen = [];
     private string diagState = "normal";
     private IReadOnlyDictionary<string, string> diagErrors = new Dictionary<string, string>();
 
@@ -74,9 +76,11 @@ public sealed class SettingsScreen : Screen
         notifyRecovered = Toggle("settings.notifyRecovered", "끊김 관측이 끝났을 때도 알림", r.NotifyRecovered, v => UpdateResident(x => x with { NotifyRecovered = v }));
         notifyFinished = Toggle("settings.notifyFinished", "측정이 끝났을 때 알림", r.NotifyFinished, v => UpdateResident(x => x with { NotifyFinished = v }));
         residentNote = Fonts.Wrapped("", Typography.Caption, Ui.Brushes.Muted);
-        (resident, var residentBody) = ScreenParts.Card(Ui, "settings.resident", "상주와 알림",
-            "창이 앞에 있으면 앱 안에서, 숨겨져 있거나 다른 창 뒤에 있으면 Windows 알림으로도 알립니다. Windows 알림 설정·방해 금지·정책에 따라 나타나지 않을 수 있습니다.");
-        residentBody.Set(Stack(closeToTray, notifyDropout, notifyRecovered, notifyFinished, residentNote));
+        // 긴 설명은 카드 머리(한 줄, 줄임표)가 아니라 본문에 줄바꿈 글로 둔다 (150% 배율에서 잘리지 않게)
+        (resident, var residentBody) = ScreenParts.Card(Ui, "settings.resident", "상주와 알림");
+        residentBody.Set(Stack(About("settings.resident.about",
+            "창이 앞에 있으면 앱 안에서, 숨겨져 있거나 다른 창 뒤에 있으면 Windows 알림으로도 알립니다. Windows 알림 설정·방해 금지·정책에 따라 나타나지 않을 수 있습니다."),
+            closeToTray, notifyDropout, notifyRecovered, notifyFinished, residentNote));
 
         // ---- 기록 저장 위치 ----
         folderText = Fonts.Wrapped("", Typography.Body, Ui.Brushes.Ink);
@@ -97,8 +101,9 @@ public sealed class SettingsScreen : Screen
         buttons.Children.Add(toDefault);
         buttons.Children.Add(retry);
         buttons.Children.Add(stop);
-        (records, var recordsBody) = ScreenParts.Card(Ui, "settings.records", "기록 저장 위치", "새 측정을 저장할 폴더입니다. 바꾸면 지금까지의 기록도 확인한 뒤 옮깁니다.");
-        recordsBody.Set(Stack(folderText, buttons, progress, recordsStatus));
+        (records, var recordsBody) = ScreenParts.Card(Ui, "settings.records", "기록 저장 위치");
+        recordsBody.Set(Stack(About("settings.records.about", "새 측정을 저장할 폴더입니다. 바꾸면 지금까지의 기록도 확인한 뒤 옮깁니다."),
+            folderText, buttons, progress, recordsStatus));
         state = R.RecordStartup.JournalProblem is not null ? RecordsState.JournalProblem : R.RecordStartup.Interrupted ? RecordsState.Interrupted : RecordsState.Normal;
 
         // ---- 진단 기본값 ----
@@ -116,8 +121,9 @@ public sealed class SettingsScreen : Screen
         var diagButtons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
         diagButtons.Children.Add(diagSave);
         diagButtons.Children.Add(diagReset);
-        (diagnosis, var diagnosisBody) = ScreenParts.Card(Ui, "settings.diagnosis", "진단 기본값", "빠른 진단이 확인할 외부 주소와 도메인입니다. 서로 다른 사업자의 주소를 두 개 적으세요.");
-        diagnosisBody.Set(Stack(tcp0, tcp1, domain0, domain1, diagButtons, diagStatus));
+        (diagnosis, var diagnosisBody) = ScreenParts.Card(Ui, "settings.diagnosis", "진단 기본값");
+        diagnosisBody.Set(Stack(About("settings.diagnosis.about", "빠른 진단이 확인할 외부 주소와 도메인입니다. 서로 다른 사업자의 주소를 두 개 적으세요."),
+            tcp0, tcp1, domain0, domain1, diagButtons, diagStatus));
 
         // ---- 측정 구성 ----
         var open = new GlassButton(Ui, ButtonKind.Secondary, "settings.profile", "측정 구성 열기", Icons.Pencil);
@@ -171,6 +177,13 @@ public sealed class SettingsScreen : Screen
 
     // ---------------- 부품 ----------------
 
+    private TextBlock About(string id, string text)
+    {
+        var t = Fonts.Wrapped(text, Typography.Caption, Ui.Brushes.Muted);
+        AutomationProperties.SetAutomationId(t, id);
+        return t;
+    }
+
     private SettingToggle Toggle(string id, string label, bool value, Action<bool> set)
     {
         var t = new SettingToggle(Ui, id, label, value);
@@ -189,11 +202,11 @@ public sealed class SettingsScreen : Screen
     private GlassTextBox DiagField(string id, string label, string value)
     {
         var f = new GlassTextBox(Ui, id, label, value, null, Size.FieldM);
-        string last = value;
+        diagSeen[f] = value;
         f.Box.TextChanged += (_, _) =>
         {
-            if (f.Text == last) return;
-            last = f.Text;
+            if (f.Text == diagSeen[f]) return;
+            diagSeen[f] = f.Text;
             diagDirty = true;
             diagState = "dirty";
             RenderDiagnosis();
@@ -385,6 +398,7 @@ public sealed class SettingsScreen : Screen
     private void SaveDiagnosis()
     {
         string[] tcp = [tcp0.Text.Trim(), tcp1.Text.Trim()], domains = [domain0.Text.Trim(), domain1.Text.Trim()];
+        MarkDiagSeen();
         diagErrors = DiagnosisDefaults.Validate(tcp, domains);
         if (diagErrors.Count > 0) { diagState = "errors"; RenderDiagnosis(); return; }
         var result = Store.Update(f => f with { Diagnosis = new DiagnosisPrefs(tcp, domains) });
@@ -392,6 +406,11 @@ public sealed class SettingsScreen : Screen
         diagDirty = false;
         diagState = result == SettingsSaveResult.Failed ? "failed" : "saved";
         RenderDiagnosis();
+    }
+
+    private void MarkDiagSeen()
+    {
+        foreach (var f in new[] { tcp0, tcp1, domain0, domain1 }) diagSeen[f] = f.Text;
     }
 
     private void ResetDiagnosis()
@@ -403,6 +422,7 @@ public sealed class SettingsScreen : Screen
         tcp1.Text = cur.TcpTargets.ElementAtOrDefault(1)?.ToString() ?? "";
         domain0.Text = cur.Domains.ElementAtOrDefault(0) ?? "";
         domain1.Text = cur.Domains.ElementAtOrDefault(1) ?? "";
+        MarkDiagSeen();
         diagErrors = new Dictionary<string, string>();
         diagDirty = false;
         diagState = result == SettingsSaveResult.Failed ? "failed" : "saved";
@@ -421,6 +441,10 @@ public sealed class SettingsScreen : Screen
             changeEnabled = change.IsEnabled, retryVisible = retry.Visibility == Visibility.Visible,
         },
         diagnosis = new { state = diagState, errors = diagErrors.Keys, probed = (Context.Diagnosis.Probes as NetPulse.Core.Demo.DemoDiagnosticProbes)?.Probed },
-        resident = new { closeToTray = closeToTray.IsChecked == true, tray = Context.TrayAvailable() },
+        resident = new
+        {
+            closeToTray = closeToTray.IsChecked == true, tray = Context.TrayAvailable(),
+            notifyDropout = notifyDropout.IsChecked == true, notifyRecovered = notifyRecovered.IsChecked == true, notifyFinished = notifyFinished.IsChecked == true,
+        },
     };
 }

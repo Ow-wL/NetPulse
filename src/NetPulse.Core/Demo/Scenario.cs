@@ -107,7 +107,7 @@ public sealed class Scenario
         if (Faults is { } f)
         {
             if (f.DetectDelayMs is < 0) throw new ScenarioException("faults.detectDelayMs는 0 이상입니다.");
-            if (f.Detect is not (null or "unknown")) throw new ScenarioException("faults.detect는 unknown만 쓸 수 있습니다.");
+            if (f.Detect is not (null or "unknown" or "no-ipv4")) throw new ScenarioException("faults.detect는 unknown, no-ipv4 중 하나입니다.");
             if (f.StorageFailFrom is < 0) throw new ScenarioException("faults.storageFailFrom은 0 이상입니다.");
             if (f.StorageRecoverAt is { } r && (f.StorageFailFrom is not { } from || r <= from)) throw new ScenarioException("faults.storageRecoverAt은 storageFailFrom보다 커야 합니다.");
             if ((f.SuspendAt is null) != (f.SuspendSeconds is null)) throw new ScenarioException("faults.suspendAt과 suspendSeconds는 함께 적어야 합니다.");
@@ -156,7 +156,7 @@ public sealed class ScenarioFaults
 {
     /// <summary>탐지가 이만큼 늦게 끝난다 (실제 ms).</summary>
     public int? DetectDelayMs { get; init; }
-    /// <summary>"unknown"이면 탐지 실패 (경로 조회 실패).</summary>
+    /// <summary>"unknown"이면 탐지 실패 (경로 조회 실패), "no-ipv4"면 연결은 있지만 IPv4 기본 경로가 없음.</summary>
     public string? Detect { get; init; }
     /// <summary>두 저장 위치 모두 측정을 시작하지 못한다.</summary>
     public bool StorageStartFail { get; init; }

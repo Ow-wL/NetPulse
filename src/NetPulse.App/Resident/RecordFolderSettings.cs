@@ -38,11 +38,10 @@ public sealed record ResidentServices(RecordMoveService Moves, RecordWorkGate Wo
 public sealed class FaultMoveOps(string spec) : NetPulse.Core.Records.DiskMoveOps
 {
     private string Arg => spec[(spec.IndexOf(':') + 1)..];
-    private static readonly TimeSpan Hold = NetPulse.Design.Tokens.Waits.ReportSlowTest;
     public override bool SameVolume(string a, string b) => spec is not ("cross" or "hold") && !spec.StartsWith("copy:", StringComparison.Ordinal) && !spec.StartsWith("delete:", StringComparison.Ordinal) && base.SameVolume(a, b);
     public override void CopyFile(string from, string to)
     {
-        if (spec == "hold") Thread.Sleep(Hold);   // 옮기는 중 장면: 파일마다 멈춤 (멈추기로 풀린다)
+        if (spec == "hold") Thread.Sleep(NetPulse.Design.Tokens.Waits.ReportSlowTest);   // 옮기는 중 장면: 파일마다 멈춤 (멈추기로 풀린다)
         if (spec.StartsWith("copy:", StringComparison.Ordinal) && from.Contains(Arg, StringComparison.Ordinal)) throw new IOException("시험: 복사 실패");
         base.CopyFile(from, to);
     }

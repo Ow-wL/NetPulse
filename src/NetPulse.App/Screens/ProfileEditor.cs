@@ -173,8 +173,17 @@ public sealed class ProfileEditor : Screen
 
     // ---------------- 화면 ----------------
 
-    private void Rebuild()
+    /// <summary>
+    /// 편집기를 다시 만든다. <paramref name="focusId"/>가 있으면 새로 만든 그 요소로 초점을 돌려놓는다
+    /// (방식 바꾸기·순서 바꾸기는 줄을 다시 만들어, 그대로 두면 키보드 초점이 사라져 Tab이 탐색 줄로 간다).
+    /// </summary>
+    private void Rebuild(string? focusId = null)
     {
+        if (focusId is not null)
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                if (LayoutProbe.FindById(content, focusId) is Control c) c.Focus(FocusState.Programmatic);
+            });
         content.Children.Clear();
         fields.Clear();
         if (locked) content.Children.Add(new Banner(Ui, "profile.locked", BannerKind.Info, "측정 중에는 바꿀 수 없습니다. 측정을 멈추면 고칠 수 있습니다."));
@@ -319,7 +328,10 @@ public sealed class ProfileEditor : Screen
         actions.Children.Add(add);
         actions.Children.Add(redetect);
         stack.Children.Add(actions);
-        var (card, body) = ScreenParts.Card(Ui, "profile.targets", "대상", $"{d.Targets.Count(t => t.Enabled)}개 사용 · 최대 {Profile.MaxTargets}개. Ping에 응답하지 않는 대상은 TCP 연결로 잴 수 있습니다 (연결 거부도 응답으로 셉니다).");
+        var tcpHint = Fonts.Wrapped("Ping에 응답하지 않는 대상은 TCP 연결로 잴 수 있습니다. 연결 거부도 응답으로 셉니다.", Typography.Caption, Ui.Brushes.Muted);
+        AutomationProperties.SetAutomationId(tcpHint, "profile.targets.tcpHint");
+        stack.Children.Insert(1, tcpHint);
+        var (card, body) = ScreenParts.Card(Ui, "profile.targets", "대상", $"{d.Targets.Count(t => t.Enabled)}개 사용 · 최대 {Profile.MaxTargets}개");
         body.Set(stack);
         return card;
     }
@@ -331,8 +343,9 @@ public sealed class ProfileEditor : Screen
         var first = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S2 };
         var up = new GlassButton(Ui, ButtonKind.Icon, $"profile.target.{i}.up", "위로", Icons.Up) { IsEnabled = !locked && i > 0, VerticalAlignment = VerticalAlignment.Bottom };
         var down = new GlassButton(Ui, ButtonKind.Icon, $"profile.target.{i}.down", "아래로", Icons.Down) { IsEnabled = !locked && i < d.Targets.Count - 1, VerticalAlignment = VerticalAlignment.Bottom };
-        up.Click += (_, _) => { (d.Targets[i - 1], d.Targets[i]) = (d.Targets[i], d.Targets[i - 1]); Changed(); Rebuild(); };
-        down.Click += (_, _) => { (d.Targets[i + 1], d.Targets[i]) = (d.Targets[i], d.Targets[i + 1]); Changed(); Rebuild(); };
+        // 옮긴 줄을 따라 같은 단추로 (끝에 닿으면 반대쪽 단추)
+        up.Click += (_, _) => { (d.Targets[i - 1], d.Targets[i]) = (d.Targets[i], d.Targets[i - 1]); Changed(); Rebuild(i - 1 > 0 ? $"profile.target.{i - 1}.up" : $"profile.target.{i - 1}.down"); };
+        down.Click += (_, _) => { (d.Targets[i + 1], d.Targets[i]) = (d.Targets[i], d.Targets[i + 1]); Changed(); Rebuild(i + 1 < d.Targets.Count - 1 ? $"profile.target.{i + 1}.down" : $"profile.target.{i + 1}.up"); };
         first.Children.Add(up);
         first.Children.Add(down);
         first.Children.Add(Field($"profile.target.{i}.name", "이름", t.Name, Size.FieldM, v => t.Name = v));
@@ -354,15 +367,18 @@ public sealed class ProfileEditor : Screen
             if (locked) return;
             t.Method = v == "tcp" ? ProbeMethod.Tcp(int.TryParse(t.Port.Trim(), out var p) ? p : 0) : ProbeMethod.Icmp;
             Changed();
-            Rebuild();
+            Rebuild($"profile.target.{i}.method.{v}");
         };
-        second.Children.Add(method);
+        // 측정 방식·포트는 셋째 줄 (150% 배율에서 둘째 줄이 가로로 넘치지 않게)
+        var third = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
+        third.Children.Add(method);
         if (t.Method.Kind == ProbeMethodKind.Tcp)
-            second.Children.Add(Field($"profile.target.{i}.port", "포트", t.Port, Size.FieldS, v => t.Port = v, "443"));
+            third.Children.Add(Field($"profile.target.{i}.port", "포트", t.Port, Size.FieldS, v => t.Port = v, "443"));
         var remove = new GlassButton(Ui, ButtonKind.Icon, $"profile.target.{i}.remove", "대상 삭제", Icons.Trash) { IsEnabled = !locked, VerticalAlignment = VerticalAlignment.Bottom };
         remove.Click += (_, _) => { d.Targets.RemoveAt(i); Changed(); Rebuild(); };
         second.Children.Add(remove);
         lines.Children.Add(second);
+        lines.Children.Add(third);
         var panel = new GroupPanel($"profile.target.{i}", t.Name.Length == 0 ? $"대상 {i + 1}" : t.Name);
         panel.Children.Add(new Border { BorderBrush = Ui.Brushes.Edge, BorderThickness = new Thickness(0, 0, 0, Size.Hairline), Padding = new Thickness(0, 0, 0, Space.S4), Child = lines });
         return panel;
