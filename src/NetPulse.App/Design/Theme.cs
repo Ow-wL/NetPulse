@@ -80,6 +80,7 @@ public sealed class Theme
     public void OnModeChanged(EffectiveMode previous, EffectiveMode next)
     {
         if (closing) return;   // 닫는 중에는 새 전환도 대기 요청도 받지 않는다 (M2 이월 1)
+        if (suspended) { suspendedMode = next; return; }   // 숨긴 동안: 최신 값만 기억 (M9 설계 A1)
         if (transition is not null)
         {
             if (next.ReduceMotion || next.HighContrast) { pending = next; transition.Cancel(); return; }   // 바로 끝내고 최신 모드
@@ -221,6 +222,27 @@ public sealed class Theme
             }
             done.TrySetResult();
             if (ReferenceEquals(transitionDone, done)) transitionDone = null;
+        }
+    }
+
+    private bool suspended;
+    private EffectiveMode? suspendedMode;
+
+    /// <summary>창 숨김 (M9 설계 A1): 진행 중 전환은 바로 끝내고(취소), 숨긴 동안의 모드 변경은 값만 기억한다.</summary>
+    public void Suspend()
+    {
+        suspended = true;
+        transition?.Cancel();
+    }
+
+    /// <summary>다시 열기: 숨긴 동안 바뀐 모드를 전환 없이 적용한다.</summary>
+    public void Resume()
+    {
+        suspended = false;
+        if (suspendedMode is { } m)
+        {
+            suspendedMode = null;
+            Apply(m);
         }
     }
 

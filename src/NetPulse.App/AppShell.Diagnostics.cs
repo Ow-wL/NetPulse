@@ -75,6 +75,7 @@ public sealed partial class AppShell
             fallbacks = ui.Theme.Fallbacks,
             snapshotLayers = ui.Theme.SnapshotLayersInTree,
             lowPerformance = ui.Pacer.Low,
+            resident = ResidentDiag(),
         };
         diag.Text = JsonSerializer.Serialize(state);
     }

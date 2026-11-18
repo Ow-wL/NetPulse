@@ -14,6 +14,8 @@
     <AssemblyName>NetPulse</AssemblyName>
     <RootNamespace>NetPulse.App</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- 앱·트레이 아이콘 (M9). tools/make-icon.ps1로 만든다 -->
+    <ApplicationIcon>Assets\NetPulse.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" />
@@ -24,6 +26,7 @@
          (Windows App SDK가 IncludeAllContentForSelfExtract를 강제하고, AppContext.BaseDirectory가 풀린 폴더를 가리킨다).
          실행 파일의 해시가 이 파일들을 덮는다. -->
     <Content Include="..\..\assets\fonts\*.otf;..\..\assets\fonts\OFL-Pretendard.txt" Link="Fonts\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Assets\NetPulse.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\demo\scenarios\*.json" Link="demo\scenarios\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <!-- 패키지 없는 배포에서 App.xbf와 앱 .pri가 배포 폴더로 복사되지 않는 것을 M0에서 관측했다. 직접 복사한다. -->

@@ -22,12 +22,14 @@ public sealed class AppDriver : IDisposable
     private readonly bool ownsUserData;
     private readonly DateTime startedUtc;
     private bool closed;
+    private readonly IntPtr windowHandle;
 
     private AppDriver(Process process, AutomationElement window, string userData, bool ownsUserData, DateTime startedUtc)
     {
         this.process = process;
         this.startedUtc = startedUtc;
         Window = window;
+        windowHandle = new IntPtr(window.Current.NativeWindowHandle);
         UserData = userData;
         this.ownsUserData = ownsUserData;
     }
@@ -53,13 +55,23 @@ public sealed class AppDriver : IDisposable
 
     public static AppDriver Launch(params string[] args) => LaunchWith(null, args);
 
-    /// <summary>사용자 데이터 폴더를 지정해 띄운다 (설정 유지 시험). null이면 새 임시 폴더.</summary>
-    public static AppDriver LaunchWith(string? userData, params string[] args)
+    /// <summary>
+    /// 사용자 데이터 폴더를 지정해 띄운다 (설정 유지 시험). null이면 새 임시 폴더.
+    /// 측정 중 창 닫기가 지금처럼 저장 후 종료가 되도록 <c>--close-to-tray off</c>를 넣는다 (M9 설계 A7: 기존 시험 보존).
+    /// 상주 시험은 인수에 직접 <c>--close-to-tray</c>를 주거나 <see cref="LaunchRaw"/>로 기본값을 쓴다.
+    /// </summary>
+    public static AppDriver LaunchWith(string? userData, params string[] args) => LaunchCore(userData, inject: !args.Contains("--close-to-tray"), args);
+
+    /// <summary>인수를 넣지 않고 띄운다: 설정 파일의 기본값(측정 중 닫기 = 트레이)을 그대로 검증한다 (M9 설계 A7 [1-16]).</summary>
+    public static AppDriver LaunchRaw(string? userData, params string[] args) => LaunchCore(userData, inject: false, args);
+
+    private static AppDriver LaunchCore(string? userData, bool inject, string[] args)
     {
         bool owns = userData is null;
         userData ??= NewUserData();
         var info = new ProcessStartInfo(Executable) { UseShellExecute = false };
         foreach (var a in args) info.ArgumentList.Add(a);
+        if (inject && !args.Contains("--showcase")) { info.ArgumentList.Add("--close-to-tray"); info.ArgumentList.Add("off"); }
         info.ArgumentList.Add("--user-data");
         info.ArgumentList.Add(userData);
         var startedUtc = DateTime.UtcNow;
@@ -261,6 +273,88 @@ public sealed class AppDriver : IDisposable
         return process.ExitCode;
     }
 
+    // ---------------- 상주 (M9) ----------------
+
+    /// <summary>프로세스가 살아 있는가.</summary>
+    public bool Alive => !process.HasExited;
+
+    /// <summary>창 닫기 요청만 보낸다 (숨김이면 프로세스는 남는다).</summary>
+    public void RequestClose() => ((WindowPattern)Window.GetCurrentPattern(WindowPattern.Pattern)).Close();
+
+    /// <summary>같은 사용자 폴더로 실행 파일을 하나 더 띄워 끝날 때까지 기다리고 그 종료 코드 (두 번째 실행, A5).</summary>
+    public int RunSecond(params string[] args)
+    {
+        var info = new ProcessStartInfo(Executable) { UseShellExecute = false };
+        foreach (var a in args) info.ArgumentList.Add(a);
+        info.ArgumentList.Add("--user-data");
+        info.ArgumentList.Add(UserData);
+        using var p = Process.Start(info) ?? throw new InvalidOperationException("두 번째 실행을 띄우지 못했습니다.");
+        if (!p.WaitForExit(20000)) { p.Kill(); throw new TimeoutException("두 번째 실행이 20초 안에 끝나지 않았습니다."); }
+        return p.ExitCode;
+    }
+
+    /// <summary>
+    /// <c>--exit</c>로 종료시킨다 (트레이 "종료"와 같은 경로): 두 번째 실행의 종료 코드와 함께 <b>이 프로세스가 끝났는지·종료 코드</b>까지 확인한다 [2-4].
+    /// </summary>
+    public (int Second, int First) Exit()
+    {
+        int second = RunSecond("--exit");
+        if (!process.WaitForExit(15000))
+        {
+            process.Kill(); process.WaitForExit(10000);
+            closed = true;
+            string evidence = CrashEvidence.Collect(process, UserData, "exit-timeout", startedUtc);
+            throw new TimeoutException($"--exit 뒤 15초 안에 끝나지 않았습니다 (두 번째 실행 {second}, 증거 {evidence}).");
+        }
+        closed = true;
+        FailIfAbnormal("exit");
+        return (second, process.ExitCode);
+    }
+
+    /// <summary>트레이 수신 창 (숨은 최상위 창, A3).</summary>
+    public IntPtr TrayWindow() => WaitFor(() => Native.FindWindowW("NetPulse.Tray", "NetPulse.Tray." + process.Id), h => h != IntPtr.Zero, "트레이 수신 창");
+
+    /// <summary>
+    /// 트레이 콜백을 v4 형식으로 보낸다 (<c>WM_APP+1</c>, lParam = MAKELPARAM(사건, 1), wParam = 좌표).
+    /// Shell을 거치지 않은 <b>처리기 시험</b>이다 (A7-1). 메뉴는 모달이라 비동기로 보낸다.
+    /// </summary>
+    public void PostTray(uint ev, int x = 200, int y = 200) =>
+        Native.PostMessageW(TrayWindow(), 0x8000 + 1, (IntPtr)((y << 16) | (x & 0xFFFF)), (IntPtr)((1 << 16) | (int)ev));
+
+    public const uint NinSelect = 0x0400, NinKeySelect = 0x0401, NinBalloonClick = 0x0405, WmContextMenu = 0x007B;
+
+    /// <summary>세션 종료 메시지 (A6): 질의 → 확정/취소. SendMessage라 처리가 끝날 때까지 기다린다.</summary>
+    public void SendSessionEnd(bool ending)
+    {
+        var h = TrayWindow();
+        Native.SendMessageTimeoutW(h, 0x0011, IntPtr.Zero, IntPtr.Zero, 0x2, 10000, out _);
+        Native.SendMessageTimeoutW(h, 0x0016, (IntPtr)(ending ? 1 : 0), IntPtr.Zero, 0x2, 10000, out _);
+    }
+
+    /// <summary>앱 프로세스의 트레이 팝업 메뉴 (데스크톱 UIA, 프로세스 Id 확인, A7-1).</summary>
+    public AutomationElement TrayMenu()
+    {
+        var condition = new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty, process.Id), new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Menu));
+        return WaitFor(() => AutomationElement.RootElement.FindFirst(TreeScope.Children, condition), e => e is not null, "트레이 메뉴")!;
+    }
+
+    /// <summary>트레이 메뉴 항목 (이름, 켜짐).</summary>
+    public IReadOnlyList<(string Name, bool Enabled, AutomationElement Element)> TrayMenuItems()
+    {
+        var items = TrayMenu().FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem));
+        return items.Cast<AutomationElement>().Select(e => (e.Current.Name, e.Current.IsEnabled, e)).ToArray();
+    }
+
+    /// <summary>트레이 메뉴 항목 고르기 (Invoke).</summary>
+    public void PickTrayMenu(string name)
+    {
+        var item = TrayMenuItems().First(i => i.Name == name).Element;
+        ((InvokePattern)item.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
+    }
+
+    /// <summary>창이 화면에 보이는가 (Win32 기준, 숨김이면 거짓).</summary>
+    public bool WindowVisible => Native.IsWindowVisible(windowHandle);
+
     /// <summary>창 닫기 버튼과 같은 경로로 닫고, 끝날 때까지 기다려 종료 코드를 돌려준다.</summary>
     public int Close()
     {
@@ -347,6 +441,10 @@ public sealed class AppDriver : IDisposable
         [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
         [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindowW(string? className, string? title);
+        [DllImport("user32.dll")] public static extern bool PostMessageW(IntPtr h, uint msg, IntPtr w, IntPtr l);
+        [DllImport("user32.dll")] public static extern IntPtr SendMessageTimeoutW(IntPtr h, uint msg, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
+        [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
         [StructLayout(LayoutKind.Sequential)] public struct KEYBDINPUT { public ushort wVk, wScan; public uint dwFlags, time; public IntPtr dwExtraInfo; }
         [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public IntPtr dwExtraInfo; }
         [StructLayout(LayoutKind.Explicit)] public struct InputUnion { [FieldOffset(0)] public KEYBDINPUT ki; [FieldOffset(0)] public MOUSEINPUT mi; }

@@ -43,6 +43,16 @@ public sealed record StartupOptions
     /// <summary>한 번 도는 모션을 이 진행도(0~1)에서 멈춘다 (화면 전환 캡처)</summary>
     public double? MotionHold { get; init; }
 
+    // ---- M9 (설계 A·B) ----
+    /// <summary>같은 사용자 폴더로 떠 있는 실행을 저장 후 종료시키고 끝난다 (트레이 "종료"와 같은 경로). 떠 있는 것이 없으면 종료 코드 2.</summary>
+    public bool Exit { get; init; }
+    /// <summary>이번 실행에만: 측정 중 창을 닫으면 트레이로 숨길지 (저장하지 않음). 기존 UI 시험은 off로 지금 동작을 지킨다.</summary>
+    public bool? CloseToTray { get; init; }
+    /// <summary>시험: 기록 저장 위치 고르기 대화상자 대신 이 폴더 (B3).</summary>
+    public string? PickFolder { get; init; }
+    /// <summary>시험 주입 (B3): copy:&lt;측정 Id&gt;(그 기록 복사 실패), delete:&lt;Id&gt;(원본 삭제 실패), kill-after:&lt;n&gt;(n개 옮긴 뒤 프로세스 강제 종료), cross(다른 볼륨처럼 복사 경로).</summary>
+    public string? MoveFail { get; init; }
+
     /// <summary>부품 전시 화면 (M2)</summary>
     public bool Showcase { get; init; }
     /// <summary>이번 실행에만 쓰는 설정 덮어쓰기 (저장하지 않음)</summary>
@@ -101,6 +111,10 @@ public sealed record StartupOptions
                 "--demo-mark" => o with { DemoMark = long.Parse(Next(), CultureInfo.InvariantCulture) },
                 "--motion-hold" => o with { MotionHold = double.Parse(Next(), CultureInfo.InvariantCulture) },
                 "--showcase" => o with { Showcase = true },
+                "--exit" => o with { Exit = true },
+                "--close-to-tray" => o with { CloseToTray = OnOff(Next()) },
+                "--pick-folder" => o with { PickFolder = Next() },
+                "--move-fail" => o with { MoveFail = Next() is var mf && (mf == "cross" || mf.StartsWith("copy:", StringComparison.Ordinal) || mf.StartsWith("delete:", StringComparison.Ordinal) || mf.StartsWith("kill-after:", StringComparison.Ordinal)) ? mf : throw new ArgumentException("copy:<id>, delete:<id>, kill-after:<n>, cross 중 하나") },
                 "--theme" => o with
                 {
                     Theme = Next() switch

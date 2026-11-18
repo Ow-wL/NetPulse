@@ -350,6 +350,24 @@ public sealed class RecordsScreen : Screen
         Render(Context.Host.Snapshot);
     }
 
+    protected override void OnSuspend()
+    {
+        renderGen++;                    // 이미 디스패처에 넘어간 조각은 세대가 달라 아무것도 하지 않는다
+        perFrame.Clear();
+        timelineQueued = false;
+        if (frameHooked)
+        {
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= RunOnePerFrame;
+            frameHooked = false;
+        }
+    }
+
+    protected override void OnResume()
+    {
+        if (Visibility == Visibility.Visible) Rerender();   // 반쯤 그린 상세를 완전히 다시 (초안은 편집 상태에 있다)
+        else renderedKey = "";
+    }
+
     // ---------------- 그리기 ----------------
 
     public override void Render(HostSnapshot snapshot)
@@ -648,7 +666,7 @@ public sealed class RecordsScreen : Screen
 
     private void RunOnePerFrame(object? sender, object e)
     {
-        if (perFrame.Count == 0 || Context.IsClosing())
+        if (perFrame.Count == 0 || Context.IsClosing() || Suspended)
         {
             Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= RunOnePerFrame;
             frameHooked = false;
@@ -656,7 +674,8 @@ public sealed class RecordsScreen : Screen
             return;
         }
         var next = perFrame.Dequeue();
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { if (!Context.IsClosing()) next(); });
+        int gen = renderGen;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { if (!Context.IsClosing() && !Suspended && gen == renderGen) next(); });
     }
 
     private void QueueTimeline()

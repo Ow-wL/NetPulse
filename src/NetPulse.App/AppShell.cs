@@ -21,7 +21,8 @@ namespace NetPulse.App;
 /// 메인 창 (M5 설계 4.2). 층: 배경 빛 → 앱 격자(왼쪽 탐색, 오른쪽 화면) → 알림 → 대화상자 → 진단 값. 전시 화면과 같은 구성이다.
 /// 측정 수명은 <see cref="MeasurementHost"/>(Core)가 갖고, 창은 그 장면을 UI 스레드로 옮겨 보이는 화면만 다시 그린다.
 /// 제목 표시줄은 넓히지 않고 테마 색으로 칠한다 (설계 4.2, M11 재검토).
-/// 닫기: 진행 중인 테마 전환 정리 → 메모 초안·측정 저장(트레이는 M9) → 앱 정리 → 닫기.
+/// 닫기 (M9 설계 A1): 측정 중 창 닫기는 트레이로 숨김(<see cref="CloseWindow"/>, AppShell.Resident.cs).
+/// 종료(<see cref="BeginClose"/>): 진행 중인 테마 전환 정리 → 메모 초안·측정 저장 → 앱 정리 → 닫기.
 /// </summary>
 public sealed partial class AppShell : Window
 {
@@ -48,7 +49,6 @@ public sealed partial class AppShell : Window
     private readonly DispatcherQueueTimer selfTestTimer;
     private bool renderQueued, diagQueued, closing, closeAllowed, navigating;
     private readonly ObservationWatch observation = new();
-    private bool lastStorageFailing;
     private UIElement liveContent = null!;
 
     /// <summary>설정 저장 경계 (M9 설계 B1).</summary>
@@ -128,7 +128,7 @@ public sealed partial class AppShell : Window
         rail.Selected += id => { if (!navigating) Navigate(id, null); };
         host.Changed += QueueRender;
         diagnosis.Changed += QueueRender;
-        host.Finished += f => DispatcherQueue.TryEnqueue(() => { if (!closeAllowed) OnFinished(f); });
+        host.Finished += f => DispatcherQueue.TryEnqueue(() => { if (!closeAllowed) OnFinished(f); });   // 앱 안 끝 알림 (숨김이면 풍선은 알림 규칙이)
         recent.Changed += QueueDiag;
         ui.Effects.Changed += (_, _) => QueueDiag();
         ui.Motion.ActiveChanged += QueueDiag;
@@ -137,7 +137,8 @@ public sealed partial class AppShell : Window
         root.GotFocus += (_, _) => QueueDiag();
         AddAccelerators();
 
-        AppWindow.Closing += (_, e) => { if (closeAllowed) return; e.Cancel = true; BeginClose(); };
+        AppWindow.Closing += (_, e) => { if (closeAllowed) return; e.Cancel = true; CloseWindow(); };
+        InitResident();
         selfTestTimer = DispatcherQueue.CreateTimer();
         selfTestTimer.Interval = MotionTokens.Slow * 3;
         selfTestTimer.IsRepeating = false;
@@ -291,12 +292,12 @@ public sealed partial class AppShell : Window
 
     private void QueueRender()
     {
-        if (renderQueued || closeAllowed) return;
+        if (renderQueued || closeAllowed || hidden) return;   // 숨긴 동안 그리지 않는다: 다시 열 때 한 번 (M9 설계 A1)
         renderQueued = true;
         DispatcherQueue.TryEnqueue(() =>
         {
             renderQueued = false;
-            if (closeAllowed) return;   // 창을 닫은 뒤 큐에서 도는 그리기는 요소를 건드리지 않는다
+            if (closeAllowed || hidden) return;   // 창을 닫은 뒤 큐에서 도는 그리기는 요소를 건드리지 않는다
             try { RenderProfile.Time("shell.render", () => Render(host.Snapshot)); }
             catch (Exception ex) { log.Write("renderFailed", new { type = ex.GetType().Name, message = ex.Message, at = ex.StackTrace?.Split(Environment.NewLine).Where(l => l.Contains("NetPulse")).Take(6) }); }
         });
@@ -308,20 +309,13 @@ public sealed partial class AppShell : Window
         if (screens.Current is not HomeScreen && screens.Prepared("home") is HomeScreen home) home.Warm(s);
         // 상태 반응: 외부 응답 없음이나 링크 끊김이 관측되고 있으면 배경 빛이 붉게 (끝나면 원래대로).
         // 띠·링크 다운은 관측이지 판정이 아니다: 알림도 관측한 그것만 말한다 (끊김 여부·원인은 잠정 분석이 말한다, G4 M5 1라운드 B4·2라운드 3)
-        // 종류는 이 장면에서 먼저 정하고 알약을 그린다 (M5 이월 3: 이전 종류로 한 번 그려지던 것), 종류마다 전환 알림
+        // 종류는 이 장면에서 먼저 정하고 알약을 그린다 (M5 이월 3: 이전 종류로 한 번 그려지던 것).
+        // 관측 전환·저장 실패 알림은 렌더와 떨어진 알림 규칙이 낸다 (M9 설계 A1·A4 [1-4]: 숨긴 동안에도, 장면을 버리지 않고)
         bool wasOutage = observation.Current != ObservationKind.None;
-        var change = observation.Update(s);
+        observation.Update(s);
         bool outage = observation.Current != ObservationKind.None;
         RenderProfile.Time("shell.status", () => RenderStatus(s));
         if (outage != wasOutage) ui.Lights.SetState(outage);
-        if (change is not null)
-        {
-            var (title, body, warning) = ObservationWatch.Message(change);
-            toasts.Show(warning ? ToastKind.Warning : ToastKind.Info, title, body);
-        }
-        bool storage = s.Status?.StorageFailing == true;
-        if (storage && !lastStorageFailing) toasts.Show(ToastKind.Error, "기록을 저장하지 못하고 있습니다", "측정은 계속하며 다시 시도합니다.", autoClose: false);
-        lastStorageFailing = storage;
         QueueDiag();
     }
 
@@ -354,6 +348,7 @@ public sealed partial class AppShell : Window
             await recent.RefreshAsync(running).ConfigureAwait(false);
         });
         string reason = f.Result.EndReason switch { EndReason.Completed => "계획한 시간을 마쳤습니다.", EndReason.Stopped => "측정을 멈추고 저장했습니다.", _ => "측정이 끝났습니다." };
+        if (hidden) { QueueRender(); return; }   // 숨김: 끝 알림은 풍선 (알림 규칙)
         if (f.Result.Unsaved > 0 || f.Result.SealFailed)
             toasts.Show(ToastKind.Warning, "측정이 끝났습니다 · 일부 저장 안 됨", $"저장하지 못한 회차 {f.Result.Unsaved}개", autoClose: false);
         else toasts.Show(ToastKind.Success, "측정이 끝났습니다", reason);
@@ -366,7 +361,13 @@ public sealed partial class AppShell : Window
     {
         if (closing) return;
         closing = true;
+        instance?.MarkClosing();   // 두 번째 실행의 요청에는 closing으로 답한다 (A5)
+        host.BlockStarts();
         runTimer?.Stop();
+        // 종료를 시작하면 화면의 프레임 구독·쌓인 프레임 작업부터 끊는다 (M7 이월 4, M9 설계 C2)
+        screens.Suspend();
+        ui.Pacer.Pause();
+        log.Write("closeStep", new { step = "begin", thread = Environment.CurrentManagedThreadId, hidden });
         // 진단 억제는 첫 await 전에 (테마 정리를 기다리는 동안 결과를 저장·게시하지 않게, G4 1라운드 b4). 끝나기는 아래에서 기다린다
         var diagnosisStop = diagnosis.ShutdownAsync();
         // 리포트 내보내기 취소도 첫 await 전에 보낸다: 쓰는 중이면 조각 사이에서 멈추고 임시 파일을 지운다 (G4 M8 2라운드 b1)
@@ -400,8 +401,11 @@ public sealed partial class AppShell : Window
             // 닫은 뒤에는 화면 요소를 건드리는 큐 작업·타이머가 돌지 않게 먼저 끊는다
             // (게이트에서 닫을 때 드물게 WinUI 내부 예외 0xC000027B로 끝났다, G4 M5 2라운드 반영 중)
             closeAllowed = true;
+            log.Write("closeStep", new { step = "detach", thread = Environment.CurrentManagedThreadId });
             toasts.StopAll();
+            tray?.Dispose();
             ui.Detach();
+            log.Write("closeStep", new { step = "close", thread = Environment.CurrentManagedThreadId });
             Close();
         }
     }

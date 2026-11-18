@@ -70,6 +70,12 @@ public static class Waits
     public static readonly TimeSpan ThemeCleanup = TimeSpan.FromSeconds(2);
     /// <summary>창을 닫을 때 메모·노트 쓰기를 기다리는 한도 (M5 설계 4.5)</summary>
     public static readonly TimeSpan CloseWrites = TimeSpan.FromSeconds(3);
+    /// <summary>두 번째 실행이 떠 있는 실행에 요청을 넘기거나 넘겨받기를 기다리는 전체 한도 (M9 설계 A5)</summary>
+    public static readonly TimeSpan InstanceClaim = TimeSpan.FromSeconds(10);
+    /// <summary>세션 종료(로그오프·시스템 종료) 때 데이터 작업을 막고 기다리는 한도 (M9 설계 A6, Windows가 주는 시간 안)</summary>
+    public static readonly TimeSpan SessionEnd = TimeSpan.FromSeconds(4);
+    /// <summary>트레이 도움말의 경과 시간 갱신 간격 (M9 설계 A3)</summary>
+    public static readonly TimeSpan TrayTooltip = TimeSpan.FromSeconds(1);
     /// <summary>시험 주입 <c>--report-fail slow</c>: 내보내기를 이만큼 늦춘다 (M8 "내보내는 중" 장면)</summary>
     public static readonly TimeSpan ReportSlowTest = TimeSpan.FromSeconds(4);
 

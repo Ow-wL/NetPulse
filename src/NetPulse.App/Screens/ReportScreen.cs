@@ -152,6 +152,16 @@ public sealed class ReportScreen : Screen
 
     private bool entered;
 
+    /// <summary>다시 열기: 숨김으로 멈춘 종이 면 그리기를 이어 간다 (M9 설계 A1).</summary>
+    protected override void OnResume()
+    {
+        if (Visibility == Visibility.Visible && pausedDraw is { } resume)
+        {
+            pausedDraw = null;
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += resume;
+        }
+    }
+
     public override void Entered()
     {
         entered = true;
@@ -500,7 +510,7 @@ public sealed class ReportScreen : Screen
                 if (ReferenceEquals(pausedDraw, (EventHandler<object>)OnFrame)) pausedDraw = null;
                 return;
             }
-            if (Visibility != Visibility.Visible)
+            if (Visibility != Visibility.Visible || Suspended)
             {
                 // 화면을 떠남: 숨은 종이 면을 계속 만들지 않는다. 들어오면 이어서 (G4 M8 1라운드 b5)
                 Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFrame;

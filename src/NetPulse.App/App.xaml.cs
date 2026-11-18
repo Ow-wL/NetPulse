@@ -54,6 +54,12 @@ public partial class App : Application
         var options = StartupOptions.Parse(Environment.GetCommandLineArgs().Skip(1).ToArray());
         Directory.CreateDirectory(options.UserData);
         log = new AppLog(options.UserData);
+        SingleInstance? owner = null;
+        if (!options.Showcase)
+        {
+            owner = ClaimInstance(options, log);
+            if (owner is null) return;   // 요청을 넘기고 끝남 (Environment.Exit)
+        }
         var load = SettingsFormat.Load(options.UserData);
         log.Write("settings", new { status = load.Status.ToString().ToLowerInvariant(), detail = load.Detail, repaired = load.Repaired });   // 칸 이름만, 값 없음
         var settings = new SettingsStore(options.UserData, load);
@@ -101,7 +107,9 @@ public partial class App : Application
         });
         var mh = host;
         var diagnosis = new DiagnosisHost(world.Diagnostics, new DiagnosisStore(Path.Combine(options.UserData, "diagnoses")), () => mh.RunningId, () => world.Now, version);
-        window = new AppShell(options, log, settings, host, recent, memos, diagnosis, ShutdownAsync);
+        var shell = new AppShell(options, log, settings, host, recent, memos, diagnosis, ShutdownAsync);
+        window = shell;
+        shell.AttachInstance(owner!);
         window.Activate();
     }
 
@@ -133,6 +141,33 @@ public partial class App : Application
         });
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// 단일 실행 (M9 설계 A5). 첫 실행이면 그 개체(프로세스가 끝날 때까지 쥔다), 아니면 떠 있는 실행에 열기·종료를 넘기고
+    /// 프로세스를 끝낸다: 0 = 넘김(종료는 대상이 끝남까지), 2 = <c>--exit</c>인데 떠 있는 것 없음, 3 = 10초 안에 답 없음.
+    /// </summary>
+    private static SingleInstance? ClaimInstance(StartupOptions options, AppLog log)
+    {
+        string key = SingleInstance.KeyFor(options.UserData);
+        string command = options.Exit ? "exit" : "open";
+        if (!options.Exit && SingleInstance.TryAcquire(key) is { } first) return first;
+        AllowSetForegroundWindow(-1);   // 받는 쪽이 창을 앞으로 가져올 수 있게 (사용자가 연 이 실행이 전경 권한을 가진다)
+        var (owner, delivered, sawOther) = SingleInstance.ClaimOrSendAsync(key, command, NetPulse.Design.Tokens.Waits.InstanceClaim).GetAwaiter().GetResult();
+        int code;
+        if (options.Exit)
+        {
+            owner?.Dispose();
+            code = !sawOther ? 2 : owner is not null ? 0 : 3;
+        }
+        else if (owner is not null) return owner;   // 앞 실행이 종료 중이었다: 이어서 첫 실행으로
+        else code = delivered ? 0 : 3;
+        log.Write("instance", new { command, delivered, sawOther, code });
+        Environment.Exit(code);
+        return null;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool AllowSetForegroundWindow(int processId);
 
     /// <summary>보기 설정 저장 (Effects가 부른다). 실패는 종류만 기록.</summary>
     internal static Action<AppSettings> PersistLook(SettingsStore store, AppLog log) => look =>
