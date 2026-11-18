@@ -47,6 +47,8 @@ public sealed record HostOptions
     public TimeSpan AnalysisInterval { get; init; } = TimeSpan.FromSeconds(5);
     /// <summary>시험·캡처: 측정 시작 직전에 멈춘다 (시작 중 화면)</summary>
     public bool HoldStart { get; init; }
+    /// <summary>기록 작업 출입문 (M9 설계 B3): 옮기는 동안 측정 시작·끝난 측정의 메모 쓰기를 막는다.</summary>
+    public RecordWorkGate? WorkGate { get; init; }
     public string AppVersion { get; init; } = "0.0.0";
 }
 
@@ -189,6 +191,17 @@ public sealed class MeasurementHost : IAsyncDisposable
     public async Task<bool> StartAsync()
     {
         Profile profile;
+        bool moving = false;
+        lock (gate)
+        {
+            if (state is not (HostState.Idle) || startsBlocked) return false;
+            if (options.WorkGate?.Closed == true)
+            {
+                startError = "기록을 옮기는 중에는 측정을 시작할 수 없습니다.";
+                moving = true;
+            }
+        }
+        if (moving) { Publish(); return false; }
         lock (gate)
         {
             if (state is not (HostState.Idle) || startsBlocked) return false;
@@ -370,8 +383,11 @@ public sealed class MeasurementHost : IAsyncDisposable
         if (live is not null) result = await live.ConfigureAwait(false);
         else
         {
-            var folder = NotesFolder(sessionId);
-            result = folder is null ? EventWriteState.Lost
+            // 끝난 측정의 노트는 기록 폴더에 쓴다: 옮기는 동안은 쓰지 않고 초안으로 남긴다 (M9 설계 B3 출입문)
+            using var ticket = options.WorkGate?.TryEnter();
+            var folder = options.WorkGate is not null && ticket is null ? null : NotesFolder(sessionId);
+            result = options.WorkGate is not null && ticket is null ? EventWriteState.Pending
+                : folder is null ? EventWriteState.Lost
                 : await notes.WriteAsync(folder, sessionId, mark, atMs, world.Now, memo, () => MemoEpoch(sessionId, mark) == mine).ConfigureAwait(false);
         }
         // 저장한 그 글일 때만 초안을 지운다: 기다리는 동안 새로 쓴 글은 남긴다 (G4 M5 1라운드 A5)

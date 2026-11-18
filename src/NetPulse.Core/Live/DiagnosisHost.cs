@@ -39,7 +39,7 @@ public sealed record DiagnosisSnapshot(long Version, DiagnosisOperation Operatio
 /// </summary>
 public sealed class DiagnosisHost
 {
-    private readonly DiagnosisWorld world;
+    private DiagnosisWorld world;
     private readonly DiagnosisStore store;
     private readonly Func<string?> runningMeasurementId;
     private readonly Func<DateTimeOffset> now;
@@ -57,6 +57,20 @@ public sealed class DiagnosisHost
     private Task current = Task.CompletedTask, siteTask = Task.CompletedTask;
     private long version;
     private DiagnosisSnapshot snapshot;
+
+    /// <summary>
+    /// 진단 기본값을 바꾼다 (M9 설계 B4). 진행 중인 진단은 시작할 때 받은 설정으로 끝까지 돈다 (다음 진단부터).
+    /// </summary>
+    public void SetSettings(DiagnosisSettings settings)
+    {
+        lock (gate) world = world with { Settings = settings };
+    }
+
+    /// <summary>지금 진단 기본값.</summary>
+    public DiagnosisSettings CurrentSettings { get { lock (gate) return world.Settings; } }
+
+    /// <summary>진단 세계 (데모 진단 값이 검사기를 본다).</summary>
+    public IDiagnosticProbes Probes => world.Probes;
 
     public DiagnosisHost(DiagnosisWorld world, DiagnosisStore store, Func<string?> runningMeasurementId, Func<DateTimeOffset> now, string appVersion)
     {

@@ -299,7 +299,11 @@ public static class RecordReader
     private static MeasurementRecord Fail(RecordStatus status, string problem, DamageCounts d) =>
         new(status, problem, null, [], [], [], null, EndReason.Interrupted, d, [], null, null);
 
-    /// <summary>측정 Id로 여러 위치에서 조각 폴더를 찾는다 (M3 설계 6.6). 접근할 수 없는 위치는 건너뛴다.</summary>
+    /// <summary>
+    /// 측정 Id로 여러 위치에서 조각 폴더를 찾는다 (M3 설계 6.6). 접근할 수 없는 위치는 건너뛴다.
+    /// 위치 순서대로 돌려준다: 같은 조각 번호가 여러 위치에 있으면 읽기(<see cref="Read"/>)·목록(<see cref="RecordCatalog"/>)이
+    /// 앞 위치의 것을 쓴다 (M9 설계 B3 정본 규칙 [1-7]). 폴더 이름이 같아도 조각 번호가 다를 수 있다(측정 중 대체 위치로 옮긴 조각).
+    /// </summary>
     public static IReadOnlyList<string> FindSegments(string measurementId, IEnumerable<string> locations)
     {
         var found = new List<string>();

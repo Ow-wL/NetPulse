@@ -21,6 +21,9 @@ public sealed record MemoSaveResult(EventWriteState State, bool Latest, bool Tru
 /// </summary>
 public sealed class RecordMemos(NotesWriter writer, Func<DateTimeOffset> now)
 {
+    /// <summary>기록 작업 출입문 (M9 설계 B3).</summary>
+    public RecordWorkGate? WorkGate { get; init; }
+
     private readonly object gate = new();
     /// <summary>앞 요청이 쓰기를 넣으면 끝나는 작업 (부른 순서대로 이어 붙임, 세대 발급과 같은 잠금에서).</summary>
     private Task queued = Task.CompletedTask;
@@ -51,6 +54,9 @@ public sealed class RecordMemos(NotesWriter writer, Func<DateTimeOffset> now)
     public async Task<MemoSaveResult> SaveAsync(string key, IReadOnlyList<string> segments, string measurementId, string mark, long markAtMs, string? memo)
     {
         var (text, truncated) = SymptomMarks.Clean(memo);
+        // 기록을 옮기는 동안은 쓰지 않는다 (M9 설계 B3 출입문). 화면은 그동안 메모 칸을 읽기 전용으로 둔다 — 이것은 안전망
+        using var ticket = WorkGate?.TryEnter();
+        if (WorkGate is not null && ticket is null) return new MemoSaveResult(EventWriteState.Lost, true, truncated, text);
         long generation;
         Task previous;
         var mine = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

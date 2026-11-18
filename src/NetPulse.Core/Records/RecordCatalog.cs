@@ -73,6 +73,9 @@ public static class RecordCatalog
         var segments = new List<int>();
         bool unreadableHeader = false, damagedSummary = false;
         RecordSummary? summary = null;
+        // 정본 규칙 (M9 설계 B3 [1-7]): 같은 조각 번호가 여러 위치에 있으면 앞 위치(폴더 목록 순서)의 것만 쓴다.
+        // 뒤 사본은 항목의 조각에서도 빼서 읽기·요약·메모 쓸 조각이 모두 같은 정본을 본다 (RecordReader도 조각 번호마다 앞 것)
+        var kept = new List<string>();
         foreach (var folder in folders)
         {
             try
@@ -80,7 +83,9 @@ public static class RecordCatalog
                 var path = Path.Combine(folder, "measurement.json");
                 if (!File.Exists(path)) { unreadableHeader = true; continue; }
                 var (h, unsupported) = RecordSchema.ParseHeader(RecordReader.ReadShared(path));
-                if (unsupported || h is null || h.Id != id) { unreadableHeader = true; continue; }
+                if (unsupported || h is null || h.Id != id) { unreadableHeader = true; kept.Add(folder); continue; }
+                if (segments.Contains(h.Segment)) continue;   // 뒤 위치의 같은 조각
+                kept.Add(folder);
                 segments.Add(h.Segment);
                 if (first is null || h.Segment < first.Segment) first = h;
                 var sum = Path.Combine(folder, "summary.json");
@@ -96,8 +101,10 @@ public static class RecordCatalog
                 or NullReferenceException or OverflowException)
             {
                 unreadableHeader = true;
+                if (!kept.Contains(folder)) kept.Add(folder);
             }
         }
+        folders = kept;
 
         var lifecycle = id == runningId ? RecordLifecycle.Running : summary is not null ? RecordLifecycle.Ended : RecordLifecycle.NoSummary;
         if (first is null)

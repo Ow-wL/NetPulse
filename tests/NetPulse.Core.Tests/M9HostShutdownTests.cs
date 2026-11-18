@@ -21,6 +21,10 @@ public sealed class M9HostShutdownTests : IDisposable
         public string Kind => inner.Kind;
         public DateTimeOffset Now => inner.Now;
         public IReadOnlyList<string> RecordPaths => inner.RecordPaths;
+        public string DefaultRecordFolder => inner.DefaultRecordFolder;
+        public string CurrentRecordFolder => inner.CurrentRecordFolder;
+        public string FallbackRecordFolder => inner.FallbackRecordFolder;
+        public void SetRecordFolders(string? folder, IReadOnlyList<string> extra) => inner.SetRecordFolders(folder, extra);
         public DiagnosisWorld Diagnostics => inner.Diagnostics;
         public Task<DetectionResult> DetectAsync(CancellationToken cancellationToken) => inner.DetectAsync(cancellationToken);
         public MeasurementSession StartSession(Profile profile, string appVersion)
