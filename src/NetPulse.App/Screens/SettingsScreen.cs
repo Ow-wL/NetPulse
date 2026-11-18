@@ -18,7 +18,7 @@ namespace NetPulse.App.Screens;
 /// </summary>
 public sealed class SettingsScreen : Screen
 {
-    private enum RecordsState { Normal, Invalid, Busy, Moving, Done, Partial, Stopped, Failed, Conflict, Interrupted, JournalProblem }
+    private enum RecordsState { Normal, Invalid, Busy, Moving, Done, Leftover, Partial, Stopped, Failed, Conflict, Interrupted, JournalProblem }
 
     private readonly PageHeader header;
     private readonly GroupPanel appearance, resident, records, diagnosis, measurement;
@@ -142,8 +142,31 @@ public sealed class SettingsScreen : Screen
 
     public override void Entered()
     {
+        CheckFolder();
         RenderResident();
         RenderRecords();
+    }
+
+    /// <summary>지금 기본 위치를 쓸 수 있는가 (들어올 때·옮긴 뒤 한 번 검사, 그리기마다 디스크를 보지 않는다).</summary>
+    private bool folderUsable = true;
+
+    private void CheckFolder()
+    {
+        var folder = Context.Host.World.CurrentRecordFolder;
+        _ = Task.Run(() =>
+        {
+            bool ok;
+            try
+            {
+                Directory.CreateDirectory(folder);
+                var probe = Path.Combine(folder, ".netpulse-write-" + Guid.NewGuid().ToString("N")[..8]);
+                File.WriteAllText(probe, "");
+                File.Delete(probe);
+                ok = true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { ok = false; }
+            DispatcherQueue.TryEnqueue(() => { folderUsable = ok; RenderRecords(); });
+        });
     }
 
     // ---------------- 부품 ----------------
@@ -229,6 +252,7 @@ public sealed class SettingsScreen : Screen
         {
             RecordsState.Moving => $"기록을 옮기는 중입니다 ({moved.Done}/{moved.Total}). 이동 중에는 측정·메모·리포트 내보내기를 할 수 없습니다.",
             RecordsState.Done => "옮겼습니다. 새 측정은 이 위치에 저장됩니다.",
+            RecordsState.Leftover => "옮겼습니다. 옛 위치에 정리하지 못한 파일이 있습니다 (기록은 새 위치에서 엽니다).",
             RecordsState.Partial => $"일부만 옮겼습니다 ({moved.Done}/{moved.Total}). {reason} 옛 위치의 기록도 계속 목록에 보입니다.",
             RecordsState.Stopped => $"멈췄습니다 ({moved.Done}/{moved.Total}). 옛 위치의 기록도 계속 목록에 보입니다.",
             RecordsState.Failed => $"옮기지 못했습니다. {reason} 옛 기록은 그대로 목록에 보입니다.",
@@ -241,12 +265,13 @@ public sealed class SettingsScreen : Screen
         if (state == RecordsState.Normal || state == RecordsState.Done)
         {
             if (!writable) text = "설정을 저장할 수 없는 실행이라 저장 위치를 바꿀 수 없습니다.";
+            else if (!folderUsable) text = "이 위치를 쓸 수 없습니다. 지금 측정은 대체 위치에 저장됩니다.";
             else if (MeasuringNow) text = "측정 중에는 바꿀 수 없습니다.";
             else if (leftovers && state == RecordsState.Normal) text = $"옛 위치 {Store.Current.Records.ExtraFolders.Count}곳의 기록도 목록에 보입니다.";
         }
         recordsStatus.Text = text;
         recordsStatus.Foreground = state is RecordsState.Failed or RecordsState.Conflict or RecordsState.Invalid or RecordsState.JournalProblem ? Ui.Brushes.Bad
-            : state is RecordsState.Partial or RecordsState.Stopped or RecordsState.Interrupted or RecordsState.Busy ? Ui.Brushes.Warn : Ui.Brushes.Muted;
+            : state is RecordsState.Partial or RecordsState.Stopped or RecordsState.Interrupted or RecordsState.Busy or RecordsState.Leftover || !folderUsable ? Ui.Brushes.Warn : Ui.Brushes.Muted;
         recordsStatus.Visibility = text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         Context.QueueDiag();
     }
@@ -316,6 +341,7 @@ public sealed class SettingsScreen : Screen
         moved = (report.Moved, report.Total);
         state = report.State switch
         {
+            MoveState.Done when report.Leftovers.Count > 0 => RecordsState.Leftover,
             MoveState.Done => RecordsState.Done,
             MoveState.Partial => RecordsState.Partial,
             MoveState.Stopped => RecordsState.Stopped,
@@ -325,7 +351,8 @@ public sealed class SettingsScreen : Screen
             _ => RecordsState.Failed,
         };
         reason = report.Reason ?? (report.Failed.Count > 0 ? $"옮기지 못한 기록 {report.Failed.Count}개." : null);
-        if (report.Leftovers.Count > 0) reason = (reason is null ? "" : reason + " ") + "옛 위치에 정리하지 못한 파일이 있습니다(기록은 새 위치에서 엽니다).";
+        if (report.Leftovers.Count > 0 && state != RecordsState.Leftover) reason = (reason is null ? "" : reason + " ") + "옛 위치에 정리하지 못한 파일이 있습니다(기록은 새 위치에서 엽니다).";
+        CheckFolder();
         Context.Log.Write("recordsMove", new
         {
             step = "end", state = report.State.ToString(), report.Moved, report.Total, failed = report.Failed.Values, leftovers = report.Leftovers.Count,
@@ -390,7 +417,7 @@ public sealed class SettingsScreen : Screen
             state = state.ToString(),
             folder = RecordFolderRules.Same(Context.Host.World.CurrentRecordFolder, Context.Host.World.DefaultRecordFolder) ? "default" : "custom",
             extra = Store.Current.Records.ExtraFolders.Count,
-            moved = moved.Done, total = moved.Total, reason,
+            moved = moved.Done, total = moved.Total, reason, usable = folderUsable,
             changeEnabled = change.IsEnabled, retryVisible = retry.Visibility == Visibility.Visible,
         },
         diagnosis = new { state = diagState, errors = diagErrors.Keys, probed = (Context.Diagnosis.Probes as NetPulse.Core.Demo.DemoDiagnosticProbes)?.Probed },

@@ -106,11 +106,17 @@ if (Test-Path $g5Dir) {
     $required += @('matrix-m8-report-preview-hc-aquatic', 'matrix-m8-report-preview-hc-desert', 'matrix-m8-report-figure-hc-aquatic')
     $required += @('matrix-m8-report-preview-dark-reduced', 'matrix-m8-report-preview-light-reduced', 'matrix-m8-report-preview-dark-reducedmotion', 'matrix-m8-report-preview-light-reducedmotion')
     foreach ($p in '0', '0.5', '1') { $required += "matrix-m8-transition-crossfade-$p" }
+    # M9 (설계 7.2·7.4): 설정·처음 숨김 안내·프로필 TCP 장면 × 테마 × 배율, 상주·설정 흐름, 고대비·효과·움직임 줄이기, 트레이 메뉴 창, 아이콘 대비
+    $m9Ids = @(Get-Content (Join-Path $root 'tests\NetPulse.UiTests\m9-scenes.txt') -Encoding UTF8 | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | ForEach-Object { ($_ -split '\|')[0] })
+    foreach ($id in $m9Ids) { foreach ($t in 'dark', 'light') { foreach ($s in '100', '150') { $required += "matrix-m9-$id-$t-$s" } } }
+    $required += @('flow-resident-hide', 'flow-resident-balloons', 'flow-settings-diagnosis', 'm9-tray-menu', 'm9-icon')
+    $required += @('matrix-m9-settings-normal-hc-aquatic', 'matrix-m9-settings-normal-hc-desert', 'matrix-m9-settings-moving-hc-aquatic', 'matrix-m9-hint-dialog-hc-desert')
+    $required += @('matrix-m9-settings-normal-dark-reduced', 'matrix-m9-settings-moving-light-reduced', 'matrix-m9-hint-dialog-dark-reducedmotion', 'matrix-m9-settings-moving-light-reducedmotion')
     $missing = @($required | Where-Object { -not (Test-Path (Join-Path $g5Dir "$_.json")) })
     $matrix = @(Get-ChildItem $g5Dir -Filter 'matrix-*.json' | Sort-Object Name)
     # M2 회귀 매트릭스는 따로 센다: M5 결과가 합쳐져 M2 캡처 누락을 가리지 않게 (G4 M5 1라운드 C3)
     # M6 결과도 M2 수에 섞이지 않게 뺀다
-    $m2Matrix = @($matrix | Where-Object { -not $_.Name.StartsWith('matrix-m5-') -and -not $_.Name.StartsWith('matrix-m6-') -and -not $_.Name.StartsWith('matrix-m7-') -and -not $_.Name.StartsWith('matrix-m8-') })
+    $m2Matrix = @($matrix | Where-Object { -not $_.Name.StartsWith('matrix-m5-') -and -not $_.Name.StartsWith('matrix-m6-') -and -not $_.Name.StartsWith('matrix-m7-') -and -not $_.Name.StartsWith('matrix-m8-') -and -not $_.Name.StartsWith('matrix-m9-') })
     $captures = @(Get-ChildItem $env:NETPULSE_UITEST_OUT -Filter *.png | Sort-Object Name | ForEach-Object { [ordered]@{ file = "ui/captures/$($_.Name)"; sha256 = Get-Sha256Text $_.FullName } })
     $bench = & $read 'bench'
     $g5 = [ordered]@{

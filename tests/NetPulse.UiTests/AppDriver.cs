@@ -155,6 +155,19 @@ public sealed class AppDriver : IDisposable
         return full.Clone(rect, PixelFormat.Format32bppArgb);
     }
 
+    /// <summary>앱 프로세스의 다른 창 하나(트레이 팝업 메뉴 등)를 그 창만 캡처한다 (PrintWindow, 화면 영역 캡처 아님).</summary>
+    public static Bitmap CaptureWindow(IntPtr hwnd)
+    {
+        Native.GetWindowRect(hwnd, out var w);
+        var bmp = new Bitmap(Math.Max(1, w.Right - w.Left), Math.Max(1, w.Bottom - w.Top));
+        using var g = Graphics.FromImage(bmp);
+        var dc = g.GetHdc();
+        bool ok = Native.PrintWindow(hwnd, dc, 2);
+        g.ReleaseHdc(dc);
+        if (!ok) throw new InvalidOperationException("PrintWindow 실패");
+        return bmp;
+    }
+
     /// <summary>화면 좌표(UI Automation 경계)를 클라이언트 캡처 좌표로 옮긴다.</summary>
     public Rectangle ToClient(System.Windows.Rect screen)
     {

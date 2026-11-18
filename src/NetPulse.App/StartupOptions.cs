@@ -82,8 +82,10 @@ public sealed record StartupOptions
     public bool SimulateAnimationsOff { get; init; }
     public bool SimulateEnergySaver { get; init; }
     public bool SimulateLowPerformance { get; init; }
+    /// <summary>트레이 아이콘을 넣지 못한 것처럼 (M9 G5 "트레이 사용 불가" 장면).</summary>
+    public bool SimulateTrayOff { get; init; }
 
-    public bool AnySimulation => SimulateHighContrast is not null || SimulateTransparencyOff || SimulateAnimationsOff || SimulateEnergySaver || SimulateLowPerformance;
+    public bool AnySimulation => SimulateHighContrast is not null || SimulateTransparencyOff || SimulateAnimationsOff || SimulateEnergySaver || SimulateLowPerformance || SimulateTrayOff;
 
     public static StartupOptions Parse(IReadOnlyList<string> args)
     {
@@ -114,7 +116,7 @@ public sealed record StartupOptions
                 "--exit" => o with { Exit = true },
                 "--close-to-tray" => o with { CloseToTray = OnOff(Next()) },
                 "--pick-folder" => o with { PickFolder = Next() },
-                "--move-fail" => o with { MoveFail = Next() is var mf && (mf == "cross" || mf.StartsWith("copy:", StringComparison.Ordinal) || mf.StartsWith("delete:", StringComparison.Ordinal) || mf.StartsWith("kill-after:", StringComparison.Ordinal)) ? mf : throw new ArgumentException("copy:<id>, delete:<id>, kill-after:<n>, cross 중 하나") },
+                "--move-fail" => o with { MoveFail = Next() is var mf && (mf == "cross" || mf == "hold" || mf.StartsWith("copy:", StringComparison.Ordinal) || mf.StartsWith("delete:", StringComparison.Ordinal) || mf.StartsWith("kill-after:", StringComparison.Ordinal)) ? mf : throw new ArgumentException("copy:<id>, delete:<id>, kill-after:<n>, cross 중 하나") },
                 "--theme" => o with
                 {
                     Theme = Next() switch
@@ -141,6 +143,7 @@ public sealed record StartupOptions
                 "--simulate-animations-off" => o with { SimulateAnimationsOff = true },
                 "--simulate-energy-saver" => o with { SimulateEnergySaver = true },
                 "--simulate-low-performance" => o with { SimulateLowPerformance = true },
+                "--simulate-tray-off" => o with { SimulateTrayOff = true },
                 _ => throw new ArgumentException($"알 수 없는 인수입니다: {args[i]}"),
             };
         }

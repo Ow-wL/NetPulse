@@ -109,6 +109,52 @@ internal static class M5Fixtures
                 SaveProfile(userData, "steady", TimeSpan.FromMinutes(60));
                 File.WriteAllText(Path.Combine(userData, "diagnoses"), "막음");   // 진단 기록 폴더 자리에 파일 → 저장 실패
                 break;
+            // ---- M9 설정 장면 (설계 7.4) ----
+            case "settings-newer":   // 더 새 판 설정 파일: 이번 실행은 저장하지 않는다
+                SaveProfile(userData, "steady", TimeSpan.FromMinutes(60));
+                File.WriteAllText(Path.Combine(userData, "settings.json"), "{\"version\": 3}");
+                break;
+            case "rec-move":         // 기록 둘 + 옮길 목적지 폴더 ({userData}-dest)
+                SaveProfile(userData, "steady", TimeSpan.FromMinutes(60));
+                MakeRecord(userData, "steady", new DateTimeOffset(2026, 11, 10, 20, 0, 0, TimeSpan.FromHours(9)), 2);
+                MakeRecord(userData, "link-drop", new DateTimeOffset(2026, 11, 11, 20, 0, 0, TimeSpan.FromHours(9)), 3);
+                Directory.CreateDirectory(userData + "-dest");
+                break;
+            case "rec-move-interrupted":   // 옮기기가 끊긴 상태: 위치는 목적지, 옛 위치가 남고 일지가 있다
+            case "rec-move-bad-journal":   // 일지 모양이 틀림: 자동 동작 없이 경고
+                Prepare(userData, "rec-move");
+                var old = Path.Combine(userData, "records");
+                var dest = userData + "-dest";
+                var ids = Directory.EnumerateDirectories(old).Select(Path.GetFileName).Order().ToArray();
+                Directory.Move(Path.Combine(old, ids[0]!), Path.Combine(dest, ids[0]!));
+                var journal = kind == "rec-move-bad-journal" ? new System.Text.Json.Nodes.JsonObject { ["kind"] = "what" }
+                    : new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["kind"] = "new", ["from"] = old, ["to"] = dest, ["step"] = "moving",
+                        ["ids"] = new System.Text.Json.Nodes.JsonArray(ids.Select(i => (System.Text.Json.Nodes.JsonNode?)i).ToArray()),
+                        ["hashes"] = new System.Text.Json.Nodes.JsonObject(), ["done"] = new System.Text.Json.Nodes.JsonArray(ids[0]),
+                    };
+                var settings = new System.Text.Json.Nodes.JsonObject
+                {
+                    ["version"] = 2,
+                    ["records"] = new System.Text.Json.Nodes.JsonObject { ["folder"] = dest, ["extraFolders"] = new System.Text.Json.Nodes.JsonArray(old), ["move"] = journal },
+                };
+                File.WriteAllText(Path.Combine(userData, "settings.json"), settings.ToJsonString());
+                break;
+            case "settings-missing-folder":   // 설정의 위치가 없어짐 (지운 드라이브 등): 측정은 대체 위치로
+                SaveProfile(userData, "steady", TimeSpan.FromMinutes(60));
+                var gone = new System.Text.Json.Nodes.JsonObject
+                {
+                    ["version"] = 2,
+                    ["records"] = new System.Text.Json.Nodes.JsonObject { ["folder"] = Path.Combine(userData, "gone", "records"), ["extraFolders"] = new System.Text.Json.Nodes.JsonArray() },
+                };
+                File.WriteAllText(Path.Combine(userData, "gone"), "폴더 자리에 파일");   // 만들 수 없는 위치
+                File.WriteAllText(Path.Combine(userData, "settings.json"), gone.ToJsonString());
+                break;
+            case "hint-shown":
+                SaveProfile(userData, "steady", TimeSpan.FromMinutes(60));
+                File.WriteAllText(Path.Combine(userData, "settings.json"), "{\"version\": 2, \"resident\": {\"trayHintShown\": true}}");
+                break;
             default:
                 if (!M7Fixtures.Prepare(userData, prep)) throw new ArgumentException("알 수 없는 준비: " + prep);
                 break;

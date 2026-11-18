@@ -68,6 +68,7 @@ public sealed class M5MatrixTests
                 app.SetText(arg[..eq], arg[(eq + 1)..]);
                 break;
             case "wait": Wait(app, arg); break;
+            case "close": app.RequestClose(); break;   // M9: 창 닫기 요청만 (처음 숨김 안내 장면)
             case "scroll":   // 스크롤 영역을 세로 n%로 (150%에서 아래로 밀린 카드). 스크롤할 것이 없으면 그대로
                 var at = arg.IndexOf('=');
                 app.ScrollTo(arg[..at], double.Parse(arg[(at + 1)..], System.Globalization.CultureInfo.InvariantCulture));
@@ -124,6 +125,9 @@ public sealed class M5MatrixTests
             case "siterunning": app.WaitDiag(d => Sd(d) is { } s && s.GetProperty("site").GetProperty("Running").GetBoolean(), b => b, "사이트 점검 중"); break;
             case "siteerror": app.WaitDiag(d => Sd(d) is { } s && s.GetProperty("site").GetProperty("InputError").ValueKind == JsonValueKind.String, b => b, "입력 오류"); break;
             case "exists": AppDriver.WaitFor(() => app.Exists(value), e => e, "요소 " + value); break;
+            case "records": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("records", out var r) ? r.GetProperty("state").GetString() : "", st => st == value, "저장 위치 상태 " + value); break;
+            case "recordsUsable": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("records", out var r) && r.GetProperty("usable").GetBoolean().ToString() == value, b => b, "위치 쓸 수 있음 " + value); break;
+            case "diagState": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("diagnosis", out var x) ? x.GetProperty("state").GetString() : "", st => st == value, "진단 기본값 " + value); break;
             // M7 기록 화면 (screenDiag = RecordsScreen.Diag)
             case "recordsListed": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("listed", out var l) && l.GetBoolean(), b => b, "기록 목록"); break;
             case "recordsAnalyzed":

@@ -65,7 +65,7 @@ public sealed partial class AppShell
             };
             tray.QueryEndSession += OnQueryEndSession;
             tray.EndSession += OnEndSession;
-            trayState = tray.Add(TooltipFor(host.Snapshot)) ? "added" : "unavailable";
+            trayState = !options.SimulateTrayOff && tray.Add(TooltipFor(host.Snapshot)) ? "added" : "unavailable";
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or ExternalException)
         {
