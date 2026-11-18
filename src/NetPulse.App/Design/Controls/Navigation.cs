@@ -158,6 +158,8 @@ public sealed class SettingToggle : ToggleButton
         HorizontalContentAlignment = HorizontalAlignment.Stretch;
         Checked += (_, _) => Update(true);
         Unchecked += (_, _) => Update(true);
+        IsEnabledChanged += (_, _) => Opacity = IsEnabled ? Emphasis.Full : Emphasis.Disabled;   // 막힌 스위치는 흐리게 (리포트: 가린 문서의 메모 넣기)
+        Opacity = IsEnabled ? Emphasis.Full : Emphasis.Disabled;
         Update(false);
     }
 

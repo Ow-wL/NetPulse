@@ -234,6 +234,28 @@ public sealed class M5ModelTests : IDisposable
     }
 
     [Fact]
+    public void BandsDoNotDependOnRoundOrderAndNeedEveryExternalLost()
+    {
+        // 회차마다 사전을 만들지 않고 결과를 훑게 바꾼 뒤 (M8 게이트 bench): 순서가 섞인 입력, 일부 대상만 응답 없음, 결과가 빠진 대상
+        var rounds = new List<RoundData>();
+        for (long i = 0; i < 20; i++)
+            rounds.Add(i is >= 3 and <= 5 ? Out(i)
+                : i == 6 ? R(i, Ok("r", 2), Lost("a"), Ok("b", 20))           // 외부 띠 바로 뒤: 외부 하나만 응답해도 외부 띠를 끝내는 성공
+                : i is 8 or 9 ? R(i, Ok("r", 2), Lost("a"), Ok("b", 20))      // 외부 하나만 응답 없음 → 일부 띠
+                : i == 12 ? R(i, Ok("r", 2), Lost("a"))                        // 외부 b의 결과 없음 → 외부 띠 아님, 일부 띠
+                : Fine(i));
+        var ordered = TimelineModel.Bands(rounds, Three, [], 1000);
+        var shuffled = TimelineModel.Bands(rounds.OrderBy(r => (r.Round * 7) % 20).ToList(), Three, [], 1000);
+        Assert.Equal(ordered, shuffled);
+        Assert.Equal([(BandKind.ExternalNone, 3L, 5L), (BandKind.PartialNone, 6L, 6L), (BandKind.PartialNone, 8L, 9L), (BandKind.PartialNone, 12L, 12L)],
+            ordered.Select(b => (b.Kind, b.FirstRound, b.LastRound)).ToArray());
+        Assert.Equal(4000L, ordered[0].MaxMs);   // 뒤 회차 6은 외부 b만 응답 → 외부 띠의 성공
+        Assert.Null(ordered[1].MaxMs);           // 일부 띠의 앞 회차 5는 모든 대상 응답이 아님
+        Assert.Equal(3000L, ordered[2].MaxMs);
+        Assert.Equal(2000L, ordered[3].MaxMs);
+    }
+
+    [Fact]
     public void DecimationKeepsSpikesAndNeverBridgesMissingRoundsOrGaps()
     {
         var rounds = Enumerable.Range(0, 1000).Select(i => Fine(i, i == 500 ? 400 : 20)).ToList();

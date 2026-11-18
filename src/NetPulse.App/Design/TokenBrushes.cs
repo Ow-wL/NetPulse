@@ -58,6 +58,43 @@ public sealed class TokenBrushes
     public static Color ToColor(Rgba c) => Color.FromArgb((byte)Math.Round(c.A * 255), c.R, c.G, c.B);
 }
 
+/// <summary>
+/// 리포트 문서 팔레트 (M8 설계 4.1 [1-6]): 미리 보기의 종이 면. 내보내는 파일과 같은 색 (<see cref="NetPulse.Core.Report.ReportPalette"/>).
+/// 고대비에서는 쓰지 않는다 (미리 보기가 시스템 색을 따른다).
+/// </summary>
+public sealed class DocumentBrushes
+{
+    public DocumentBrushes(NetPulse.Core.Report.ReportPalette p)
+    {
+        SolidColorBrush B(string hex) => new(TokenBrushes.ToColor(Rgba.Hex(hex)));
+        Paper = B(p.Surface);
+        Bg = B(p.Bg);
+        Ink = B(p.Ink);
+        Muted = B(p.Muted);
+        Accent = B(p.Accent);
+        Bad = B(p.Bad);
+        Warn = B(p.Warn);
+        Edge = B(p.Edge);
+        BadSoft = B(p.BadSoft);
+        WarnSoft = B(p.WarnSoft);
+        Link = B(p.Link);
+        Mark = B(p.Mark);
+    }
+
+    public SolidColorBrush Paper { get; }
+    public SolidColorBrush Bg { get; }
+    public SolidColorBrush Ink { get; }
+    public SolidColorBrush Muted { get; }
+    public SolidColorBrush Accent { get; }
+    public SolidColorBrush Bad { get; }
+    public SolidColorBrush Warn { get; }
+    public SolidColorBrush Edge { get; }
+    public SolidColorBrush BadSoft { get; }
+    public SolidColorBrush WarnSoft { get; }
+    public SolidColorBrush Link { get; }
+    public SolidColorBrush Mark { get; }
+}
+
 /// <summary>Pretendard 글꼴과 글자 단계 적용.</summary>
 public static class Fonts
 {

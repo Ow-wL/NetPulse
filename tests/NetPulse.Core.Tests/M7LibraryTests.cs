@@ -135,12 +135,41 @@ public sealed class M7LibraryTests : IDisposable
         var p = dir.Sub("p");
         for (int h = 0; h < 12; h++) Make(p, Id(h, $"ddddd{h:x}"), h);
         var lib = new RecordLibrary(() => [p]);
-        await lib.RefreshAsync(null);
-        var last = lib.Items[^1].Key;
-        var opened = await lib.OpenAsync(last).WaitAsync(Wait, TestContext.Current.CancellationToken);
-        Assert.NotNull(opened);
-        // 열기 요청을 받은 뒤 목록 분석은 많아야 하나(진행 중이던 것)만 먼저 끝난다
-        Assert.True(lib.Items.Count(i => !i.Summary.Analyzing) <= 3, "끝난 목록 분석 " + lib.Items.Count(i => !i.Summary.Analyzing));
+        // 순서를 고정한다: 첫 목록 분석이 시작한 자리에서 멈춘 동안 열기를 요청하고, 열기 뒤의 목록 분석은 확인이 끝날 때까지
+        // 멈춘다. 작은 기록 12개의 분석이 열기 요청보다 먼저 다 끝나 실패하던 시간 경쟁 (M8 PR CI)
+        var ct = TestContext.Current.CancellationToken;
+        using var firstStarted = new ManualResetEventSlim();
+        using var releaseFirst = new ManualResetEventSlim();
+        using var releaseRest = new ManualResetEventSlim();
+        string? last = null, first = null;
+        int calls = 0;
+        lib.BeforeAnalyzeForTest = key =>
+        {
+            if (Interlocked.Increment(ref calls) == 1) { Volatile.Write(ref first, key); firstStarted.Set(); releaseFirst.Wait(Wait); }
+            else if (key != Volatile.Read(ref last)) releaseRest.Wait(Wait);
+        };
+        try
+        {
+            await lib.RefreshAsync(null);
+            Assert.True(firstStarted.Wait(Wait, ct), "목록 분석이 시작하지 않음");
+            Volatile.Write(ref last, lib.Items[^1].Key);
+            Assert.NotNull(first);
+            Assert.NotEqual(first, last);
+            var open = lib.OpenAsync(last!);
+            releaseFirst.Set();
+            var opened = await open.WaitAsync(Wait, ct);
+            Assert.NotNull(opened);
+            // 열기 요청을 받은 뒤에는 진행 중이던 목록 분석 하나만 먼저 끝나고, 그다음은 열기다
+            var done = lib.Items.Where(i => !i.Summary.Analyzing).Select(i => i.Key).Order(StringComparer.Ordinal).ToArray();
+            Assert.Equal(new[] { first!, last! }.Order(StringComparer.Ordinal), done);
+        }
+        finally
+        {
+            releaseFirst.Set();
+            releaseRest.Set();
+        }
+        await Settled(lib);
+        Assert.All(lib.Items, i => Assert.False(i.Summary.Analyzing));
     }
 
     [Fact]

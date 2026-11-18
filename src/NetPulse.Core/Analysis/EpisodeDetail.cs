@@ -39,10 +39,25 @@ public static class EpisodeDetail
     public const int Around = 2, KeepEachEnd = 3, LongerThan = 9, LinkMax = 8;
     public const long NearMs = 3000;
 
-    public static EpisodeDetailResult For(MeasurementRecord record, AnalysisResult analysis, Episode episode)
+    /// <summary>기록 하나에서 여러 끊김의 상세를 구할 때 한 번만 만드는 것 (정렬한 회차, 경로 문맥, 증상 표시). 리포트가 상세 10개를 만들 때 쓴다.</summary>
+    public sealed record Shared(RoundData[] Rounds, JudgeContext Context, IReadOnlyList<SymptomMark> Marks);
+
+    public static Shared Prepare(MeasurementRecord record, AnalysisResult analysis) =>
+        Prepare(record, analysis, record.Rounds.OrderBy(r => r.Round).ToArray(), SymptomMarks.FromEvents(record.Events, record.NoteLines).Marks);
+
+    /// <summary>
+    /// 호출한 쪽이 이미 만든 회차 정렬(<c>Round</c> 순 안정 정렬)과 증상 표시를 그대로 쓴다. 리포트 문서 만들기가 같은 것을 두 번 만들지 않게 (M8 게이트 bench).
+    /// </summary>
+    public static Shared Prepare(MeasurementRecord record, AnalysisResult analysis, RoundData[] orderedRounds, IReadOnlyList<SymptomMark> marks)
     {
         var header = record.Header ?? throw new ArgumentException("머리가 없는 기록입니다.", nameof(record));
-        var rounds = record.Rounds.OrderBy(r => r.Round).ToArray();
+        return new Shared(orderedRounds, JudgeContext.From(header, record.Rounds, record.Events, analysis.Links), marks);
+    }
+
+    public static EpisodeDetailResult For(MeasurementRecord record, AnalysisResult analysis, Episode episode, Shared? shared = null)
+    {
+        var header = record.Header ?? throw new ArgumentException("머리가 없는 기록입니다.", nameof(record));
+        var rounds = shared?.Rounds ?? record.Rounds.OrderBy(r => r.Round).ToArray();
         var targets = header.Targets.Where(t => t.Enabled).Select(t => t.Id).ToArray();
 
         int first = Array.FindIndex(rounds, r => r.Round >= episode.FirstRound);
@@ -82,12 +97,12 @@ public static class EpisodeDetail
         long startMs = inside[0].AtMs, endMs = inside[^1].AtMs;
         var near = analysis.Links.Downs.Where(d => d.ToMs >= startMs - NearMs && d.FromMs <= endMs + NearMs).OrderBy(d => d.FromMs).ToArray();
 
-        var ctx = JudgeContext.From(header, record.Rounds, record.Events, analysis.Links);
+        var ctx = shared?.Context ?? JudgeContext.From(header, record.Rounds, record.Events, analysis.Links);
         var routes = targets.Select(id => ctx.RouteOf(id, episode.FirstRound) is { } r
             ? new RouteKindAt(id, r.Kind, r.Ok, r.InterfaceIndex)
             : new RouteKindAt(id, null, false, null)).ToArray();
 
-        var marks = SymptomMarks.FromEvents(record.Events, record.NoteLines).Marks
+        var marks = (shared?.Marks ?? SymptomMarks.FromEvents(record.Events, record.NoteLines).Marks)
             .Where(m => m.AtMs >= startMs - NearMs && m.AtMs <= endMs + NearMs).OrderBy(m => m.AtMs).ToArray();
 
         return new EpisodeDetailResult(episode, rows, omitted, omitAfter, before.Length == 0, after.Length == 0,

@@ -33,6 +33,11 @@ public static class MotionTokens
 /// <summary>프레임 기준 (M2 설계 5.2 저성능 대체, 5.9 벤치). 이 PC 한 대의 기준이다.</summary>
 public static class FrameBudget
 {
+    /// <summary>나눠 그리기(M8 리포트 미리 보기)가 한 프레임에 쓰는 시간</summary>
+    public static readonly TimeSpan PieceSlice = TimeSpan.FromMilliseconds(3);
+    /// <summary>리포트 미리 보기의 표를 이만큼 줄씩 나눠 붙인다 (M8 bench)</summary>
+    public const int ReportRowsPerPiece = 10;
+
     /// <summary>"멈칫"으로 세는 간격 (ms)</summary>
     public const double Hitch = 33;
     /// <summary>평상시 95백분위 상한, 전환 중 최대 간격 상한 (ms)</summary>
@@ -65,6 +70,11 @@ public static class Waits
     public static readonly TimeSpan ThemeCleanup = TimeSpan.FromSeconds(2);
     /// <summary>창을 닫을 때 메모·노트 쓰기를 기다리는 한도 (M5 설계 4.5)</summary>
     public static readonly TimeSpan CloseWrites = TimeSpan.FromSeconds(3);
+    /// <summary>시험 주입 <c>--report-fail slow</c>: 내보내기를 이만큼 늦춘다 (M8 "내보내는 중" 장면)</summary>
+    public static readonly TimeSpan ReportSlowTest = TimeSpan.FromSeconds(4);
+
+    /// <summary>시험용: 쓰는 중 멈춤이 닫기의 공통 한도(CloseWrites 세 번 = 9초)보다 길게 이어진다 (G4 M8 3라운드 b8).</summary>
+    public static readonly TimeSpan ReportHoldPastClose = TimeSpan.FromSeconds(11);
 }
 
 /// <summary>측정 화면 bench 구간 (M5 설계 5절 재현 절차).</summary>
@@ -89,4 +99,6 @@ public static class BenchTokens
     public static readonly TimeSpan RecordsSettle = TimeSpan.FromSeconds(2);
     public static readonly TimeSpan MemorySample = TimeSpan.FromMilliseconds(500);
     public const int RecordsReenterCount = 6;
+    // 리포트 bench (M8 설계 5절): 미리 보기 스크롤 단계 수
+    public const int ReportScrollSteps = 8;
 }

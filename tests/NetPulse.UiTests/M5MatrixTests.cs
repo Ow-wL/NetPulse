@@ -62,6 +62,7 @@ public sealed class M5MatrixTests
         {
             case "invoke": app.Invoke(arg); break;
             case "select": app.Select(arg); break;
+            case "toggle": app.Toggle(arg); break;
             case "text":
                 var eq = arg.IndexOf('=');
                 app.SetText(arg[..eq], arg[(eq + 1)..]);
@@ -137,9 +138,23 @@ public sealed class M5MatrixTests
             case "memoState":
                 app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("memoState", out var x) && x.EnumerateArray().Any(v => v.GetString()!.StartsWith(value, StringComparison.Ordinal)), b => b, "메모 상태 " + value);
                 break;
+            // M8 리포트 화면 (screenDiag = ReportScreen.Diag)
+            case "reportListed": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("candidates", out _) && s.GetProperty("listed").GetBoolean(), b => b, "리포트 목록"); break;
+            case "reportBuilding": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("state", out var x) && x.GetString() == "Building" && s.GetProperty("listed").GetBoolean(), b => b, "리포트 만드는 중"); break;
+            case "reportReady": app.WaitDiag(d => ReportReady(d, null), b => b, "리포트 미리 보기"); break;
+            case "reportUnmasked": app.WaitDiag(d => ReportReady(d, false), b => b, "가리지 않은 미리 보기"); break;
+            case "reportMemos": app.WaitDiag(d => Sd(d) is { } s && s.GetProperty("memos").GetBoolean() && ReportReady(d, null), b => b, "메모 넣은 미리 보기"); break;
+            case "reportFailed": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("state", out var x) && x.GetString() == "Failed", b => b, "리포트 실패"); break;
+            case "reportLeak": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("leak", out var x) && x.GetArrayLength() > 0, b => b, "안전망"); break;
+            case "reportExporting": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("exporting", out var x) && x.GetBoolean(), b => b, "내보내는 중"); break;
+            case "reportExported": app.WaitDiag(d => Sd(d) is { } s && s.TryGetProperty("export", out var x) && x.ValueKind == JsonValueKind.Object && !s.GetProperty("exporting").GetBoolean(), b => b, "내보내기 끝"); break;
             default: throw new ArgumentException("알 수 없는 기다림: " + what);
         }
     }
+
+    private static bool ReportReady(JsonElement d, bool? masked) =>
+        Sd(d) is { } s && s.TryGetProperty("previewReady", out var p) && p.GetBoolean() && s.GetProperty("state").GetString() == "Ready"
+        && s.GetProperty("published") is { ValueKind: JsonValueKind.Object } pub && (masked is null || pub.GetProperty("masked").GetBoolean() == masked);
 
     /// <summary>현재 화면의 진단 값 (없으면 null).</summary>
     private static JsonElement? Sd(JsonElement d) => d.TryGetProperty("screenDiag", out var s) && s.ValueKind == JsonValueKind.Object ? s : null;

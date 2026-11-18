@@ -32,6 +32,10 @@ public sealed record StartupOptions
     public bool HoldList { get; init; }
     /// <summary>시작할 때 다른 위치의 기록 폴더를 연다 (M7 설계 3.7, 시험·외부 열기 공용). 경로는 앱 기록에 남기지 않는다</summary>
     public string? OpenRecord { get; init; }
+    /// <summary>리포트 내보내기를 대화상자 없이 이 폴더로 (시험, M8 설계 2절). 같은 이름이 있으면 바꾼다 (대화상자의 덮어쓰기 확인과 같음).</summary>
+    public string? ReportOut { get; init; }
+    /// <summary>시험 주입 (M8 설계 3.7·4.2): write·move(파일 쓰기 실패), leak(안전망 걸림), slow(내보내기 늦춤).</summary>
+    public string? ReportFail { get; init; }
     /// <summary>측정 시작 직전에 멈춘다 (시작 중 화면)</summary>
     public bool HoldStart { get; init; }
     /// <summary>데모: 지금 측정이 이 회차에 닿으면 증상을 표시하고 메모를 붙인다 (캡처에서 표시가 멈춘 시각 가장자리에 오지 않게)</summary>
@@ -52,6 +56,8 @@ public sealed record StartupOptions
     public bool Bench { get; init; }
     /// <summary>기록 화면 bench (M7 설계 5절): 미리 만든 기록 40개(12시간 2개 포함)로 목록·상세·비교·재진입·메모 뒤 갱신과 메모리</summary>
     public bool BenchRecords { get; init; }
+    /// <summary>리포트 화면 bench (M8 설계 5절 report-preview): 12시간 기록과 최악 사례의 미리 보기 프레임.</summary>
+    public bool BenchReport { get; init; }
     public string? SelfTest { get; init; }
     /// <summary>원형 전환을 이 진행도(0~1)에서 멈춘다 (캡처용)</summary>
     public double? RevealHold { get; init; }
@@ -89,6 +95,8 @@ public sealed record StartupOptions
                 "--hold-analysis" => o with { HoldAnalysis = true },
                 "--hold-list" => o with { HoldList = true },
                 "--open-record" => o with { OpenRecord = Next() },
+                "--report-out" => o with { ReportOut = Next() },
+                "--report-fail" => o with { ReportFail = Next() is "write" or "move" or "leak" or "slow" or "hold" or "hold-long" ? args[i] : throw new ArgumentException("write, move, leak, slow, hold, hold-long 중 하나") },
                 "--hold-start" => o with { HoldStart = true },
                 "--demo-mark" => o with { DemoMark = long.Parse(Next(), CultureInfo.InvariantCulture) },
                 "--motion-hold" => o with { MotionHold = double.Parse(Next(), CultureInfo.InvariantCulture) },
@@ -109,6 +117,7 @@ public sealed record StartupOptions
                 "--hide-measured-text" => o with { HideMeasuredText = true },
                 "--bench" => o with { Bench = true },
                 "--bench-records" => o with { BenchRecords = true },
+                "--bench-report" => o with { BenchReport = true },
                 "--selftest" => o with { SelfTest = Next() },
                 "--reveal-hold" => o with { RevealHold = double.Parse(Next(), CultureInfo.InvariantCulture) },
                 "--alt-pattern" => o with { AltPattern = true },

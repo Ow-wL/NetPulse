@@ -339,5 +339,96 @@ public sealed partial class AppShell
         BeginClose();
     }
 
+    /// <summary>
+    /// 리포트 화면 bench (M8 설계 5절 report-preview): 12시간 기록(보통)과 최악 사례 기록(대상 8·끊김 약 2만)의 미리 보기.
+    /// 구간: 들어가 만들고 그리기, 스크롤, 옵션 바꿔 다시 그리기, 최악 사례 열기. 프레임은 기록 화면 bench와 같은 기준.
+    /// </summary>
+    private async void RunReportBench()
+    {
+        long peakMb = 0, segmentPeakMb = 0;
+        var sampler = DispatcherQueue.CreateTimer();
+        sampler.Interval = BenchTokens.MemorySample;
+        sampler.Tick += (_, _) => { long now = PrivateMb(); peakMb = Math.Max(peakMb, now); segmentPeakMb = Math.Max(segmentPeakMb, now); };
+        try
+        {
+            sampler.Start();
+            await Task.Delay(BenchTokens.Warmup);
+            var library = recent.Library;
+            await library.RefreshAsync(host.RunningId);
+            // M7 bench와 같은 조건: 목록 분석이 끝난 뒤 보유분을 비우고 캐시 없이 연다 (다른 기록 작업이 측정 구간과 겹치지 않게)
+            await library.AnalyzedAsync(library.Items.Select(i => i.Key).ToArray());
+            library.SetPinned([]);
+            library.DropUnpinned();
+            var typical = library.Items.FirstOrDefault(i => i.Entry.PlannedMs >= 12 * 3_600_000L && i.Entry.Targets.Count < 8)?.Key;
+            var worst = library.Items.FirstOrDefault(i => i.Entry.Targets.Count >= 8)?.Key;
+            if (typical is null || worst is null) throw new InvalidOperationException("bench 준비가 모자랍니다 (12시간 기록·최악 사례)");
+            var segments = new List<object>();
+            var timings = new List<object>();
+            ReportScreen Screen() => (ReportScreen)screens.Get("report");
+            async Task Until(Func<bool> done, string what)
+            {
+                var limit = DateTime.UtcNow + BenchTokens.RecordsOpenLimit;
+                while (!done())
+                {
+                    if (DateTime.UtcNow >= limit) throw new TimeoutException(what + " 준비가 한도 안에 끝나지 않았습니다");
+                    await Task.Delay(MotionTokens.Fast);
+                }
+            }
+            async Task Segment(string name, Func<Task> body)
+            {
+                int[] gcBefore = [GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2)];
+                var pauseBefore = GC.GetTotalPauseDuration();
+                segmentPeakMb = PrivateMb();
+                ui.Pacer.BeginSegment();
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                await body();
+                segments.Add(ui.Pacer.EndSegment(name));
+                timings.Add(new
+                {
+                    segment = name, ms = watch.ElapsedMilliseconds, privateMb = PrivateMb(), peakMb = Math.Max(segmentPeakMb, PrivateMb()),
+                    gc = new { gen0 = GC.CollectionCount(0) - gcBefore[0], gen1 = GC.CollectionCount(1) - gcBefore[1], gen2 = GC.CollectionCount(2) - gcBefore[2], pauseMs = (GC.GetTotalPauseDuration() - pauseBefore).TotalMilliseconds },
+                });
+            }
+            await Segment("report-enter", async () =>
+            {
+                OpenReport(typical);
+                await Until(() => Screen().PreviewReady, "report-enter 미리 보기");
+                await Task.Delay(BenchTokens.RecordsSettle);
+            });
+            await Segment("report-scroll", async () =>
+            {
+                for (int i = 1; i <= BenchTokens.ReportScrollSteps; i++) { Screen().BenchScroll((double)i / BenchTokens.ReportScrollSteps); await Task.Delay(BenchTokens.PanStep); }
+                Screen().BenchScroll(0);
+                await Task.Delay(BenchTokens.PanStep);
+            });
+            await Segment("report-options", async () =>
+            {
+                Screen().BenchOptions(new Core.Report.ReportOptions(Masked: false, IncludeMemos: true, EpisodeDetails: Core.Report.ReportOptions.MaxEpisodeDetails));
+                await Until(() => Screen().PreviewReady, "report-options 미리 보기");
+                await Task.Delay(BenchTokens.RecordsSettle);
+            });
+            await Segment("report-worst", async () =>
+            {
+                // 최악 사례는 가장 무거운 옵션으로 (메모 넣기·끊김 상세 10, 앞 구간에서 정한 것을 명시)
+                Screen().BenchOptions(new Core.Report.ReportOptions(Masked: false, IncludeMemos: true, EpisodeDetails: Core.Report.ReportOptions.MaxEpisodeDetails));
+                Screen().Show(worst);
+                await Until(() => Screen().PreviewReady, "report-worst 미리 보기");
+                await Task.Delay(BenchTokens.RecordsSettle);
+            });
+            await Segment("report-worst-scroll", async () =>
+            {
+                for (int i = 1; i <= BenchTokens.ReportScrollSteps; i++) { Screen().BenchScroll((double)i / BenchTokens.ReportScrollSteps); await Task.Delay(BenchTokens.PanStep); }
+            });
+            sampler.Stop();
+            log.Write("bench", new { kind = "report", segments, timings, peakPrivateMb = Math.Max(peakMb, PrivateMb()), baselineMs = ui.Pacer.Baseline });
+        }
+        catch (Exception ex)
+        {
+            sampler.Stop();
+            log.Write("bench", new { kind = "report", error = ex.GetType().Name, message = ex.Message });
+        }
+        BeginClose();
+    }
+
     private static long PrivateMb() => System.Diagnostics.Process.GetCurrentProcess().PrivateMemorySize64 / (1024 * 1024);
 }

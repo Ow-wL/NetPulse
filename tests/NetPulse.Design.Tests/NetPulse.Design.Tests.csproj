@@ -9,5 +9,7 @@
     <PackageReference Include="xunit.v3" />
     <Using Include="Xunit" />
     <ProjectReference Include="..\..\src\NetPulse.Design\NetPulse.Design.csproj" />
+    <!-- M8: 리포트 문서 팔레트가 라이트 팔레트와 같은지 (설계 7.1) -->
+    <ProjectReference Include="..\..\src\NetPulse.Core\NetPulse.Core.csproj" />
   </ItemGroup>
 </Project>

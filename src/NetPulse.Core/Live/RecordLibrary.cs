@@ -45,6 +45,9 @@ public sealed class RecordLibrary(Func<IReadOnlyList<string>> roots, bool holdAn
 
     /// <summary>시험: 갱신 루프가 끝내기로 정한 뒤, 작업이 완료되기 전 (그 틈에 온 요청을 재현).</summary>
     internal Action? AfterLastPassForTest { get; set; }
+
+    /// <summary>시험: 작업자가 한 항목(열쇠)의 분석을 시작하기 직전, 잠금 밖 (열기 요청과 목록 분석의 순서를 고정).</summary>
+    internal Action<string>? BeforeAnalyzeForTest { get; set; }
     public bool Listed { get; private set; }
 
     /// <summary>목록·요약이 바뀜 (백그라운드 스레드).</summary>
@@ -304,6 +307,7 @@ public sealed class RecordLibrary(Func<IReadOnlyList<string>> roots, bool holdAn
             }
             if (item is null) { open?.TrySetResult(null); continue; }
 
+            BeforeAnalyzeForTest?.Invoke(item.Key);
             var (opened, summary, damage, status) = Analyze(item);
             bool stable = Stamp(item.Entry.Segments) == item.Stamp;
             lock (gate)

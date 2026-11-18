@@ -38,6 +38,8 @@ internal static class M7Fixtures
             }
             case "rec-mixed": Synthetic(userData, Kst.AddMinutes(-40), mixed: true); return true;
             case "rec-sparse": Synthetic(userData, Kst.AddMinutes(-40), mixed: false, deadTarget: true); return true;
+            case "rec-short": Synthetic(userData, Kst.AddMinutes(-40), mixed: false, rounds: 40); return true;   // M8: 관측 부족 (1분 미만)
+            case "rec-undecidable": Synthetic(userData, Kst.AddMinutes(-40), mixed: false, rounds: 300, allLost: true); return true;   // M8: 응답이 한 번도 없음 → 판단 불가
             case "rec-damaged":
             {
                 var id = Ok(userData);
@@ -152,11 +154,11 @@ internal static class M7Fixtures
 
     public static string Folder(string userData, string id) => Path.Combine(Records(userData), id);
 
-    private static void CorruptRounds(string userData, string id) =>
+    internal static void CorruptRounds(string userData, string id) =>
         File.AppendAllText(Path.Combine(Folder(userData, id), "rounds.jsonl"), "{ 망가진 회차\n{ 또 망가짐\n");
 
     /// <summary>조각 2만 따로 두어 조각 1이 없는 상태 (누락 조각).</summary>
-    private static void AddDetachedSegment(string userData, string id)
+    internal static void AddDetachedSegment(string userData, string id)
     {
         var target = Path.Combine(Records(userData), id + "~3");
         CopyDirectory(Folder(userData, id), target);
@@ -203,7 +205,7 @@ internal static class M7Fixtures
     /// 합성 기록 (20분, 1초). mixed: 외부 둘 함께 손실 3회차 → 이어서 하나만 손실 2회차 (판정이 바뀌는 끊김) + 그 안의 증상 표시.
     /// deadTarget: 외부 B가 한 번도 응답하지 않음 (지연 추세 "값이 적어 추세 없음").
     /// </summary>
-    public static string Synthetic(string userData, DateTimeOffset start, bool mixed, bool deadTarget = false, int rounds = 1200)
+    public static string Synthetic(string userData, DateTimeOffset start, bool mixed, bool deadTarget = false, int rounds = 1200, bool allLost = false)
     {
         M5Fixtures.SaveProfile(userData, "steady");
         var id = RecordLocation.NewId(start);
@@ -228,12 +230,14 @@ internal static class M7Fixtures
             bool aDown = mixed && at400 is >= 403 and < 405;
             double drift = 18 + (r % 7200) / 120.0;   // 서서히 오르는 지연 (추세가 보이게)
             TargetResult Ext(string tid, bool down, bool dead) => down || dead ? new(tid, ProbeOutcome.Lost, null, null) : new(tid, ProbeOutcome.Success, drift + rng.NextDouble() * 4, null);
-            var results = new[]
-            {
-                new TargetResult("gateway", ProbeOutcome.Success, 2 + rng.NextDouble(), null),
-                Ext("ext-a", bothDown || aDown, false),
-                Ext("ext-b", bothDown, deadTarget),
-            };
+            var results = allLost
+                ? targets.Select(t => new TargetResult(t.Id, ProbeOutcome.Lost, null, null)).ToArray()
+                : new[]
+                {
+                    new TargetResult("gateway", ProbeOutcome.Success, 2 + rng.NextDouble(), null),
+                    Ext("ext-a", bothDown || aDown, false),
+                    Ext("ext-b", bothDown, deadTarget),
+                };
             long at = r * 1000L;
             lines.Add(RecordSchema.RoundLine(id, new RoundData(r, at, at + 3, start.AddMilliseconds(at), 0, false, results, at + 40)));
         }
@@ -247,6 +251,58 @@ internal static class M7Fixtures
         File.WriteAllText(Path.Combine(folder, "summary.json"), RecordSchema.SummaryJson(
             new RecordSummary(id, EndReason.Completed, start.AddSeconds(n), n, n, 0, 0, 0, n - 1, false, null, 0, (long)n * 1000)));
         return id;
+    }
+
+    /// <summary>
+    /// M8 최악 사례 (설계 5절): 대상 8개, 12시간, 회차마다 성공·손실이 번갈아 끊김 약 2만 개, 판정이 수천 번 바뀌는 혼합 끊김 하나,
+    /// 증상 표시 100개(메모), 경로 변경 500번.
+    /// </summary>
+    public static string Worst(string userData, DateTimeOffset start)
+    {
+        var id = RecordLocation.NewId(start);
+        var folder = Folder(userData, id);
+        Directory.CreateDirectory(folder);
+        var targets = Enumerable.Range(0, 8).Select(i => i == 0
+            ? new Target("gateway", "공유기", IPAddress.Parse("192.0.2.1"), TargetRole.Local, null, ProbeMethod.Icmp)
+            : new Target("ext-" + i, "외부 " + i, IPAddress.Parse("198.51.100." + (10 + i)), TargetRole.External, "예시 통신사 " + (char)('A' + i % 3), ProbeMethod.Icmp)).ToArray();
+        const int n = 12 * 3600;
+        var header = new RecordHeader(id, 0, "test", start, 540, targets, 1000, 800, (long)n * 1000, "primary", ExpectedConnection.Any);
+        File.WriteAllText(Path.Combine(folder, "measurement.json"), RecordSchema.HeaderJson(header));
+        var lines = new List<string>(n);
+        for (int r = 0; r < n; r++)
+        {
+            bool mixedZone = r is >= 20000 and < 24000;
+            bool lost = mixedZone || r % 2 == 1;
+            var results = targets.Select((t, i) => i == 0 ? new TargetResult(t.Id, ProbeOutcome.Success, 2, null)
+                : lost && (!mixedZone || r % 2 == 0 || i == 1) ? new TargetResult(t.Id, ProbeOutcome.Lost, null, null)
+                : new TargetResult(t.Id, ProbeOutcome.Success, 20 + r % 9, null)).ToArray();
+            long at = r * 1000L;
+            lines.Add(RecordSchema.RoundLine(id, new RoundData(r, at, at + 3, start.AddMilliseconds(at), 0, false, results, at + 40)));
+        }
+        File.WriteAllLines(Path.Combine(folder, "rounds.jsonl"), lines);
+        var events = new List<string>();
+        for (int k = 0; k < 500; k++)
+            foreach (var t in targets)
+                events.Add(RecordSchema.EventLine(id, "route", k * 86, k * 86_000L, start.AddSeconds(k * 86), new JsonObject
+                {
+                    ["target"] = t.Id, ["status"] = "ok", ["interfaceIndex"] = 7, ["kind"] = k % 2 == 0 ? "wired" : "wireless",
+                }));
+        for (int k = 0; k < 100; k++)
+            events.Add(RecordSchema.EventLine(id, SymptomMarks.MarkType, k * 400 + 1, k * 400_000L + 500, start.AddMilliseconds(k * 400_000L + 500),
+                new JsonObject { ["mark"] = "m" + k, ["memo"] = "메모 " + k }));
+        File.WriteAllLines(Path.Combine(folder, "events.jsonl"), events);
+        File.WriteAllText(Path.Combine(folder, "summary.json"), RecordSchema.SummaryJson(
+            new RecordSummary(id, EndReason.Completed, start.AddSeconds(n), n, n, 0, 0, 0, n - 1, false, null, 0, (long)n * 1000)));
+        return id;
+    }
+
+    /// <summary>리포트 bench 준비 (M8 설계 5절): 12시간 기록(보통, M7 bench와 같은 합성) + 최악 사례.</summary>
+    public static (string Typical, string Worst) BenchReport(string userData)
+    {
+        M5Fixtures.SaveProfile(userData, "steady");
+        var typical = Synthetic(userData, Kst.AddDays(-3), mixed: true, rounds: 12 * 3600);
+        var worst = Worst(userData, Kst.AddDays(-2));
+        return (typical, worst);
     }
 
     /// <summary>기록 화면 bench 준비 (설계 5절): 짧은 기록 38개(가장 최근 것에 증상 표시) + 합성 12시간 기록 2개.</summary>

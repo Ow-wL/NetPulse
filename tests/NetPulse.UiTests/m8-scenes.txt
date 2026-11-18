@@ -1,0 +1,21 @@
+# M8 캡처 장면 목록 (설계 4.2 상태표의 장면 열, 7.4). 시험(M8MatrixTests)과 build/ui-test.ps1이 같은 파일을 읽는다. 형식은 m5-scenes.txt와 같다.
+# 준비: M7Fixtures (rec-*). 인수의 {userData}는 그 실행의 사용자 폴더 (내보내기 대상 폴더로도 씀).
+# 기다림 추가: reportListed, reportBuilding, reportReady, reportUnmasked, reportMemos, reportFailed, reportLeak, reportExporting, reportExported
+# 동작 추가: toggle:자동화ID
+report-empty|profile|--demo steady --screen report|wait:screen=report;wait:reportListed
+report-building|rec-ok|--demo steady --screen report --hold-analysis|wait:screen=report;wait:reportBuilding
+report-preview|rec-mixed|--demo steady --screen report|wait:screen=report;wait:reportReady
+report-preview-figure|rec-mixed|--demo steady --screen report|wait:screen=report;wait:reportReady;scroll:report.scroll=25
+report-preview-episodes|rec-mixed|--demo steady --screen report|wait:screen=report;wait:reportReady;scroll:report.scroll=45
+report-memo|rec-memo|--demo steady --screen report|wait:screen=report;wait:reportReady;select:report.mask.unmasked;wait:reportUnmasked;toggle:report.memos;wait:reportMemos;scroll:report.scroll=85
+report-unmasked|rec-mixed|--demo steady --screen report|wait:screen=report;wait:reportReady;select:report.mask.unmasked;wait:reportUnmasked
+report-no-outage|rec-ok|--demo steady --screen report|wait:screen=report;wait:reportReady;scroll:report.scroll=20
+report-insufficient|rec-short|--demo steady --screen report|wait:screen=report;wait:reportReady;scroll:report.scroll=20
+report-undecidable|rec-undecidable|--demo steady --screen report|wait:screen=report;wait:reportReady;scroll:report.scroll=20
+report-damaged|rec-damaged|--demo steady --screen report|wait:screen=report;wait:reportReady;scroll:report.scroll=100
+report-failed|rec-unreadable|--demo steady --screen report|wait:screen=report;wait:reportFailed
+report-redaction-error|rec-ok|--demo steady --screen report --report-out {userData} --report-fail leak|wait:screen=report;wait:reportReady;invoke:report.export;wait:reportLeak
+report-exporting|rec-ok|--demo steady --screen report --report-out {userData} --report-fail slow|wait:screen=report;wait:reportReady;invoke:report.export;wait:reportExporting
+report-exported|rec-ok|--demo steady --screen report --report-out {userData}|wait:screen=report;wait:reportReady;invoke:report.export;wait:reportExported;wait:focused=report.export
+report-export-failed|rec-ok|--demo steady --screen report --report-out {userData} --report-fail write|wait:screen=report;wait:reportReady;invoke:report.export;wait:reportExported;wait:focused=report.export
+records-detail-report|rec-ok|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady;wait:exists=records.report

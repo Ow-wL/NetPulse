@@ -102,7 +102,7 @@ public sealed partial class AppShell : Window
         {
             Ui = ui, Host = host, Recent = recent, Toasts = toasts, Dialog = dialog, Options = options, Log = log,
             Diagnosis = diagnosis, Navigate = Navigate, QueueDiag = QueueDiag, SetRevealOrigin = SetRevealOrigin, IsClosing = () => closing,
-            Memos = memos, OpenRecord = OpenRecord, WindowHandle = () => WinRT.Interop.WindowNative.GetWindowHandle(this),
+            Memos = memos, OpenRecord = OpenRecord, OpenReport = OpenReport, WindowHandle = () => WinRT.Interop.WindowNative.GetWindowHandle(this),
         };
         screens.Register("home", () => new HomeScreen(context));
         screens.Register("measure", () => new MeasureScreen(context));
@@ -111,7 +111,7 @@ public sealed partial class AppShell : Window
         screens.Register("settings", () => new SettingsScreen(context));
         screens.Register("diagnose", () => new DiagnoseScreen(context));
         screens.Register("records", () => new RecordsScreen(context));
-        screens.Register("report", () => new PendingScreen(context, "report", "리포트", "통신사에 전달할 리포트를 이 화면에서 만들게 됩니다."));
+        screens.Register("report", () => new ReportScreen(context));
 
         BuildLayout();
         var scaled = ScaleHost();
@@ -144,16 +144,19 @@ public sealed partial class AppShell : Window
             _ = recent.RefreshAsync(host.RunningId);
             _ = Task.Run(diagnosis.LoadRecent);
             StartScreen();
-            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => { if (!closing) foreach (var id in new[] { "home", "measure", "diagnose", "records" }) screens.Prepare(id); });   // 진단도 미리 (M6 bench diag-enter 40 ms대), 기록도 (M7 bench records-enter 50 ms대)
+            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => { if (!closing) foreach (var id in new[] { "home", "measure", "diagnose", "records", "report" }) screens.Prepare(id); });   // 진단도 미리 (M6 bench diag-enter 40 ms대), 기록도 (M7 bench records-enter 50 ms대), 리포트도 (M8 bench report-enter 64 ms 한 번)
             // 기록 화면이 처음 쓰는 메서드는 백그라운드에서 미리 컴파일 (첫 상세 열기의 컴파일 시간, M7 bench records-open)
             _ = Design.JitWarmup.Start(typeof(RecordsScreen), typeof(Design.Controls.TimelinePanel), typeof(Design.Controls.TrendChart),
                 typeof(Core.Presentation.RecordView), typeof(Core.Presentation.TimelineModel), typeof(Core.Analysis.EpisodeDetail),
-                typeof(Core.Records.SymptomMarks), typeof(Core.Analysis.MeasurementComparison));
+                typeof(Core.Records.SymptomMarks), typeof(Core.Analysis.MeasurementComparison),
+                typeof(ReportScreen), typeof(Design.Controls.ReportParts), typeof(Core.Report.ReportBuilder), typeof(Core.Report.ReportHtml),
+                typeof(Core.Report.TimelineSvg), typeof(Core.Report.Redactor), typeof(Core.Report.ReportRequests));
             RenderStatus(host.Snapshot);
             QueueDiag();
             if (options.SelfTest is not null) selfTestTimer.Start();
             if (options.Bench) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, RunBench);
             if (options.BenchRecords) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, RunRecordsBench);
+            if (options.BenchReport) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, RunReportBench);
             if (options.OpenRecord is { } folder) DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => OpenExternal(folder));
         };
         if (options.RunSeconds > 0)
@@ -172,6 +175,14 @@ public sealed partial class AppShell : Window
     {
         Navigate("records", null);
         if (screens.Get("records") is RecordsScreen r) r.Show(key);
+    }
+
+    /// <summary>리포트 화면에서 그 기록을 고른다 (M8 설계 4.1).</summary>
+    private void OpenReport(string key)
+    {
+        if (screens.Get("report") is ReportScreen pre) pre.Preselect(key);   // 들어가며 기본 측정으로 만들기 시작하지 않게
+        Navigate("report", null);
+        if (screens.Get("report") is ReportScreen r) r.Show(key);
     }
 
     /// <summary>다른 위치의 기록 열기 (시작 인수, M7 3.7). 경로는 앱 기록에 남기지 않는다.</summary>
@@ -354,6 +365,8 @@ public sealed partial class AppShell : Window
         runTimer?.Stop();
         // 진단 억제는 첫 await 전에 (테마 정리를 기다리는 동안 결과를 저장·게시하지 않게, G4 1라운드 b4). 끝나기는 아래에서 기다린다
         var diagnosisStop = diagnosis.ShutdownAsync();
+        // 리포트 내보내기 취소도 첫 await 전에 보낸다: 쓰는 중이면 조각 사이에서 멈추고 임시 파일을 지운다 (G4 M8 2라운드 b1)
+        var reportStop = screens.Prepared("report") is ReportScreen report ? report.StopExportAsync() : Task.CompletedTask;
         await ui.Theme.ShutdownAsync(Waits.ThemeCleanup);
         log.Write("closeCleanup", new { snapshotLayers = ui.Theme.SnapshotLayersInTree, inTransition = ui.Theme.InTransition, rendering = ui.Theme.RenderingSubscribed });
         AppWindow.Hide();
@@ -363,9 +376,16 @@ public sealed partial class AppShell : Window
             // 기록 화면의 메모 저장은 쓰기 큐에 들어가기 전(저장 시작 알림·앞 요청 대기)일 수 있어 호스트 종료와 함께 따로 기다린다
             // (호스트는 쓰기 큐만 기다린다, G4 M7 3라운드 1). 둘은 세대로 서로의 옛 글을 건너뛰므로 동시에 해도 된다
             var memoWrites = memos.DrainAsync(Waits.CloseWrites);
-            var shutdown = Task.WhenAll(host.ShutdownAsync(), memoWrites);
+            var shutdown = Task.WhenAll(host.ShutdownAsync(), memoWrites, reportStop);
             if (await Task.WhenAny(shutdown, Task.Delay(Waits.CloseWrites + Waits.CloseWrites + Waits.CloseWrites)) != shutdown)
                 log.Write("closeTimeout", new { state = host.Snapshot.State.ToString() });
+            // 리포트 내보내기는 시간 한도 없이 끝까지 기다린다: 취소를 받았으니 곧 끝나고, 끝나기 전에 닫으면 임시 파일이 남을 수 있다
+            // (G4 M8 1·2라운드 b1. 입출력 자체가 멈추면 운영체제가 오류로 끝낼 때까지 기다린다 — 남는 파일보다 늦은 닫기를 택함)
+            if (!reportStop.IsCompleted)
+            {
+                log.Write("reportCloseWait", new { });
+                await reportStop;
+            }
             if (memoWrites.IsCompleted && !memoWrites.Result) log.Write("memoCloseTimeout", new { });
             var left = host.UnsavedDrafts();
             if (left.Count > 0) log.Write("memoUnsaved", new { marks = left });   // 메모 글은 남기지 않는다
