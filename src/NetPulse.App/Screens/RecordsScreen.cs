@@ -99,7 +99,12 @@ public sealed class RecordsScreen : Screen
         AutomationProperties.SetAutomationId(scroll, "records.scroll");
         Grid.SetRow(scroll, 1);
         Children.Add(scroll);
-        Context.Records.Changed += () => DispatcherQueue.TryEnqueue(() => { if (!Context.IsClosing() && Visibility == Visibility.Visible) Render(Context.Host.Snapshot); });
+        Context.Records.Changed += () => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (Context.IsClosing() || Visibility != Visibility.Visible) return;
+            // 메모 저장 완료 뒤 갱신·다시 열기가 끝날 때까지는 일반 다시 그리기도 초점을 지킨다 (M7 이월 2, M9 설계 C2)
+            if (keepFocus > 0) RenderKeepingFocus(); else Render(Context.Host.Snapshot);
+        });
     }
 
     public override IReadOnlyList<UIElement> Parts => [header, scroll];
@@ -1110,7 +1115,12 @@ public sealed class RecordsScreen : Screen
                     edit.Click += (_, _) => { if (!editing.Contains(mark.Mark)) editing.Add(mark.Mark); focusMark = mark.Mark; Rerender(); };
                     row.Children.Add(edit);
                 }
-                if (memoState.GetValueOrDefault((detailKey!, m.Mark)) is { } st) row.Children.Add(Named($"records.mark.{i}.state", st, Typography.Caption, Ui.Brushes.Muted));
+                if (memoState.GetValueOrDefault((detailKey!, m.Mark)) is { } st)
+                {
+                    var stateText = Named($"records.mark.{i}.state", st, Typography.Caption, Ui.Brushes.Muted);
+                    memoStateText[m.Mark] = stateText;   // 늦게 온 완료가 이 글을 바꿀 수 있게 (M7 이월 1)
+                    row.Children.Add(stateText);
+                }
             }
             stack.Children.Add(row);
         }
@@ -1158,12 +1168,22 @@ public sealed class RecordsScreen : Screen
     /// </summary>
     private void RerenderKeepingFocus()
     {
+        renderedKey = "";
+        RenderKeepingFocus();
+    }
+
+    /// <summary>그릴 것이 바뀌었으면 다시 그리되 초점을 같은 자동화 ID로 돌려준다.</summary>
+    private void RenderKeepingFocus()
+    {
         string? id = null;
         if (XamlRoot is { } xr && Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(xr) is UIElement f && FocusWithin(content))
             id = AutomationProperties.GetAutomationId(f);
-        Rerender();
+        Render(Context.Host.Snapshot);
         if (!string.IsNullOrEmpty(id)) FocusLater(id, mode);
     }
+
+    /// <summary>메모 저장 완료 뒤 갱신·다시 열기가 진행 중인 수 (그동안의 목록 갱신 다시 그리기는 초점을 지킨다).</summary>
+    private int keepFocus;
 
     private async Task SaveMemoAsync(SymptomMark mark, string text)
     {
@@ -1172,6 +1192,11 @@ public sealed class RecordsScreen : Screen
         if (item is null) return;
         int req = requestGen;   // 이 상세를 떠나거나 다른 기록을 열면 바뀐다 (b4)
         bool Here() => !Context.IsClosing() && req == requestGen && detailKey == key && mode == Mode.Detail;
+        // 같은 상세가 지금 보이는가 (목록에 갔다 같은 상세로 돌아온 경우 포함): 상태 글만 바꿀 때 쓴다. 편집 상태 변경은 Here()만 (M7 이월 1)
+        bool SameDetail() => !Context.IsClosing() && detailKey == key && mode == Mode.Detail;
+        double scrollAtStart = scroll.VerticalOffset;
+        // 완료 때 상태 글로 스크롤: 초점이 그 칸에 있고 사용자가 그 사이 휠로 다른 곳을 보지 않았을 때만 (M7 이월 3)
+        bool Unmoved() => Math.Abs(scroll.VerticalOffset - scrollAtStart) < 1;
         // 화면 스레드에서 부르기 전에 번호를 받고, 완료·다시 열기·큐 작업마다 아직 마지막 요청인지 본다:
         // 저장 쪽 최신 판정과 화면에 반영하는 순간 사이에 다음 저장을 눌러도 앞 완료가 "저장했습니다"를 띄우지 않게 (G4 M7 4라운드 1)
         int seq = ++memoSaveCounter;
@@ -1183,14 +1208,25 @@ public sealed class RecordsScreen : Screen
         if (!result.Latest || !Mine()) return;   // 더 새 요청이 있다: 오래된 완료는 반영하지 않는다
         if (result.State == EventWriteState.Saved)
         {
-            SetMemoState(key, mark.Mark, result.Truncated ? "저장했습니다 (200자에서 잘라 저장)" : "저장했습니다", Here(),
-                reveal: memoEditors.TryGetValue(mark.Mark, out var done) && FocusWithin(done.Row));
+            SetMemoState(key, mark.Mark, result.Truncated ? "저장했습니다 (200자에서 잘라 저장)" : "저장했습니다", SameDetail(),
+                reveal: Here() && Unmoved() && memoEditors.TryGetValue(mark.Mark, out var done) && FocusWithin(done.Row));
             // 저장하는 동안 더 고친 글이 있으면 칸과 초안을 남긴다
             if (Here() && (!memoDrafts.TryGetValue(mark.Mark, out var now) || now == text)) { editing.Remove(mark.Mark); memoDrafts.Remove(mark.Mark); }
-            await Context.Records.RefreshAsync(Context.Host.RunningId);
-            if (!Here() || !Mine()) return;
-            var reopened = await Context.Records.OpenAsync(key);
-            DispatcherQueue.TryEnqueue(() => { if (Here() && Mine() && reopened is not null) { detail = reopened; RerenderKeepingFocus(); } });
+            keepFocus++;
+            try
+            {
+                await Context.Records.RefreshAsync(Context.Host.RunningId);
+                if (!Here() || !Mine()) return;
+                var reopened = await Context.Records.OpenAsync(key);
+                var done2 = new TaskCompletionSource();
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (Here() && Mine() && reopened is not null) { detail = reopened; RerenderKeepingFocus(); }
+                    done2.TrySetResult();
+                });
+                await done2.Task;
+            }
+            finally { keepFocus--; }
         }
         else
         {
@@ -1201,7 +1237,13 @@ public sealed class RecordsScreen : Screen
             if (Here() && editing.Contains(mark.Mark) && memoEditors.TryGetValue(mark.Mark, out var ed))
             {
                 ed.Box.SetError("저장하지 못했습니다. 다시 저장해 보세요.");
-                SetMemoState(key, mark.Mark, "저장하지 못했습니다", true, reveal: FocusWithin(ed.Row));
+                SetMemoState(key, mark.Mark, "저장하지 못했습니다", true, reveal: Unmoved() && FocusWithin(ed.Row));
+            }
+            else if (SameDetail())
+            {
+                // 목록에 갔다 같은 상세로 돌아온 뒤 실패: 그 칸의 "저장하는 중…"을 실패로 바꾼다 (다시 그릴 계기가 없어 남던 것, M7 이월 1)
+                SetMemoState(key, mark.Mark, "저장하지 못했습니다", true);
+                Context.Toasts.Show(ToastKind.Error, "메모를 저장하지 못했습니다", "메모 고치기를 누르면 저장하지 못한 글로 다시 저장할 수 있습니다.");
             }
             else Context.Toasts.Show(ToastKind.Error, "메모를 저장하지 못했습니다", Here() ? "메모 고치기를 누르면 저장하지 못한 글로 다시 저장할 수 있습니다." : "그 기록을 다시 열면 다시 저장할 수 있습니다.");
         }
