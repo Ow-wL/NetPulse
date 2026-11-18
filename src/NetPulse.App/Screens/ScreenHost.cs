@@ -25,6 +25,12 @@ public sealed class ScreenContext
     public required Action<string> OpenReport { get; init; }
     /// <summary>창 핸들 (폴더 선택 대화상자 연결용).</summary>
     public required Func<nint> WindowHandle { get; init; }
+    /// <summary>설정 저장 경계 (M9 설계 B1).</summary>
+    public required NetPulse.Design.Settings.SettingsStore Settings { get; init; }
+    /// <summary>기록 옮기기·출입문·시작 상태 (M9 설계 B3).</summary>
+    public required NetPulse.App.Resident.ResidentServices Resident { get; init; }
+    /// <summary>트레이를 쓸 수 있는가 (상주 카드).</summary>
+    public required Func<bool> TrayAvailable { get; init; }
     public required ToastHost Toasts { get; init; }
     public required DialogHost Dialog { get; init; }
     public required StartupOptions Options { get; init; }

@@ -54,7 +54,11 @@ public sealed partial class AppShell : Window
     /// <summary>설정 저장 경계 (M9 설계 B1).</summary>
     public SettingsStore Settings { get; }
 
-    public AppShell(StartupOptions options, AppLog log, SettingsStore settings, MeasurementHost host, RecentRecords recent, RecordMemos memos, DiagnosisHost diagnosis, Func<Task> beforeClose)
+    /// <summary>기록 옮기기·출입문 (M9 설계 B3).</summary>
+    public NetPulse.App.Resident.ResidentServices Resident { get; }
+
+    public AppShell(StartupOptions options, AppLog log, SettingsStore settings, MeasurementHost host, RecentRecords recent, RecordMemos memos, DiagnosisHost diagnosis, Func<Task> beforeClose,
+        NetPulse.App.Resident.ResidentServices services)
     {
         this.options = options;
         this.log = log;
@@ -66,6 +70,7 @@ public sealed partial class AppShell : Window
         Title = "NetPulse";
         AppWindow.ResizeClient(new SizeInt32(Size.WindowWidth, Size.WindowHeight));
         Settings = settings;
+        Resident = services;
         ui = new Ui(this, options, log, settings.Current.Look, App.PersistLook(settings, log));
 
         root = new GroupPanel("app.root", "NetPulse") { Background = ui.Brushes.Bg };
@@ -107,6 +112,7 @@ public sealed partial class AppShell : Window
             Ui = ui, Host = host, Recent = recent, Toasts = toasts, Dialog = dialog, Options = options, Log = log,
             Diagnosis = diagnosis, Navigate = Navigate, QueueDiag = QueueDiag, SetRevealOrigin = SetRevealOrigin, IsClosing = () => closing,
             Memos = memos, OpenRecord = OpenRecord, OpenReport = OpenReport, WindowHandle = () => WinRT.Interop.WindowNative.GetWindowHandle(this),
+            Settings = settings, Resident = services, TrayAvailable = () => TrayAvailable,
         };
         screens.Register("home", () => new HomeScreen(context));
         screens.Register("measure", () => new MeasureScreen(context));
@@ -364,6 +370,8 @@ public sealed partial class AppShell : Window
         instance?.MarkClosing();   // 두 번째 실행의 요청에는 closing으로 답한다 (A5)
         host.BlockStarts();
         runTimer?.Stop();
+        // 기록을 옮기는 중이면 멈춤을 보낸다: 지금 기록 하나를 끝내거나 되돌리고 멈춘다 (M9 설계 A1 표). 아래에서 독점이 풀리기를 기다린다
+        if (screens.Prepared("settings") is SettingsScreen settingsScreen) settingsScreen.StopMove();
         // 종료를 시작하면 화면의 프레임 구독·쌓인 프레임 작업부터 끊는다 (M7 이월 4, M9 설계 C2)
         screens.Suspend();
         ui.Pacer.Pause();
@@ -378,6 +386,8 @@ public sealed partial class AppShell : Window
         try
         {
             await diagnosisStop;   // 진단을 먼저 멈춘다: 억제 → 취소 → 최대 3초 (M6 설계 3.4)
+            // 옮기기가 멈추고 출입문을 놓을 때까지 (기록 하나 복사 중이면 그 파일 사이에서 멈춘다)
+            for (int i = 0; i < 100 && Resident.WorkGate.Closed; i++) await Task.Delay(Waits.CloseWrites / 100);
             // 기록 화면의 메모 저장은 쓰기 큐에 들어가기 전(저장 시작 알림·앞 요청 대기)일 수 있어 호스트 종료와 함께 따로 기다린다
             // (호스트는 쓰기 큐만 기다린다, G4 M7 3라운드 1). 둘은 세대로 서로의 옛 글을 건너뛰므로 동시에 해도 된다
             var memoWrites = memos.DrainAsync(Waits.CloseWrites);

@@ -14,7 +14,7 @@ namespace NetPulse.App.Screens;
 /// <summary>
 /// 측정 구성 편집 (M5 설계 4.5, R1). 모든 변경은 초안이다: [저장]은 검증 오류가 0일 때만 켜지고, [취소]는 초안을 버린다
 /// (그래서 삭제도 저장 전에는 되돌릴 수 있어 확인을 묻지 않는다). 측정 중에는 읽기 전용.
-/// 측정 방식은 ICMP만 편집한다 (TCP는 M9). 새 대상 ID는 자동.
+/// 측정 방식은 대상마다 ICMP(Ping) 또는 TCP(포트) (M9 설계 B5, N10). 새 대상 ID는 자동.
 /// </summary>
 public sealed class ProfileEditor : Screen
 {
@@ -30,6 +30,8 @@ public sealed class ProfileEditor : Screen
         public TargetRole Role = TargetRole.External;
         public bool Enabled = true;
         public ProbeMethod Method = ProbeMethod.Icmp;
+        /// <summary>TCP 포트 칸의 글 (TCP일 때만 쓴다).</summary>
+        public string Port = "443";
     }
 
     private sealed class DraftProfile
@@ -100,7 +102,8 @@ public sealed class ProfileEditor : Screen
     {
         Id = p.Id, Name = p.Name, Minutes = ((int)p.Duration.TotalMinutes).ToString(CultureInfo.InvariantCulture),
         TimeoutMs = ((int)p.Timeout.TotalMilliseconds).ToString(CultureInfo.InvariantCulture), Expected = p.Expected,
-        Targets = p.Targets.Select(t => new DraftTarget { Id = t.Id, Name = t.Name, Address = t.Address.ToString(), Provider = t.Provider ?? "", Role = t.Role, Enabled = t.Enabled, Method = t.Method }).ToList(),
+        Targets = p.Targets.Select(t => new DraftTarget { Id = t.Id, Name = t.Name, Address = t.Address.ToString(), Provider = t.Provider ?? "", Role = t.Role, Enabled = t.Enabled, Method = t.Method,
+            Port = t.Method.Kind == ProbeMethodKind.Tcp ? t.Method.Port.ToString(CultureInfo.InvariantCulture) : "443" }).ToList(),
     };
 
     private DraftProfile Current => profiles.First(p => p.Id == currentId);
@@ -112,7 +115,9 @@ public sealed class ProfileEditor : Screen
         foreach (var t in d.Targets)
         {
             if (!IPAddress.TryParse(t.Address.Trim(), out var ip)) return null;
-            targets.Add(new Target(t.Id, t.Name.Trim(), ip, t.Role, t.Provider.Trim().Length == 0 ? null : t.Provider.Trim(), t.Method, t.Enabled));
+            // TCP 포트를 못 읽으면 0: 검증기가 bad-port로 막고 칸 오류는 FieldErrors가 낸다
+            var method = t.Method.Kind == ProbeMethodKind.Tcp ? ProbeMethod.Tcp(int.TryParse(t.Port.Trim(), out var port) ? port : 0) : ProbeMethod.Icmp;
+            targets.Add(new Target(t.Id, t.Name.Trim(), ip, t.Role, t.Provider.Trim().Length == 0 ? null : t.Provider.Trim(), method, t.Enabled));
         }
         if (!int.TryParse(d.Minutes.Trim(), out var minutes) || !int.TryParse(d.TimeoutMs.Trim(), out var timeout)) return null;
         return new Profile(d.Id, d.Name.Trim(), targets, TimeSpan.FromMilliseconds(timeout), TimeSpan.FromMinutes(minutes), d.Expected);
@@ -131,6 +136,8 @@ public sealed class ProfileEditor : Screen
             if (x.Name.Trim().Length == 0) e[$"profile.target.{i}.name"] = "이름을 적어 주세요.";
             if (!IPAddress.TryParse(x.Address.Trim(), out var ip) || ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork || x.Address.Count(c => c == '.') != 3)
                 e[$"profile.target.{i}.address"] = "IPv4 주소를 적어 주세요 (예: 192.0.2.1).";
+            if (x.Method.Kind == ProbeMethodKind.Tcp && (!int.TryParse(x.Port.Trim(), out var port) || port is < 1 or > 65535))
+                e[$"profile.target.{i}.port"] = "1~65535 사이의 포트를 적어 주세요.";
         }
         return e;
     }
@@ -312,7 +319,7 @@ public sealed class ProfileEditor : Screen
         actions.Children.Add(add);
         actions.Children.Add(redetect);
         stack.Children.Add(actions);
-        var (card, body) = ScreenParts.Card(Ui, "profile.targets", "대상", $"{d.Targets.Count(t => t.Enabled)}개 사용 · 최대 {Profile.MaxTargets}개");
+        var (card, body) = ScreenParts.Card(Ui, "profile.targets", "대상", $"{d.Targets.Count(t => t.Enabled)}개 사용 · 최대 {Profile.MaxTargets}개. Ping에 응답하지 않는 대상은 TCP 연결로 잴 수 있습니다 (연결 거부도 응답으로 셉니다).");
         body.Set(stack);
         return card;
     }
@@ -340,8 +347,18 @@ public sealed class ProfileEditor : Screen
         role.Changed += v => { if (locked) return; t.Role = v == "local" ? TargetRole.Local : TargetRole.External; Changed(); };
         second.Children.Add(role);
         second.Children.Add(Field($"profile.target.{i}.provider", "사업자 (선택)", t.Provider, Size.FieldM, v => t.Provider = v));
+        var method = new SegmentedChoice(Ui, $"profile.target.{i}.method", "측정 방식", [("icmp", "Ping"), ("tcp", "TCP")],
+            t.Method.Kind == ProbeMethodKind.Tcp ? "tcp" : "icmp") { ReadOnly = locked };
+        method.Changed += v =>
+        {
+            if (locked) return;
+            t.Method = v == "tcp" ? ProbeMethod.Tcp(int.TryParse(t.Port.Trim(), out var p) ? p : 0) : ProbeMethod.Icmp;
+            Changed();
+            Rebuild();
+        };
+        second.Children.Add(method);
         if (t.Method.Kind == ProbeMethodKind.Tcp)
-            second.Children.Add(Fonts.Text($"TCP {t.Method.Port} · 편집은 다음 단계에서", Typography.Caption, Ui.Brushes.Muted));
+            second.Children.Add(Field($"profile.target.{i}.port", "포트", t.Port, Size.FieldS, v => t.Port = v, "443"));
         var remove = new GlassButton(Ui, ButtonKind.Icon, $"profile.target.{i}.remove", "대상 삭제", Icons.Trash) { IsEnabled = !locked, VerticalAlignment = VerticalAlignment.Bottom };
         remove.Click += (_, _) => { d.Targets.RemoveAt(i); Changed(); Rebuild(); };
         second.Children.Add(remove);

@@ -573,6 +573,15 @@ public sealed class ReportScreen : Screen
         if (!doc.Options.Masked && !await ConfirmUnmaskedAsync()) { lastAction = "unmasked-cancel"; Context.QueueDiag(); return; }
         string? path = Context.Options.ReportOut is { } outFolder ? System.IO.Path.Combine(outFolder, doc.FileName) : await PickAsync(doc.FileName);
         if (path is null || Context.IsClosing()) { lastAction = "cancel"; Context.QueueDiag(); return; }   // 취소: 아무 일도 하지 않는다
+        // 기록을 옮기는 동안은 내보내지 않는다 (M9 설계 B3 출입문). 표는 내보내기 작업이 끝날 때 놓는다
+        var ticket = Context.Resident.WorkGate.TryEnter();
+        if (ticket is null)
+        {
+            lastAction = "moving";
+            Context.Toasts.Show(ToastKind.Warning, "기록을 옮기는 중입니다", "옮기기가 끝난 뒤 내보내세요.");
+            Context.QueueDiag();
+            return;
+        }
         exporting = true;
         SetExport();
         Context.QueueDiag();
@@ -606,6 +615,7 @@ public sealed class ReportScreen : Screen
             return (r, ReportFile.Write(path, r.Html!, overwrite: true, fault is ReportFault.Write or ReportFault.Move ? fault : ReportFault.None, token, hold));
         }, token);
         exportTask = work;
+        _ = work.ContinueWith(_ => ticket.Dispose(), TaskScheduler.Default);
         ReportExport.Rendered rendered;
         ReportWriteResult? written;
         try { (rendered, written) = await work; }

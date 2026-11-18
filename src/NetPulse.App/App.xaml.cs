@@ -3,6 +3,7 @@ using NetPulse.App.Design.Showcase;
 using NetPulse.Core.Demo;
 using NetPulse.Core.Live;
 using NetPulse.Design.Settings;
+using NetPulse.App.Resident;
 using NetPulse.Platform;
 
 namespace NetPulse.App;
@@ -42,7 +43,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             // 기록을 만들기 전에 실패해도 원인을 남긴다 (임시 폴더, 예외 종류와 메시지만)
-            var text = ex.GetType().Name + ": " + ex.Message + Environment.NewLine + ex.StackTrace;
+            var text = NetPulse.Core.Records.RecordFolderRules.Sanitize(ex.GetType().Name + ": " + ex.Message + Environment.NewLine + ex.StackTrace);
             if (log is not null) log.Write("startupFailed", new { type = ex.GetType().Name, message = ex.Message, hresult = ex.HResult, at = ex.StackTrace?.Split(Environment.NewLine).Take(6) });
             else File.WriteAllText(Path.Combine(Path.GetTempPath(), "netpulse-startup-error.log"), text);
             throw;
@@ -88,9 +89,13 @@ public partial class App : Application
                 Path.Combine(options.UserData, "demo-fallback"));
         }
         else world = new LiveAppWorld(options.UserData);
-        host = new MeasurementHost(world, options.UserData, new HostOptions { AppVersion = version, HoldStart = options.HoldStart });
-        var recent = new RecentRecords(new RecordLibrary(() => world.RecordPaths, options.HoldAnalysis, options.HoldList));
-        var memos = new RecordMemos(host.Notes, () => world.Now);
+        // 기록 위치 (M9 설계 B3): 설정의 기본 위치·옛 위치. 끊긴 옮기기의 일지를 먼저 검증한다 (흐름 9, [2-8])
+        var folders = new RecordFolderSettings(settings);
+        var recordStartup = StartRecords(world, settings, folders, load, log);
+        var workGate = new RecordWorkGate();
+        host = new MeasurementHost(world, options.UserData, new HostOptions { AppVersion = version, HoldStart = options.HoldStart, WorkGate = workGate });
+        var recent = new RecentRecords(new RecordLibrary(() => world.RecordPaths, options.HoldAnalysis, options.HoldList) { WorkGate = workGate });
+        var memos = new RecordMemos(host.Notes, () => world.Now) { WorkGate = workGate };
         memos.Saving += host.MemoSavingElsewhere;   // 측정 화면에 남은 옛 초안을 버리고 넣은 옛 쓰기도 건너뛴다 (M7 구현 중 결정 4, G4 M7 1라운드 a1)
         memos.Saved += host.MemoSavedElsewhere;
         memos.SavingFailed += ex => log?.Write("memoSavingFailed", new { type = ex.GetType().Name });   // 예외 종류만 (글·경로 없음, G4 M7 4라운드 3)
@@ -107,7 +112,11 @@ public partial class App : Application
         });
         var mh = host;
         var diagnosis = new DiagnosisHost(world.Diagnostics, new DiagnosisStore(Path.Combine(options.UserData, "diagnoses")), () => mh.RunningId, () => world.Now, version);
-        var shell = new AppShell(options, log, settings, host, recent, memos, diagnosis, ShutdownAsync);
+        ApplyDiagnosisDefaults(diagnosis, world.Diagnostics.Settings, settings, log);
+        var moves = new RecordMoveService(world, workGate, host, folders, path => SingleInstance.FinalPath(path));
+        if (options.MoveFail is { } moveFail) FaultMoveOps.Configure(moves, moveFail);
+        var shell = new AppShell(options, log, settings, host, recent, memos, diagnosis, ShutdownAsync,
+            new ResidentServices(moves, workGate, recordStartup));
         window = shell;
         shell.AttachInstance(owner!);
         window.Activate();
@@ -168,6 +177,36 @@ public partial class App : Application
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool AllowSetForegroundWindow(int processId);
+
+    /// <summary>
+    /// 시작 때 기록 위치 (M9 설계 B3 흐름 9): 일지가 있으면 한 덩어리로 검증해 맞으면 우리 .moving만 정리하고, 맞지 않으면 records 묶음을
+    /// 저장 금지로 두고 아무것도 자동으로 하지 않는다. 그다음 세계에 위치를 준다 (경로는 기록에 남기지 않는다).
+    /// </summary>
+    private static RecordStartup StartRecords(IAppWorld world, SettingsStore settings, RecordFolderSettings folders, SettingsLoad load, AppLog log)
+    {
+        var f = folders.Read();
+        string? problem = null;
+        bool interrupted = false;
+        if (load.Repaired.Contains("records.move")) { problem = "shape"; interrupted = true; }
+        else if (f.Move is not null) (interrupted, problem) = RecordMoveService.Recover(f, f.Folder ?? world.DefaultRecordFolder);
+        if (problem is not null) settings.BlockRecords();
+        world.SetRecordFolders(f.Folder, f.Extra);
+        log.Write("records", new { folder = f.Folder is null ? "default" : "custom", extra = f.Extra.Count, interrupted, problem });
+        return new RecordStartup(interrupted, problem);
+    }
+
+    /// <summary>진단 기본값 (B4): 설정 값이 있고 맞으면 세계의 기본 위에. 맞지 않는 쌍은 기본값 + 기록(칸 이름만).</summary>
+    /// <param name="baseSettings">세계의 기본 진단 설정 (실측: Core 기본값, 데모: 시나리오 값). 설정 값은 이 위에 얹는다</param>
+    internal static void ApplyDiagnosisDefaults(DiagnosisHost diagnosis, NetPulse.Core.Diagnostics.DiagnosisSettings baseSettings, SettingsStore settings, AppLog log)
+    {
+        var d = settings.Current.Diagnosis;
+        var (parsed, rejected) = NetPulse.Core.Diagnostics.DiagnosisDefaults.From(d.TcpTargets, d.Domains);
+        var next = baseSettings;
+        if (d.TcpTargets is not null && !rejected.Contains("tcpTargets")) next = next with { TcpTargets = parsed.TcpTargets };
+        if (d.Domains is not null && !rejected.Contains("domains")) next = next with { Domains = parsed.Domains };
+        diagnosis.SetSettings(next);
+        if (rejected.Count > 0) log.Write("diagnosisDefaults", new { rejected });
+    }
 
     /// <summary>보기 설정 저장 (Effects가 부른다). 실패는 종류만 기록.</summary>
     internal static Action<AppSettings> PersistLook(SettingsStore store, AppLog log) => look =>

@@ -302,6 +302,7 @@ public sealed partial class AppShell
         OnQueryEndSession();
         // 확정: 취소부터 보낸다 (기다리지 않음) — 진단 억제, 리포트 내보내기 취소 토큰, 두 번째 실행에는 closing
         instance?.MarkClosing();
+        if (screens.Prepared("settings") is SettingsScreen settingsScreen) settingsScreen.StopMove();   // 옮기기 작업자가 되돌리고 스스로 독점을 놓는다
         _ = diagnosis.ShutdownAsync();
         if (screens.Prepared("report") is ReportScreen report) _ = report.StopExportAsync();
         // UI 스레드는 데이터 작업이 끝나기를 막고 기다리기만 한다 (A6): 호스트·메모는 UI 문맥을 쓰지 않는다
