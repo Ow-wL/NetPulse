@@ -311,6 +311,13 @@ public sealed class AppDriver : IDisposable
         return (second, process.ExitCode);
     }
 
+    /// <summary>시험 주입으로 앱이 스스로 강제 종료되기를 기다린다 (<c>--move-fail kill-after</c>, 종료 코드는 보지 않는다).</summary>
+    public void WaitKilled(TimeSpan timeout)
+    {
+        if (!process.WaitForExit((int)timeout.TotalMilliseconds)) throw new TimeoutException("앱이 강제 종료되지 않았습니다.");
+        closed = true;
+    }
+
     /// <summary>세션 종료 확정 뒤 Windows가 하는 일을 흉내: 프로세스를 끝낸다 (종료 코드는 보지 않는다).</summary>
     public void TerminateAfterSessionEnd()
     {

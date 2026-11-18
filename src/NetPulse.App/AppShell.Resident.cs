@@ -332,6 +332,8 @@ public sealed partial class AppShell
         trayWindow = tray is null ? 0 : (long)tray.Handle,
         hiddenObserved = notifier.HiddenSegmentStarts,
         settingsPersist = Settings.CanPersist,
+        workGate = Resident.WorkGate.Closed,
+        probed = (diagnosis.Probes as NetPulse.Core.Demo.DemoDiagnosticProbes)?.Probed,   // 데모: 진단 검사기가 받은 대상 (B4)
     };
 
     private object[] NotifiedSnapshot() { lock (notified) return [.. notified]; }
