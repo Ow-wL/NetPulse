@@ -34,6 +34,12 @@ internal static class TestSupport
     }
 
     /// <summary>엔진이 다음 회차를 기다리기 시작할 때까지 기다린 뒤 시계를 돌린다.</summary>
+    /// <summary>
+    /// 세션 완료 대기 한도 (M9 이월, M8 PR CI): 완료는 신호(<c>Completion</c>)로 기다리고, 이 한도는 멈춤만 잡는다.
+    /// 느린 CI 실행기에서 봉인·요약·링크 기록 읽기가 10초를 넘긴 일이 있었다 (<c>DemoLinkScenarioTests</c>).
+    /// </summary>
+    public static readonly TimeSpan SessionLimit = TimeSpan.FromSeconds(60);
+
     public static async Task AdvanceWhenWaiting(ManualClock clock, TimeSpan by)
     {
         await Eventually(() => clock.WaiterCount > 0, "엔진이 다음 회차를 기다림");

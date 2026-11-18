@@ -83,7 +83,7 @@ public sealed class SessionTests : IDisposable
         var clock = new ManualClock(Start);
         var s = MeasurementSession.Start(Options(clock));
         await Rounds(clock, s, 59);
-        var result = await s.Completion.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        var result = await s.Completion.WaitAsync(TestSupport.SessionLimit, TestContext.Current.CancellationToken);
         Assert.Equal(EndReason.Completed, result.EndReason);
         Assert.Equal((60L, 60L, 0L, 0L, 0L), (result.Summary!.Observed, result.Summary.Committed, result.Summary.Pending, result.Summary.Dropped, result.Summary.Unprocessed));
         Assert.Equal(59, result.Summary.LastCommittedRound);
@@ -255,7 +255,7 @@ public sealed class SessionTests : IDisposable
         var clock = new ManualClock(Start);
         primary.Next = name => name.StartsWith("rounds", StringComparison.Ordinal) ? Fault.Unexpected : Fault.None;
         var s = MeasurementSession.Start(Options(clock));
-        var result = await s.Completion.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        var result = await s.Completion.WaitAsync(TestSupport.SessionLimit, TestContext.Current.CancellationToken);
         Assert.Equal(EndReason.Error, result.EndReason);
         Assert.Equal(nameof(InvalidOperationException), result.Error);
         Assert.Equal(EndReason.Error, Reread().EndReason);

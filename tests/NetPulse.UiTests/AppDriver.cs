@@ -177,8 +177,17 @@ public sealed class AppDriver : IDisposable
     /// <summary>앱이 내보낸 진단 값 (diag.state의 이름, JSON).</summary>
     public JsonElement Diag() => JsonDocument.Parse(Text("diag.state")).RootElement.Clone();
 
+    /// <summary>
+    /// 진단 값이 조건을 만족할 때까지. 읽는 순간의 중간 상태(빈 글, 아직 없는 칸, 다른 형식의 값)는 "아직"으로 보고 다시 읽는다
+    /// (M8 게이트 1회차: 측정 시작 실패 장면의 빈 값 → NRE, 흐름 시험의 GetBoolean 형식 예외, M9 설계 C2).
+    /// </summary>
     public T WaitDiag<T>(Func<JsonElement, T> read, Func<T, bool> until, string what) =>
-        WaitFor(() => { try { return read(Diag()); } catch (JsonException) { return default!; } catch (ElementNotAvailableException) { return default!; } }, until, what);
+        WaitFor(() =>
+        {
+            try { return read(Diag()); }
+            catch (Exception ex) when (ex is JsonException or ElementNotAvailableException or KeyNotFoundException or InvalidOperationException
+                or NullReferenceException or FormatException or IndexOutOfRangeException) { return default!; }
+        }, until, what);
 
     public void Select(string automationId) =>
         ((SelectionItemPattern)Find(automationId).GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
