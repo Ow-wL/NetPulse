@@ -16,7 +16,7 @@ public sealed class M9SettingsTests
         File.WriteAllText(Path.Combine(G5Dir, name + ".json"), JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
 
     private static JsonElement Sd(JsonElement d) => d.GetProperty("screenDiag");
-    private static string RecState(JsonElement d) => Sd(d).ValueKind == JsonValueKind.Object && Sd(d).TryGetProperty("records", out var r) ? r.GetProperty("state").GetString()! : "";
+    internal static string RecState(JsonElement d) => Sd(d).ValueKind == JsonValueKind.Object && Sd(d).TryGetProperty("records", out var r) ? r.GetProperty("state").GetString()! : "";
 
     private static string[] Ids(string folder) => Directory.Exists(folder)
         ? Directory.EnumerateDirectories(folder).Select(Path.GetFileName).Where(n => n!.Length > 16 && !n.Contains('.')).Select(n => n!).Order().ToArray() : [];
@@ -39,7 +39,7 @@ public sealed class M9SettingsTests
 
     private static string SettingsText(string userData) => File.ReadAllText(Path.Combine(userData, "settings.json"));
 
-    private static void ConfirmMove(AppDriver app, string button)
+    internal static void ConfirmMove(AppDriver app, string button)
     {
         app.WaitDiag(d => Sd(d).ValueKind == JsonValueKind.Object && Sd(d).GetProperty("records").GetProperty("changeEnabled").GetBoolean(), b => b, "바꾸기 켜짐");
         app.Invoke(button);
@@ -161,6 +161,56 @@ public sealed class M9SettingsTests
         finally { Cleanup(userData, dest); }
     }
 
+    /// <summary>
+    /// C1 저장 위치 대체 (G3): 설정의 사용자 위치가 사용자 폴더 안의 쓰기 거부 폴더 → 측정은 대체 위치에 저장되고
+    /// 측정 띠와 설정 카드가 알린다. 쓰기 거부는 시험이 만든 폴더에만 걸고 끝나면 푼다.
+    /// </summary>
+    [Fact]
+    public void UnwritableFolderFallsBack()
+    {
+        var userData = AppDriver.NewUserData();
+        M5Fixtures.SaveProfile(userData, "steady");
+        var locked = Path.Combine(userData, "locked-records");
+        Directory.CreateDirectory(locked);
+        File.WriteAllText(Path.Combine(userData, "settings.json"), new System.Text.Json.Nodes.JsonObject
+        {
+            ["version"] = 2,
+            ["records"] = new System.Text.Json.Nodes.JsonObject { ["folder"] = locked, ["extraFolders"] = new System.Text.Json.Nodes.JsonArray() },
+        }.ToJsonString());
+        var dir = new DirectoryInfo(locked);
+        var deny = new System.Security.AccessControl.FileSystemAccessRule(System.Security.Principal.WindowsIdentity.GetCurrent().User!,
+            System.Security.AccessControl.FileSystemRights.CreateFiles | System.Security.AccessControl.FileSystemRights.CreateDirectories
+            | System.Security.AccessControl.FileSystemRights.WriteData | System.Security.AccessControl.FileSystemRights.AppendData,
+            System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+            System.Security.AccessControl.PropagationFlags.None, System.Security.AccessControl.AccessControlType.Deny);
+        var acl = dir.GetAccessControl();
+        acl.AddAccessRule(deny);
+        dir.SetAccessControl(acl);
+        try
+        {
+            Assert.ThrowsAny<UnauthorizedAccessException>(() => File.WriteAllText(Path.Combine(locked, "probe.txt"), "x"));   // 정말 쓸 수 없다
+            using var app = AppDriver.LaunchWith(userData, "--demo", "steady", "--demo-speed", "20", "--start", "--screen", "settings");
+            var d = app.WaitDiag(x => x, x => x.GetProperty("host").GetString() == "Measuring" && Sd(x).ValueKind == JsonValueKind.Object
+                && !Sd(x).GetProperty("records").GetProperty("usable").GetBoolean(), "설정 카드: 쓸 수 없음");
+            Assert.Contains("지금 측정은 대체 위치에 저장됩니다", app.Text("settings.records.status"));
+            var session = M5Fixtures.Str(d, "session");
+            app.Select("nav.measure");
+            AppDriver.WaitFor(() => app.Exists("measure.banner.fallback"), b => b, "측정 띠: 대체 위치");
+            app.Invoke("measure.stop");
+            app.WaitDiag(x => x.GetProperty("finished").ValueKind == JsonValueKind.Object, b => b, "멈춤");
+            Assert.Equal(0, app.Close());
+            Assert.Contains(session, Ids(Path.Combine(userData, "demo-fallback")));
+            Assert.Empty(Ids(locked));
+        }
+        finally
+        {
+            acl = dir.GetAccessControl();
+            acl.RemoveAccessRuleSpecific(deny);
+            dir.SetAccessControl(acl);
+            AppDriver.DeleteUserData(userData);
+        }
+    }
+
     [Fact]
     public void DiagnosisDefaultsReachTheProbesOnTheNextDiagnosis()
     {
@@ -169,10 +219,13 @@ public sealed class M9SettingsTests
         try
         {
             using var app = AppDriver.LaunchWith(userData, "--demo", "steady", "--screen", "settings");
+            string DiagState(JsonElement x) => Sd(x).GetProperty("diagnosis").GetProperty("state").GetString()!;
             app.SetText("settings.diag.domain.0", "not a domain");
+            app.WaitDiag(DiagState, s => s == "dirty", "고침 (저장 켜짐)");          // 글 상자 변경 사건은 한 박자 늦게 온다
             app.Invoke("settings.diag.save");
-            app.WaitDiag(x => Sd(x).GetProperty("diagnosis").GetProperty("state").GetString(), s => s == "errors", "칸 오류");
+            app.WaitDiag(DiagState, s => s == "errors", "칸 오류");
             app.SetText("settings.diag.domain.0", "check.example.com");
+            app.WaitDiag(DiagState, s => s == "dirty", "다시 고침");
             app.SetText("settings.diag.domain.1", "check.example.net");
             app.Invoke("settings.diag.save");
             app.WaitDiag(x => Sd(x).GetProperty("diagnosis").GetProperty("state").GetString(), s => s == "saved", "저장");
@@ -203,7 +256,7 @@ public sealed class M9SettingsTests
                 app.SetText("profile.target.1.port", "443");
                 app.WaitDiag(x => Sd(x).GetProperty("saveEnabled").GetBoolean(), b => b, "저장 켜짐");
                 app.Invoke("profile.save");
-                app.WaitDiag(x => M5Fixtures.Str(x, "screen"), s => s != "profile", "저장 뒤 나감");
+                app.WaitDiag(x => Sd(x).GetProperty("dirty").GetBoolean(), b => !b, "저장됨 (편집기는 그대로)");
                 Assert.Equal(0, app.Close());
             }
             using (var again = AppDriver.LaunchWith(userData, "--demo", "steady", "--demo-speed", "60", "--start"))

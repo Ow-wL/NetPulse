@@ -257,4 +257,162 @@ public sealed class M9ResidentTests
         }
         finally { AppDriver.DeleteUserData(userData); }
     }
+
+    private static int Gaps(JsonElement d) => d.GetProperty("gaps").GetInt32();
+    private static bool HiddenNow(JsonElement d) => Resident(d).GetProperty("hidden").GetBoolean();
+    private static JsonElement[] Balloons(AppDriver app, string kind) =>
+        ResidentLog(app, "balloon").Select(e => e.GetProperty("data")).Where(b => b.GetProperty("kind").GetString() == kind).ToArray();
+
+    /// <summary>
+    /// C1 절전 복귀 (G3): 숨긴 측정 중 데모 절전 공백(측정 경과가 40초 건너뜀) → 끊김 풍선 없음, 다시 열면 같은 측정에 공백 하나,
+    /// 숨긴 동안 알림 구간 0이라 요약 알림도 없음 (A4).
+    /// </summary>
+    [Fact]
+    public void HiddenSleepGapIsShownOnReopenWithoutADropoutBalloon()
+    {
+        var userData = AppDriver.NewUserData();
+        M5Fixtures.SaveProfile(userData, "gap");
+        HintAlreadyShown(userData);
+        try
+        {
+            // 300회차, 60초에 절전 40초: 10배속이면 약 6초에 공백, 26초에 끝
+            using var app = AppDriver.LaunchWith(userData, "--demo", "gap", "--demo-speed", "10", "--start", "--close-to-tray", "on");
+            app.WaitDiag(Rounds, r => r >= 3, "3회차");
+            var session = Session(app);
+            Assert.Equal(0, Gaps(app.Diag()));
+            app.RequestClose();
+            WaitHidden(app);
+            Thread.Sleep(9000);                                            // 숨긴 채 공백을 지난다
+            app.PostTray(AppDriver.NinSelect);
+            AppDriver.WaitFor(() => app.WindowVisible, b => b, "다시 보임");
+            var d = app.WaitDiag(x => x, x => !HiddenNow(x) && Gaps(x) >= 1, "다시 연 장면의 공백");
+            Assert.Equal(session, M5Fixtures.Str(d, "session"));
+            Assert.Equal("Measuring", Host(d));
+            Assert.Empty(Balloons(app, "SegmentStart"));                   // 절전은 끊김이 아니다
+            var reopened = ResidentLog(app, "reopened").Last().GetProperty("data");
+            Assert.Equal(0, reopened.GetProperty("hiddenStarts").GetInt32());
+            Assert.Equal((0, 0), app.Exit());
+            Assert.NotEmpty(ReadRecord(userData, session).Gaps);
+            Record("flow-resident-sleepgap", new { session, gaps = Gaps(d), rounds = Rounds(d) });
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
+    /// <summary>끝에서 끝까지 시나리오 (C1): 끊김 6회차(60~66초)와 절전 40초(100초)가 있는 200초 데모를 시험 폴더에 둔다.</summary>
+    private static string RoundTripScenario(string name, string? detect)
+    {
+        var o = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(M5Fixtures.ScenarioPath("resident-roundtrip")))!.AsObject();
+        if (detect is not null) o["faults"]!["detect"] = detect;
+        var dir = Path.Combine(AppDriver.OutputDirectory, "m9-scenarios");
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, name + ".json");
+        File.WriteAllText(path, o.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        return path;
+    }
+
+    [Fact]
+    public void RoundTripFromTheFirstRunThroughTheTrayToAMovedRecordReport() => RoundTrip("roundtrip", null, "Ok");
+
+    /// <summary>C1 IPv4 경로 없음: 첫 실행 탐지가 이 상태여도(외부 대상만 제안) 상주 흐름이 같게 동작한다.</summary>
+    [Fact]
+    public void RoundTripWorksWhenTheFirstRunFindsNoIpv4Route() => RoundTrip("roundtrip-noipv4", "no-ipv4", "NoIpv4Route");
+
+    /// <summary>
+    /// 첫 실행 → 측정 시작 → 창 닫기 → 안내 [트레이에서 계속] → 데모 끊김 → 풍선 1 → 절전 공백 → 두 번째 실행(열기) → 같은 측정·공백 표시
+    /// → 트레이 메뉴 증상 표시 → 측정 끝 → 기록에서 열기 → 설정에서 위치 옮기기 → 같은 기록 다시 열기 → 리포트 내보내기 → <c>--exit</c>.
+    /// </summary>
+    private static void RoundTrip(string name, string? detect, string expectedStatus)
+    {
+        var userData = AppDriver.NewUserData();
+        var dest = userData + "-dest";
+        var outDir = Path.Combine(AppDriver.OutputDirectory, "m9-out", name);
+        if (Directory.Exists(outDir)) Directory.Delete(outDir, true);
+        Directory.CreateDirectory(outDir);
+        Directory.CreateDirectory(dest);
+        var scenario = RoundTripScenario(name, detect);
+        try
+        {
+            // 5배속: 끊김 12초, 절전 20초. 150초부터 0.5배속이라 다시 연 뒤 끝나기 전까지 여유 100초
+            using var app = AppDriver.LaunchRaw(userData, "--demo", scenario, "--demo-speed", "5", "--demo-speed-after", "150:0.5",
+                "--pick-folder", dest, "--report-out", outDir);
+            var first = app.WaitDiag(x => x, x => M5Fixtures.Str(x, "screen") == "firstrun" && x.GetProperty("screenDiag").ValueKind == JsonValueKind.Object
+                && x.GetProperty("screenDiag").GetProperty("startEnabled").GetBoolean(), "첫 실행");
+            Assert.Equal(expectedStatus, M5Fixtures.Str(first, "screenDiag", "status"));
+            app.Invoke("firstrun.start");
+            app.WaitDiag(x => (M5Fixtures.Str(x, "screen"), Host(x)), s => s == ("measure", "Measuring"), "측정 시작");
+            var session = Session(app);
+
+            app.RequestClose();
+            app.WaitDiag(x => x.GetProperty("dialogOpen").GetBoolean(), b => b, "처음 안내");
+            app.Invoke("dialog.confirm");
+            WaitHidden(app);
+            AppDriver.WaitFor(() => Balloons(app, "SegmentStart").Length, n => n >= 1, "끊김 풍선", TimeSpan.FromSeconds(60));
+            Thread.Sleep(12000);                                           // 숨긴 채 절전 공백(100→140초)을 지나 느린 구간(150초~)으로
+            Assert.Single(Balloons(app, "SegmentStart"));
+
+            Assert.Equal(0, app.RunSecond("--demo", scenario));            // 두 번째 실행 = 열기
+            AppDriver.WaitFor(() => app.WindowVisible, b => b, "두 번째 실행으로 열림");
+            var back = app.WaitDiag(x => x, x => !HiddenNow(x) && Gaps(x) >= 1, "같은 측정, 공백");
+            Assert.Equal(session, M5Fixtures.Str(back, "session"));
+            Assert.Equal("Measuring", Host(back));
+            Assert.Equal(1, ResidentLog(app, "reopened").Last().GetProperty("data").GetProperty("hiddenStarts").GetInt32());
+
+            app.PostTray(AppDriver.WmContextMenu);
+            AppDriver.WaitFor(() => app.TrayMenuItems(), i => i.Count >= 3, "트레이 메뉴");
+            app.PickTrayMenu("증상 표시");
+            app.WaitDiag(x => x.GetProperty("marks").GetArrayLength(), n => n == 1, "트레이에서 증상 표시");
+
+            app.Select("nav.measure");
+            app.Invoke("measure.stop");
+            app.WaitDiag(x => x.GetProperty("finished").ValueKind == JsonValueKind.Object, b => b, "측정 끝");
+
+            void OpenRecord(string why)
+            {
+                app.Select("nav.records");
+                // 기록 화면은 지난번 상세 보기를 기억한다: 상세면 목록으로
+                var now = app.WaitDiag(x => x, x => x.GetProperty("screenDiag") is { ValueKind: JsonValueKind.Object } sd && sd.TryGetProperty("mode", out _), why + ": 기록 화면");
+                if (M5Fixtures.Str(now, "screenDiag", "mode") != "List")
+                {
+                    app.Invoke("records.back");
+                    app.WaitDiag(x => M5Fixtures.Str(x, "screenDiag", "mode"), m => m == "List", why + ": 목록으로");
+                }
+                var list = app.WaitDiag(x => x, x => x.GetProperty("screenDiag") is { ValueKind: JsonValueKind.Object } sd && sd.TryGetProperty("rows", out var rows)
+                    && sd.GetProperty("analyzing").GetInt32() == 0 && rows.EnumerateArray().Any(r => r.GetProperty("Id").GetString() == session), why + ": 목록");
+                var row = list.GetProperty("screenDiag").GetProperty("rows").EnumerateArray().First(r => r.GetProperty("Id").GetString() == session).GetProperty("n").GetInt32();
+                app.Invoke($"records.row.{row}");
+                var detail = app.WaitDiag(x => x, x => x.GetProperty("screenDiag").TryGetProperty("detailComplete", out var c) && c.GetBoolean(), why + ": 상세");
+                Assert.Equal(session, M5Fixtures.Str(detail, "screenDiag", "detail", "Id"));
+            }
+            OpenRecord("끝난 측정");
+
+            app.Select("nav.settings");
+            M9SettingsTests.ConfirmMove(app, "settings.records.change");
+            app.WaitDiag(M9SettingsTests.RecState, s => s is "Done" or "Partial" or "Failed", "옮기기 끝");
+            Assert.Equal("Done", M9SettingsTests.RecState(app.Diag()));
+            Assert.True(Directory.Exists(Path.Combine(dest, session)), "새 위치로 옮김");
+
+            OpenRecord("옮긴 기록");
+            app.Invoke("records.report");
+            app.WaitDiag(x => M5Fixtures.Str(x, "screen"), s => s == "report", "리포트 화면");
+            M8FlowTests.WaitReady(app);
+            app.Invoke("report.export");
+            var done = M8FlowTests.WaitExport(app);
+            Assert.True(done.GetProperty("screenDiag").GetProperty("export").GetProperty("Ok").GetBoolean());
+            Assert.Single(Directory.GetFiles(outDir));
+            Assert.True(app.ReadLog().All(e => e.GetProperty("kind").GetString() is not ("unhandled" or "renderFailed" or "diagFailed")), "앱 기록에 오류");
+            Assert.Equal((0, 0), app.Exit());
+
+            var record = RecordReader.Read(RecordReader.FindSegments(session, [dest, .. M5Fixtures.RecordRoots(userData)]));
+            Assert.Equal(EndReason.Stopped, record.EndReason);
+            Assert.NotEmpty(record.Gaps);
+            Assert.Contains(record.Events, e => (string?)e["type"] == SymptomMarks.MarkType);
+            Assert.Equal(detect is null, record.Header!.Targets.Any(t => t.Role == NetPulse.Core.Targets.TargetRole.Local));
+            Record("flow-resident-" + name, new { status = expectedStatus, balloons = 1, gaps = record.Gaps.Count, rounds = record.Rounds.Count, moved = true });
+        }
+        finally
+        {
+            AppDriver.DeleteUserData(userData);
+            AppDriver.DeleteUserData(dest);
+        }
+    }
 }

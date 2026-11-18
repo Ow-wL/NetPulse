@@ -16,8 +16,8 @@ settings-failed|rec-move|--demo steady --screen settings --pick-folder {userData
 settings-interrupted|rec-move-interrupted|--demo steady --screen settings|wait:screen=settings;wait:records=Interrupted;scroll:settings.scroll=40
 settings-journal-problem|rec-move-bad-journal|--demo steady --screen settings|wait:screen=settings;wait:records=JournalProblem;scroll:settings.scroll=40
 settings-folder-unusable|settings-missing-folder|--demo steady --screen settings|wait:screen=settings;wait:recordsUsable=False;scroll:settings.scroll=40
-settings-diag-errors|profile|--demo steady --screen settings|wait:screen=settings;text:settings.diag.tcp.0=192.0.2;text:settings.diag.domain.1=bad;invoke:settings.diag.save;wait:diagState=errors;scroll:settings.scroll=80
-settings-diag-saved|profile|--demo steady --screen settings|wait:screen=settings;text:settings.diag.domain.0=check.example.com;invoke:settings.diag.save;wait:diagState=saved;scroll:settings.scroll=80
+settings-diag-errors|profile|--demo steady --screen settings|wait:screen=settings;text:settings.diag.tcp.0=192.0.2;text:settings.diag.domain.1=bad;wait:diagState=dirty;invoke:settings.diag.save;wait:diagState=errors;scroll:settings.scroll=80
+settings-diag-saved|profile|--demo steady --screen settings|wait:screen=settings;text:settings.diag.domain.0=check.example.com;wait:diagState=dirty;invoke:settings.diag.save;wait:diagState=saved;scroll:settings.scroll=80
 hint-dialog|profile|--demo steady --start --demo-hold 5 --close-to-tray on|wait:host=Measuring;close;wait:dialog
 profile-tcp|profile|--demo steady --screen profile|wait:screen=profile;select:profile.target.1.method.tcp;wait:exists=profile.target.1.port
 profile-tcp-port-error|profile|--demo steady --screen profile|wait:screen=profile;select:profile.target.1.method.tcp;wait:exists=profile.target.1.port;text:profile.target.1.port=70000;wait:dirty

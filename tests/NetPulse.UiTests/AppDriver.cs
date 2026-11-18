@@ -156,13 +156,13 @@ public sealed class AppDriver : IDisposable
     }
 
     /// <summary>앱 프로세스의 다른 창 하나(트레이 팝업 메뉴 등)를 그 창만 캡처한다 (PrintWindow, 화면 영역 캡처 아님).</summary>
-    public static Bitmap CaptureWindow(IntPtr hwnd)
+    public static Bitmap CaptureWindow(IntPtr hwnd, uint flags = 2)
     {
         Native.GetWindowRect(hwnd, out var w);
         var bmp = new Bitmap(Math.Max(1, w.Right - w.Left), Math.Max(1, w.Bottom - w.Top));
         using var g = Graphics.FromImage(bmp);
         var dc = g.GetHdc();
-        bool ok = Native.PrintWindow(hwnd, dc, 2);
+        bool ok = Native.PrintWindow(hwnd, dc, flags);
         g.ReleaseHdc(dc);
         if (!ok) throw new InvalidOperationException("PrintWindow 실패");
         return bmp;
@@ -390,6 +390,24 @@ public sealed class AppDriver : IDisposable
 
     /// <summary>창이 화면에 보이는가 (Win32 기준, 숨김이면 거짓).</summary>
     public bool WindowVisible => Native.IsWindowVisible(windowHandle);
+
+    /// <summary>
+    /// UI 자동화를 거치지 않고 창에 <c>WM_CLOSE</c>를 보내 닫는다 (M7 이월 4: 닫기 요청 방식 비교). 기다림·판정은 <see cref="Close"/>와 같다.
+    /// </summary>
+    public int CloseByMessage()
+    {
+        Native.PostMessageW(windowHandle, 0x0010, IntPtr.Zero, IntPtr.Zero);
+        if (!process.WaitForExit(15000))
+        {
+            process.Kill(); process.WaitForExit(10000);
+            closed = true;
+            string evidence = CrashEvidence.Collect(process, UserData, "close-message-timeout", startedUtc);
+            throw new TimeoutException($"WM_CLOSE를 보냈지만 15초 안에 끝나지 않았습니다 (증거 {evidence}).");
+        }
+        closed = true;
+        FailIfAbnormal("close-message");
+        return process.ExitCode;
+    }
 
     /// <summary>창 닫기 버튼과 같은 경로로 닫고, 끝날 때까지 기다려 종료 코드를 돌려준다.</summary>
     public int Close()

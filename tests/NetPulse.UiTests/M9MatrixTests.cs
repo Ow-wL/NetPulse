@@ -124,12 +124,28 @@ public sealed class M9MatrixTests
             var menu = app.TrayMenu();
             Assert.Equal(app.ProcessId, menu.Current.ProcessId);
             var items = AppDriver.WaitFor(() => app.TrayMenuItems(), i => i.Count >= 3, "메뉴 항목");
-            using var shot = AppDriver.CaptureWindow(new IntPtr(menu.Current.NativeWindowHandle));
-            shot.Save(Path.Combine(AppDriver.OutputDirectory, "m9-tray-menu.png"), ImageFormat.Png);
-            Record("m9-tray-menu", new { items = items.Select(i => new { i.Name, i.Enabled }), w = shot.Width, h = shot.Height });
-            Assert.True(shot.Width > 40 && shot.Height > 40, "메뉴 캡처 크기");
+            // 메뉴는 나타나는 효과 동안 빈 그림으로 찍힐 수 있다: 글자가 그려질 때까지(색 수) 다시 찍고, PW_RENDERFULLCONTENT(2)와 WM_PRINT 경로(0)를 번갈아
+            var hwnd = new IntPtr(menu.Current.NativeWindowHandle);
+            Bitmap? shot = null;
+            int colors = 0;
+            uint flags = 0;
+            try
+            {
+                AppDriver.WaitFor(() =>
+                {
+                    shot?.Dispose();
+                    flags = flags == 2 ? 0u : 2u;
+                    shot = AppDriver.CaptureWindow(hwnd, flags);
+                    colors = DistinctColors(shot);
+                    return colors;
+                }, n => n >= 8, "메뉴 글자가 그려진 캡처", TimeSpan.FromSeconds(5));
+                shot!.Save(Path.Combine(AppDriver.OutputDirectory, "m9-tray-menu.png"), ImageFormat.Png);
+                Record("m9-tray-menu", new { items = items.Select(i => new { i.Name, i.Enabled }), w = shot.Width, h = shot.Height, colors, printFlags = flags });
+                Assert.True(shot.Width > 40 && shot.Height > 40, "메뉴 캡처 크기");
+            }
+            finally { shot?.Dispose(); }
             app.PickTrayMenu("열기");
-            Assert.Equal(0, app.Close());
+            Assert.Equal((0, 0), app.Exit());                                 // 측정 중 창 닫기는 안내가 뜨므로 --exit로 끝낸다
         }
         finally { AppDriver.DeleteUserData(userData); }
     }
@@ -167,6 +183,14 @@ public sealed class M9MatrixTests
             }
         }
         Record("m9-icon", new { results });
+    }
+
+    private static int DistinctColors(Bitmap b)
+    {
+        var set = new HashSet<int>();
+        for (int y = 0; y < b.Height; y += 2)
+            for (int x = 0; x < b.Width; x += 2) set.Add(b.GetPixel(x, y).ToArgb());
+        return set.Count;
     }
 
     private static Color Avg(List<Color> cs) => Color.FromArgb((int)cs.Average(c => c.R), (int)cs.Average(c => c.G), (int)cs.Average(c => c.B));

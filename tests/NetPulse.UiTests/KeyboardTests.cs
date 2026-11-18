@@ -301,6 +301,199 @@ public sealed class KeyboardTests
         finally { AppDriver.DeleteUserData(userData); }
     }
 
+    private const ushort Left = 0x25, Right = 0x27;
+
+    private static void TabToPrefix(AppDriver app, string prefix, int limit = 80)
+    {
+        for (int i = 0; i < limit && !Focused(app).StartsWith(prefix, StringComparison.Ordinal); i++) Press(app, Tab);
+        Assert.StartsWith(prefix, Focused(app));
+    }
+
+    /// <summary>
+    /// M8 이월 3: 가린 문서에서 Tab은 막힌 메모 넣기 스위치를 건너뛴다. 가리기 해제(화살표·Space) → 메모 켜기(Space) → 다시 가리기를 키보드로 하면
+    /// 메모 넣기는 꺼지고 막힌다 (UIA IsEnabled·ToggleState).
+    /// </summary>
+    [Fact]
+    public void TabSkipsTheBlockedMemoSwitchAndTheKeyboardUnmasksAndMasksAgain()
+    {
+        var userData = AppDriver.NewUserData();
+        var outDir = Path.Combine(AppDriver.OutputDirectory, "m8-out", "keyboard-mask");
+        if (Directory.Exists(outDir)) Directory.Delete(outDir, true);
+        Directory.CreateDirectory(outDir);
+        M5Fixtures.Prepare(userData, "rec-memo");
+        try
+        {
+            using var app = LaunchAny(userData, [.. M5Fixtures.Args("--demo steady --screen report"), "--report-out", outDir, "--freeze-motion"]);
+            bool Ready(System.Text.Json.JsonElement d, bool masked) => Sd(d).ValueKind == System.Text.Json.JsonValueKind.Object && Sd(d).TryGetProperty("previewReady", out var p) && p.GetBoolean()
+                && Sd(d).GetProperty("state").GetString() == "Ready" && Sd(d).GetProperty("published") is { ValueKind: System.Text.Json.JsonValueKind.Object } pub && pub.GetProperty("masked").GetBoolean() == masked;
+            app.WaitDiag(d => Ready(d, true), b => b, "가린 미리 보기");
+            var visited = new List<string>();
+            for (int i = 0; i < 60 && Focused(app) != "report.export"; i++) { Press(app, Tab); visited.Add(Focused(app)); }
+            Assert.Equal("report.export", Focused(app));
+            Assert.DoesNotContain("report.memos", visited);                  // 막힌 스위치는 건너뜀
+
+            TabToPrefix(app, "report.mask.");
+            for (int i = 0; i < 3 && Focused(app) != "report.mask.unmasked"; i++) Press(app, Right);
+            Assert.Equal("report.mask.unmasked", Focused(app));
+            Press(app, Space);
+            app.WaitDiag(d => Ready(d, false), b => b, "가리기 해제 (Space)");
+            TabTo(app, "report.memos");
+            Press(app, Space);
+            app.WaitDiag(d => Sd(d).GetProperty("memos").GetBoolean(), b => b, "메모 넣기 켬 (Space)");
+
+            TabToPrefix(app, "report.mask.");
+            for (int i = 0; i < 3 && Focused(app) != "report.mask.masked"; i++) Press(app, Left);
+            Assert.Equal("report.mask.masked", Focused(app));
+            Press(app, Space);
+            app.WaitDiag(d => Ready(d, true) && !Sd(d).GetProperty("memos").GetBoolean(), b => b, "다시 가림: 메모 넣기 꺼짐");
+            var memoSwitch = app.Find("report.memos");
+            Assert.False(memoSwitch.Current.IsEnabled);
+            Assert.Equal(ToggleState.Off, ((TogglePattern)memoSwitch.GetCurrentPattern(TogglePattern.Pattern)).Current.ToggleState);
+            Assert.Equal(0, app.Close());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
+    /// <summary>M9 C1 키보드: 설정 화면 Tab 순서로 상주 알림 토글(Space), 기록 옮기기 확인 대화상자(Enter·Tab 갇힘·Esc·다시 Enter).</summary>
+    [Fact]
+    public void KeyboardAloneTogglesANoticeAndConfirmsARecordMove()
+    {
+        var userData = AppDriver.NewUserData();
+        var dest = userData + "-dest";
+        M5Fixtures.Prepare(userData, "rec-move");
+        try
+        {
+            using var app = LaunchAny(userData, ["--demo", "steady", "--screen", "settings", "--pick-folder", dest, "--freeze-motion"]);
+            app.WaitDiag(d => Sd(d).ValueKind == System.Text.Json.JsonValueKind.Object && Sd(d).TryGetProperty("records", out var r) && r.GetProperty("changeEnabled").GetBoolean(), b => b, "설정 화면");
+            Assert.False(Sd(app.Diag()).GetProperty("resident").GetProperty("notifyRecovered").GetBoolean());
+            TabTo(app, "settings.notifyRecovered");
+            Press(app, Space);
+            app.WaitDiag(d => Sd(d).GetProperty("resident").GetProperty("notifyRecovered").GetBoolean(), b => b, "알림 토글 (Space)");
+            Assert.Contains("\"notifyRecovered\": true", File.ReadAllText(Path.Combine(userData, "settings.json")));
+
+            TabTo(app, "settings.records.change");
+            Press(app, Enter);
+            app.WaitDiag(d => d.GetProperty("dialogOpen").GetBoolean(), o => o, "옮기기 확인 (Enter)");
+            for (int i = 0; i < 4; i++)
+            {
+                Press(app, Tab);
+                var f = Focused(app);
+                Assert.True(f is "dialog.confirm" or "dialog.cancel", "탭이 대화상자 밖으로 나갔다: " + f);
+            }
+            Press(app, Escape);
+            app.WaitDiag(d => d.GetProperty("dialogOpen").GetBoolean(), o => !o, "Esc → 닫힘");
+            app.WaitDiag(d => d.GetProperty("focused").ToString(), f => f == "settings.records.change", "누른 단추로 초점 복귀");
+            Assert.Equal("Normal", M9SettingsTests.RecState(app.Diag()));         // 취소는 아무것도 옮기지 않는다
+
+            Press(app, Enter);
+            app.WaitDiag(d => d.GetProperty("dialogOpen").GetBoolean(), o => o, "다시 열림");
+            TabTo(app, "dialog.confirm", 4);
+            Press(app, Enter);
+            app.WaitDiag(M9SettingsTests.RecState, s => s is "Done" or "Partial" or "Failed", "옮기기 끝");
+            Assert.Equal("Done", M9SettingsTests.RecState(app.Diag()));
+            Assert.Equal(0, app.Close());
+        }
+        finally
+        {
+            AppDriver.DeleteUserData(userData);
+            AppDriver.DeleteUserData(dest);
+        }
+    }
+
+    /// <summary>M9 C1 키보드: 처음 숨김 안내 — Tab은 세 단추 안에 갇히고, Esc는 취소(측정 계속), [측정 멈추고 종료]는 Enter로.</summary>
+    [Fact]
+    public void HintDialogKeepsTabInsideAndTheKeyboardStopsAndExits()
+    {
+        var userData = AppDriver.NewUserData();
+        M5Fixtures.SaveProfile(userData, "steady", TimeSpan.FromMinutes(60));
+        try
+        {
+            using var app = LaunchAny(userData, ["--demo", "steady", "--start", "--demo-hold", "5", "--close-to-tray", "on", "--freeze-motion"]);
+            app.WaitDiag(d => d.GetProperty("host").GetString(), h => h == "Measuring", "측정 중");
+            app.RequestClose();
+            app.WaitDiag(d => d.GetProperty("dialogOpen").GetBoolean(), o => o, "처음 안내");
+            for (int i = 0; i < 6; i++)
+            {
+                Press(app, Tab);
+                var f = Focused(app);
+                Assert.True(f is "dialog.confirm" or "dialog.alternate" or "dialog.cancel", "탭이 대화상자 밖으로 나갔다: " + f);
+            }
+            Press(app, Escape);
+            app.WaitDiag(d => d.GetProperty("dialogOpen").GetBoolean(), o => !o, "Esc → 취소");
+            Assert.True(app.WindowVisible);
+            Assert.Equal("Measuring", app.Diag().GetProperty("host").GetString());
+            app.RequestClose();
+            app.WaitDiag(d => d.GetProperty("dialogOpen").GetBoolean(), o => o, "다시 안내");
+            TabTo(app, "dialog.alternate", 6);
+            Press(app, Enter);
+            Assert.Equal(0, app.WaitExit(TimeSpan.FromSeconds(20)));
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
+    /// <summary>M9 C1 키보드: 프로필 편집기 대상 방식 묶음(Tab으로 들어가 화살표·Space) → 포트 칸이 다음 Tab, 저장(Enter) → 구성에 TCP 443.</summary>
+    [Fact]
+    public void KeyboardAloneSwitchesATargetToTcp()
+    {
+        var userData = AppDriver.NewUserData();
+        M5Fixtures.SaveProfile(userData, "steady");
+        try
+        {
+            using (var app = LaunchAny(userData, ["--demo", "steady", "--screen", "profile", "--freeze-motion"]))
+            {
+                app.WaitDiag(d => d.GetProperty("screen").GetString(), s => s == "profile", "프로필 편집기");
+                TabToPrefix(app, "profile.target.1.method.");
+                for (int i = 0; i < 3 && Focused(app) != "profile.target.1.method.tcp"; i++) Press(app, Right);
+                Assert.Equal("profile.target.1.method.tcp", Focused(app));
+                Press(app, Space);
+                AppDriver.WaitFor(() => app.Exists("profile.target.1.port"), b => b, "포트 칸");
+                Press(app, Tab);
+                Assert.Equal("profile.target.1.port", Focused(app));
+                app.WaitDiag(d => Sd(d).GetProperty("saveEnabled").GetBoolean(), b => b, "저장 켜짐");
+                TabTo(app, "profile.save");
+                Press(app, Enter);
+                app.WaitDiag(d => Sd(d).GetProperty("dirty").GetBoolean(), b => !b, "저장됨 (Enter)");
+                Assert.Equal(0, app.Close());
+            }
+            var set = NetPulse.Core.Targets.ProfileStore.Load(userData, DateTimeOffset.Now).Set!;
+            var target = set.Profiles.Single().Targets[1];
+            Assert.Equal(NetPulse.Core.Targets.ProbeMethodKind.Tcp, target.Method.Kind);
+            Assert.Equal(443, target.Method.Port);
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
+    /// <summary>M9 C1 키보드: 트레이 메뉴(Win32 팝업)는 Esc로 닫히고, 화살표로 "증상 표시"에 가서 Enter로 고른다.</summary>
+    [Fact]
+    public void TrayMenuWorksWithTheKeyboard()
+    {
+        var userData = AppDriver.NewUserData();
+        M5Fixtures.SaveProfile(userData, "steady");
+        Directory.CreateDirectory(userData);
+        File.WriteAllText(Path.Combine(userData, "settings.json"), """{"version": 2, "resident": {"closeToTray": true, "trayHintShown": true}}""");
+        try
+        {
+            using var app = LaunchAny(userData, ["--demo", "steady", "--demo-speed", "20", "--start", "--close-to-tray", "on", "--freeze-motion"]);
+            app.WaitDiag(d => d.GetProperty("rounds").GetInt32(), r => r >= 3, "3회차");
+            app.PostTray(AppDriver.WmContextMenu);
+            AppDriver.WaitFor(() => app.TrayMenuItems(), i => i.Count >= 3, "트레이 메뉴");
+            Press(app, Escape);
+            AppDriver.WaitFor(() => AutomationElement.RootElement.FindFirst(TreeScope.Children, new AndCondition(
+                new PropertyCondition(AutomationElement.ProcessIdProperty, app.ProcessId), new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Menu))) is null, b => b, "Esc → 메뉴 닫힘");
+            Assert.Equal(0, app.Diag().GetProperty("marks").GetArrayLength());
+
+            app.PostTray(AppDriver.WmContextMenu);
+            AppDriver.WaitFor(() => app.TrayMenuItems(), i => i.Count >= 3, "다시 메뉴");
+            string Highlighted() { try { return AutomationElement.FocusedElement?.Current.Name ?? ""; } catch (ElementNotAvailableException) { return ""; } }
+            for (int i = 0; i < 5 && Highlighted() != "증상 표시"; i++) Press(app, Down);
+            Assert.Equal("증상 표시", Highlighted());
+            Press(app, Enter);
+            app.WaitDiag(d => d.GetProperty("marks").GetArrayLength(), n => n == 1, "증상 표시 (Enter)");
+            Assert.Equal((0, 0), app.Exit());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
     [Fact]
     public void ArrowsMoveThroughRecordRowsAndFocusComesBackPastTheFirstRows()
     {
