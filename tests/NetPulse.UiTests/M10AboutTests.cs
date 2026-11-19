@@ -82,14 +82,24 @@ public sealed class M10AboutTests
             e => e.ValueKind == JsonValueKind.Object, "펼침 기록").GetProperty("data");
         double ms = log.GetProperty("ms").GetDouble();
         int chars = log.GetProperty("chars").GetInt32();
-        var box = app.Find($"legal.text.{index}");
-        var scroll = (ScrollPattern?)(box.TryGetCurrentPattern(ScrollPattern.Pattern, out var p) ? p : null);
-        bool scrolled = false;
-        if (scroll is { Current.VerticallyScrollable: true }) { scroll.SetScrollPercent(ScrollPattern.NoScroll, 100); scrolled = AppDriver.WaitFor(() => scroll.Current.VerticalScrollPercent, v => v >= 99, "끝까지") >= 99; }
-        File.WriteAllText(Path.Combine(G5Dir, "bench-legal.json"), JsonSerializer.Serialize(new { index, chars, firstLayoutMs = ms, scrolledToEnd = scrolled }));
+        var frames = AppDriver.WaitFor(() => app.ReadLog().LastOrDefault(e => e.GetProperty("kind").GetString() == "legal" && e.GetProperty("data").GetProperty("step").GetString() == "frames"),
+            e => e.ValueKind == JsonValueKind.Object, "펼친 뒤 프레임").GetProperty("data");
+        double maxGap = frames.GetProperty("maxMs").GetDouble();
+        int over33 = frames.GetProperty("over33").GetInt32();
+        // 긴 원문은 문단 목록 (설계 5절): 목록의 ScrollPattern으로 끝까지 내리고 마지막 문단이 만들어졌는지 본다
+        var list = app.Find($"legal.text.{index}");
+        Assert.Equal(ControlType.List, list.Current.ControlType);
+        // [전문 복사] 단추는 목록 바로 다음 형제로 찾는다: 창 전체 하위 검색은 가상화 목록의 줄을 모두 만들게 해 UIA가 시간 초과했다 (UI 시험 1차). 누르지는 않는다 (사용자 클립보드)
+        var sibling = TreeWalker.ControlViewWalker.GetNextSibling(list);
+        Assert.Equal($"legal.copy.{index}", sibling?.Current.AutomationId);
+        var scroll = (ScrollPattern)list.GetCurrentPattern(ScrollPattern.Pattern);
+        scroll.SetScrollPercent(ScrollPattern.NoScroll, 100);
+        bool scrolled = AppDriver.WaitFor(() => scroll.Current.VerticalScrollPercent, v => v >= 99.9, "끝까지") >= 99.9;
+        File.WriteAllText(Path.Combine(G5Dir, "bench-legal.json"), JsonSerializer.Serialize(new { index, chars, firstLayoutMs = ms, maxFrameMs = maxGap, over33, samples = frames.GetProperty("samples").GetInt32(), scrolledToEnd = scrolled }));
         Assert.True(chars > 300_000, $"원문 {chars}자");
         Assert.True(scrolled, "끝까지 스크롤");
-        Assert.True(ms <= 500, $"펼친 원문 첫 배치 {ms} ms");                                 // 기준: DECISIONS "M10 고지 bench"
+        Assert.True(ms <= 50, $"펼친 원문 첫 배치 {ms} ms");                                  // 설계 5절 기준
+        Assert.True(over33 <= 2, $"펼친 뒤 1초 33 ms 초과 {over33}회 (최대 {maxGap} ms)");
         Assert.Equal(0, app.Close());
     }
 

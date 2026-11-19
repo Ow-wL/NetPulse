@@ -144,6 +144,7 @@ public sealed class SettingsScreen : Screen
         {
             var view = new NetPulse.App.Legal.LegalView(Ui, "legal", 360);
             view.Opened += (i, ms) => Context.Log.Write("legal", new { step = "expanded", index = i, chars = view.Items![i].Text.Length, ms = Math.Round(ms, 1) });
+            view.Frames += (i, max, over, samples) => Context.Log.Write("legal", new { step = "frames", index = i, maxMs = Math.Round(max, 1), over33 = over, samples });
             Context.Dialog.OpenContent(legalButton, "라이선스와 고지", view, "닫기", Size.GuideWidth, 520);
             Context.Log.Write("legal", new { step = "opened", items = view.Items?.Count });
         };

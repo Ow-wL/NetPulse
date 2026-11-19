@@ -399,6 +399,12 @@ public sealed class AppDriver : IDisposable
     public void PostTray(uint ev, int x = 200, int y = 200) =>
         Native.PostMessageW(TrayWindow(), 0x8000 + 1, (IntPtr)((y << 16) | (x & 0xFFFF)), (IntPtr)((1 << 16) | (int)ev));
 
+    /// <summary>
+    /// 열린 트레이 메뉴를 닫는다 (<c>WM_CANCELMODE</c>를 메뉴 주인 창에). 실측 시험 전용: 사용자가 다른 앱을 쓰는 중이면
+    /// 메뉴 주인 창이 전경을 얻지 못해 UIA 고르기가 무시될 수 있다 (M10 실측 1회차).
+    /// </summary>
+    public void CancelTrayMenu() => Native.PostMessageW(TrayWindow(), 0x001F, IntPtr.Zero, IntPtr.Zero);
+
     public const uint NinSelect = 0x0400, NinKeySelect = 0x0401, NinBalloonClick = 0x0405, WmContextMenu = 0x007B;
 
     /// <summary>세션 종료 메시지 (A6): 질의 → 확정/취소. SendMessage라 처리가 끝날 때까지 기다린다.</summary>

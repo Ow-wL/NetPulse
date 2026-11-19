@@ -84,10 +84,17 @@ public sealed class M9GapTests
             app.PressEnter("records.mark.0.text");                                  // 초점이 그 칸에 있는 채 저장
             WaitHeld(app, "memo");
             var scroll = (ScrollPattern)app.Find("records.scroll").GetCurrentPattern(ScrollPattern.Pattern);
+            // 저장 시작의 "저장하는 중…" 보이기 스크롤이 끝난 뒤에 옮긴다: 진행 중인 보이기가 시험의 스크롤을 덮어썼다 (UI 시험 1차)
+            double last = double.NaN;
+            AppDriver.WaitFor(() => { double now = scroll.Current.VerticalScrollPercent; bool still = now == last; last = now; Thread.Sleep(200); return still; }, s => s, "스크롤 멈춤");
             double before = scroll.Current.VerticalScrollPercent;
             double target = before < 50 ? 100 : 0;
-            scroll.SetScrollPercent(ScrollPattern.NoScroll, target);
-            AppDriver.WaitFor(() => scroll.Current.VerticalScrollPercent, v => Math.Abs(v - target) < 1, "다른 곳으로 스크롤");
+            AppDriver.WaitFor(() =>
+            {
+                scroll.SetScrollPercent(ScrollPattern.NoScroll, target);
+                Thread.Sleep(300);
+                return scroll.Current.VerticalScrollPercent;
+            }, v => Math.Abs(v - target) < 1, "다른 곳으로 스크롤");
             app.Invoke("diag.release");
             AppDriver.WaitFor(() => MemoState(app, 0), s => s == "저장했습니다", "저장 완료");
             Thread.Sleep(700);
@@ -115,15 +122,12 @@ public sealed class M9GapTests
             Assert.False(Sd(app.Diag()).GetProperty("detailOpen").GetProperty("cached").GetBoolean());   // 캐시를 타지 않은 열기
             app.RequestClose();
             M9ResidentTests.WaitHidden(app);
-            int renders = Sd(app.Diag()).GetProperty("renders").GetInt32();
-            int arrived = Sd(app.Diag()).GetProperty("detailOpen").GetProperty("arrived").GetInt32();
-            app.Invoke("diag.release");
-            app.WaitDiag(d => Sd(d).GetProperty("detailOpen").GetProperty("arrived").GetInt32(), n => n > arrived, "옛 완료 도착");
-            Thread.Sleep(1000);
-            var hidden = app.Diag();
-            Assert.True(M9ResidentTests.HiddenNow(hidden));
-            Assert.Equal(renders, Sd(hidden).GetProperty("renders").GetInt32());       // 숨긴 동안 그리지 않았다
-            Assert.Equal(0, hidden.GetProperty("resident").GetProperty("frameHooks").GetInt32());
+            // 숨기면 시험 멈춤이 풀려 옛 완료가 숨긴 동안 반영된다. 숨긴 창의 진단 값은 읽을 수 없어 앱 기록으로 본다 (UI 시험 1차)
+            var applied = AppDriver.WaitFor(() => app.ReadLog().FirstOrDefault(e => e.GetProperty("kind").GetString() == "recordsHiddenApply"),
+                e => e.ValueKind == JsonValueKind.Object, "숨긴 동안 옛 완료 반영").GetProperty("data");
+            Assert.False(app.WindowVisible);
+            Assert.Equal(applied.GetProperty("rendersAtSuspend").GetInt32(), applied.GetProperty("renders").GetInt32());   // 숨긴 동안 그리지 않았다
+            Assert.Equal(0, applied.GetProperty("frameHooks").GetInt32());                                              // 프레임 구독도 새로 만들지 않았다
             app.PostTray(AppDriver.NinSelect);
             AppDriver.WaitFor(() => app.WindowVisible, b => b, "다시 보임");
             WaitDetail(app);
@@ -146,14 +150,14 @@ public sealed class M9GapTests
             string id = first.GetProperty("Id").GetString()!;
             app.Invoke($"records.row.{first.GetProperty("n").GetInt32()}");
             WaitHeld(app, "records.apply");                                         // 옛 위치에서 읽기를 마치고 작업 표를 놓은 뒤 멈춤
-            app.Invoke("nav.settings");
+            app.Select("nav.settings");
             app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "settings", "설정");
             app.Invoke("settings.records.change");
             app.WaitDiag(d => d.GetProperty("dialogOpen").GetBoolean(), o => o, "옮기기 확인");
             app.Invoke("dialog.confirm");
             app.WaitDiag(d => Sd(d).GetProperty("records").GetProperty("state").GetString(), s => s is "Done" or "Failed" or "Partial", "옮기기 끝");
             Assert.Equal("Done", Sd(app.Diag()).GetProperty("records").GetProperty("state").GetString());
-            app.Invoke("nav.records");
+            app.Select("nav.records");
             app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "records", "기록");
             app.Invoke("diag.release");                                             // 옛 위치의 열기 완료가 이제 도착
             WaitDetail(app);

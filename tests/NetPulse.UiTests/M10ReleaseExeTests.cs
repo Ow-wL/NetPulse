@@ -27,7 +27,7 @@ public sealed class M10ReleaseExeTests
             app.Invoke("terms.accept");
             app.FollowNextWindow();
             app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "home", "홈");
-            app.Invoke("nav.settings");
+            app.Select("nav.settings");
             app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "settings", "설정");
             Assert.Equal("1.0.0", app.Text("settings.about.version.value"));
             var startup = app.ReadLog().First(e => e.GetProperty("kind").GetString() == "startup").GetProperty("data").GetProperty("resources");

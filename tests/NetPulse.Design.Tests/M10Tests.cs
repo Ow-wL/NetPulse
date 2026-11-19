@@ -72,4 +72,19 @@ public sealed class M10Tests : IDisposable
         Assert.Equal(SettingsLoadStatus.UnknownVersion, SettingsFormat.Load(folder).Status);
         Assert.True(TermsConsent.IsAccepted(folder));
     }
+
+    [Fact]
+    public void LongNoticeSplitsIntoParagraphsWithoutLosingLines()
+    {
+        string text = "\n\nA1\nA2\n\n\nB1\r\n\r\n" + string.Join("\n", Enumerable.Range(0, 30).Select(i => $"C{i:00}-xxxx")) + "\n\n" + new string('D', 50) + "\n";
+        var parts = NetPulse.Design.LegalParagraphs.Split(text, maxChars: 40);
+        Assert.Equal("A1\nA2", parts[0]);
+        Assert.Equal("B1", parts[1]);
+        Assert.All(parts.Where(p => !p.StartsWith('D')), p => Assert.True(p.Length <= 40, p));   // 긴 문단은 줄 경계에서
+        Assert.Equal(new string('D', 50), parts[^1]);                                          // 한 줄이 더 길면 그 줄 하나
+        var lines = string.Join("\n", parts).Split('\n');
+        var expected = text.Replace("\r\n", "\n").Split('\n').Where(l => l.Length > 0).ToArray();
+        Assert.Equal(expected, lines);                                                         // 줄을 잃거나 바꾸지 않는다
+        Assert.Empty(NetPulse.Design.LegalParagraphs.Split("\n\n"));
+    }
 }

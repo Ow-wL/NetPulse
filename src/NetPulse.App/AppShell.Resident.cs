@@ -139,6 +139,9 @@ public sealed partial class AppShell
         AppWindow.Hide();
         // 숨긴 뒤 남은 프레임 구독 수 (화면·테마·프레임 측정기, 0이어야 한다: 설계 A1, G4 M9 1라운드 b2)
         log.Write("resident", new { what = "hidden", host = host.Snapshot.State.ToString(), frameHooks = FrameHooks() });
+        // 시험 전용 (M10 D3): 숨기면 멈춤 지점을 모두 푼다. 숨긴 창의 UIA 트리는 믿을 수 없어 diag.release를 누를 수 없다 (UI 시험 1차).
+        // 멈춘 작업의 완료가 정확히 숨긴 동안 도착한다
+        if (TestHolds.Active) TestHolds.ReleaseAll();
         // 실측 시험 전용 (M10 D4): 처음 숨길 때 시험 풍선을 정확히 한 번. 호출 결과만 남긴다 (실제로 보였는지는 사용자가 확인)
         if (options.LiveBalloonTest && !liveBalloonSent)
         {

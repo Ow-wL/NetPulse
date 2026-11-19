@@ -243,6 +243,8 @@ public sealed class RecordsScreen : Screen
             scroll.ChangeView(null, 0, null, true);
             // 다시 그리면 [목록으로]가 새 줄로 옮겨 붙어 아직 배치 전이다: 프레임을 그린 뒤에 초점을 준다 (M7 UI 시험 1차: 초점이 탐색으로 빠짐)
             OnePerFrame(() => { if (req == requestGen && mode == Mode.Detail) back.Focus(FocusState.Programmatic); });
+            // 숨긴 동안 반영된 열기 완료 (M10 D3): 숨긴 창은 진단 값을 읽을 수 없어 기록으로 남긴다. 그리기 횟수가 숨길 때와 같아야 한다
+            if (Suspended) Context.Log.Write("recordsHiddenApply", new { renders, rendersAtSuspend, frameHooks = FrameHooks });
         });
     }
 
@@ -356,7 +358,7 @@ public sealed class RecordsScreen : Screen
         });
     }
 
-    private int renders, detailArrived;
+    private int renders, detailArrived, rendersAtSuspend = -1;
     private (int Req, bool Cached) lastDetailOpen = (-1, false);
 
     private void Rerender()
@@ -396,6 +398,7 @@ public sealed class RecordsScreen : Screen
         suspendFocusId = focused is not null && FocusWithin(content) ? AutomationProperties.GetAutomationId(focused) : null;
         suspendSelection = focused is TextBox tb && suspendFocusId is not null ? (tb.SelectionStart, tb.SelectionLength) : null;   // 커서·선택 (2라운드 b6)
         suspendScroll = scroll.VerticalOffset;
+        rendersAtSuspend = renders;
         renderGen++;                    // 이미 디스패처에 넘어간 조각은 세대가 달라 아무것도 하지 않는다
         perFrame.Clear();
         timelineQueued = false;
