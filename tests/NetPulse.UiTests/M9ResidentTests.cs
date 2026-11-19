@@ -294,6 +294,49 @@ public sealed class M9ResidentTests
         finally { AppDriver.DeleteUserData(userData); }
     }
 
+    /// <summary>
+    /// G4 M9 3라운드 b1: 숨기기 전에 시작한 메모 저장이 숨긴 뒤 실패해도 알림 요소·모션·타이머를 만들지 않고 쌓아 두었다가, 다시 열 때 보인다.
+    /// (저장은 1초·3초 재시도 뒤 실패: 그 사이에 숨긴다)
+    /// </summary>
+    [Fact]
+    public void AToastRaisedWhileHiddenIsShownOnReopen()
+    {
+        var userData = AppDriver.NewUserData();
+        M5Fixtures.Prepare(userData, "rec-memo-blocked");
+        M5Fixtures.SaveProfile(userData, "steady");
+        HintAlreadyShown(userData);
+        try
+        {
+            using var app = AppDriver.LaunchWith(userData, "--demo", "steady", "--demo-speed", "20", "--start", "--screen", "records", "--close-to-tray", "on");
+            var list = app.WaitDiag(x => x, x => x.GetProperty("screenDiag") is { ValueKind: JsonValueKind.Object } sd && sd.TryGetProperty("rows", out var rows)
+                && rows.EnumerateArray().Any(r => r.GetProperty("life").GetString() != "Running" && !r.GetProperty("analyzing").GetBoolean()), "끝난 기록 줄");
+            var row = list.GetProperty("screenDiag").GetProperty("rows").EnumerateArray().First(r => r.GetProperty("life").GetString() != "Running").GetProperty("n").GetInt32();
+            app.Invoke($"records.row.{row}");
+            app.WaitDiag(x => x.GetProperty("screenDiag").TryGetProperty("detailComplete", out var c) && c.GetBoolean(), b => b, "상세");
+            app.Invoke("records.mark.0.edit");
+            app.SetText("records.mark.0.text", "숨긴 뒤 실패할 메모");
+            app.Invoke("records.mark.0.save");
+            app.Invoke("records.back");                                  // 상세를 떠나야 실패가 칸 오류가 아니라 알림으로 온다
+            app.Select("nav.measure");
+            app.RequestClose();
+            WaitHidden(app);
+            Thread.Sleep(6000);                                          // 재시도(1초·3초) 뒤 숨긴 채 실패
+            app.PostTray(AppDriver.NinSelect);
+            AppDriver.WaitFor(() => app.WindowVisible, b => b, "다시 보임");
+            try { app.WaitDiag(x => !HiddenNow(x) && x.GetProperty("toasts").GetInt32() >= 1, b => b, "다시 연 뒤 쌓인 알림"); }
+            catch (TimeoutException ex)
+            {
+                var kinds = string.Join(", ", app.ReadLog().TakeLast(25).Select(e => e.GetProperty("kind").GetString() + (e.TryGetProperty("data", out var d) && d.ValueKind == JsonValueKind.Object && d.TryGetProperty("what", out var w) ? ":" + w : "")));
+                throw new TimeoutException(ex.Message + " / 기록: " + kinds);
+            }
+            var toast = app.Window.FindAll(System.Windows.Automation.TreeScope.Descendants, System.Windows.Automation.Condition.TrueCondition).Cast<System.Windows.Automation.AutomationElement>()
+                .Any(e => { try { return e.Current.AutomationId.StartsWith("toast.error.", StringComparison.Ordinal) && e.Current.Name.Contains("메모를 저장하지 못했습니다", StringComparison.Ordinal); } catch (System.Windows.Automation.ElementNotAvailableException) { return false; } });
+            Assert.True(toast, "메모 저장 실패 알림");
+            Assert.Equal((0, 0), app.Exit());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
     private static int Gaps(JsonElement d) => d.GetProperty("gaps").GetInt32();
     private static bool HiddenNow(JsonElement d) => Resident(d).GetProperty("hidden").GetBoolean();
     private static JsonElement[] Balloons(AppDriver app, string kind) =>

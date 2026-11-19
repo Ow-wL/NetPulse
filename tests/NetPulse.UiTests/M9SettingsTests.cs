@@ -186,6 +186,8 @@ public sealed class M9SettingsTests
             using var app = AppDriver.LaunchWith(userData, "--demo", "steady", "--screen", "settings", "--pick-folder", dest, "--move-fail", "hold-long");
             ConfirmMove(app, "settings.records.change");
             app.WaitDiag(RecState, s => s == "Moving", "옮기는 중");
+            // 작업자가 복사(파일마다 5초 멈춤)에 들어간 뒤에 닫는다: "옮기는 중" 게시는 작업 예약보다 먼저다 (G4 M9 3라운드 b3)
+            AppDriver.WaitFor(() => Directory.EnumerateDirectories(dest, "*" + RecordMover.MovingSuffix).Any(), b => b, "복사 시작");
             Assert.Equal(0, app.Close());
             var log = app.ReadLog();
             Assert.Contains(log, e => e.GetProperty("kind").GetString() == "moveCloseWait");             // 한도를 넘겨 기다렸다

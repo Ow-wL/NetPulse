@@ -332,6 +332,57 @@ public sealed class M9ReviewR1Tests : IDisposable
         Assert.Equal(2, RecordReader.FindSegments(id, [world.CurrentRecordFolder]).Count);
     }
 
+    /// <summary>3라운드 a1: 지금 위치가 다른 경로 표기(끝의 <c>\.</c>, 구분자)로 옛 위치 목록에 있어도 원본이 되지 않고 기록은 그대로다.</summary>
+    [Fact]
+    public async Task ARetryWithAnotherSpellingOfTheCurrentFolderKeepsTheRecords()
+    {
+        var (service, world, settings, _) = NewService();
+        var current = world.CurrentRecordFolder;
+        var id = Id(10, "jjjjjj");
+        M9RecordMoveTests.Make(current, id, 10);
+        foreach (var alias in new[] { current + Path.DirectorySeparatorChar + ".", current.Replace('\\', '/'), current.ToUpperInvariant() + Path.DirectorySeparatorChar })
+        {
+            Assert.True(RecordFolderRules.Same(alias, current), alias);
+            settings.Current = new RecordFolders(null, [alias], null);
+            Assert.Empty(service.Route(MoveKind.Retry, null).Sources);
+            var report = await service.RunAsync(MoveKind.Retry, null, null, Ct);
+            Assert.NotEqual(MoveState.Partial, report.State);
+            Assert.True(Directory.Exists(Path.Combine(current, id)), "자기 기록을 지우지 않는다: " + alias);
+        }
+        // 실행 경계의 마지막 방어선
+        var plan = RecordMover.Plan(MoveKind.Retry, current + Path.DirectorySeparatorChar + ".", current);
+        Assert.Equal("same", RecordMover.Execute(plan, new DiskMoveOps(), _ => { }, Ct).Failed[id]);
+        Assert.True(Directory.Exists(Path.Combine(current, id)));
+    }
+
+    /// <summary>3라운드 a2·b2: 나뉜 측정의 한쪽 조각만 옮기고 다른 쪽이 실패하면 완료로 세지 않는다 (일부 옮김, 0/1).</summary>
+    [Fact]
+    public async Task ASplitRecordIsCountedOnlyWhenEveryPartMoved()
+    {
+        var (service, _, settings, _) = NewService();
+        var id = Id(11, "kkkkkk");
+        var a = dir.Sub("pa");
+        var b = dir.Sub("pb");
+        M9RecordMoveTests.Make(a, id, 11, 0);
+        var bad = M9RecordMoveTests.Make(b, id, 11, 1);
+        settings.Current = new RecordFolders(null, [a, b], null);
+        service.Ops = new FailCopyFrom(bad);
+        var report = await service.RunAsync(MoveKind.Retry, null, null, Ct);
+        Assert.Equal(MoveState.Partial, report.State);                                // 한쪽은 옮겼으니 "하나도 못 옮김"은 아니다
+        Assert.Equal((0, 1), (report.Moved, report.Total));
+        Assert.True(report.Failed.ContainsKey(id));
+    }
+
+    private sealed class FailCopyFrom(string folder) : DiskMoveOps
+    {
+        public override bool SameVolume(string a, string b) => false;
+        public override void CopyFile(string from, string to)
+        {
+            if (from.StartsWith(folder, StringComparison.OrdinalIgnoreCase)) throw new IOException("시험: 복사 실패");
+            base.CopyFile(from, to);
+        }
+    }
+
     /// <summary>2라운드 b2: 백그라운드 옮기기는 예약하기 전에 Running을 등록하고, 이미 멈춘 요청은 처음에 돌아온다.</summary>
     [Fact]
     public async Task BackgroundMoveIsRegisteredBeforeItIsScheduled()
