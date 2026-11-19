@@ -280,13 +280,13 @@ public sealed class RecordsScreen : Screen
     private void FocusLater(string id, Mode expected) => FocusLater(id, expected, requestGen, detailKey, 10);
 
     /// <param name="gen">예약할 때의 요청 세대, <paramref name="key"/>는 그때의 상세: 그 사이 다른 기록을 열었으면 하지 않는다 (G4 M7 2라운드 4)</param>
-    private void FocusLater(string id, Mode expected, int gen, string? key, int tries)
+    private void FocusLater(string id, Mode expected, int gen, string? key, int tries, Action<Control>? then = null)
     {
         OnePerFrame(() =>
         {
             if (mode != expected || gen != requestGen || (expected == Mode.Detail && key != detailKey)) return;
-            if (FindRow(id) is { } c && c.Focus(FocusState.Programmatic)) return;
-            if (tries > 1) FocusLater(id, expected, gen, key, tries - 1);
+            if (FindRow(id) is { } c && c.Focus(FocusState.Programmatic)) { then?.Invoke(c); return; }
+            if (tries > 1) FocusLater(id, expected, gen, key, tries - 1, then);
         });
     }
 
@@ -370,20 +370,24 @@ public sealed class RecordsScreen : Screen
         foreach (var k in memoState.Keys.Where(k => k.Key == old).ToArray()) { memoState[(next, k.Mark)] = memoState[k]; memoState.Remove(k); }
         Context.Memos.Rekey(old, next);
         Context.Records.SetPinned([next]);
-        Context.Log.Write("recordsRelinked", new { });
+        Context.Log.Write("recordsRelinked", new { loading = detail is null });
         renderedKey = "";
+        // 아직 여는 중이었으면 새 열쇠로 다시 연다: 옛 열기의 완료는 열쇠가 달라 버려진다 (G4 M9 2라운드 b4)
+        if (detail is null && loadError is null) _ = LoadDetailAsync(next, ++requestGen);
     }
 
     private string? suspendFocusId;
     private double suspendScroll;
+    private (int Start, int Length)? suspendSelection;
 
     public override int FrameHooks => frameHooked ? 1 : 0;
 
     protected override void OnSuspend()
     {
         // 다시 열 때 돌려줄 초점·스크롤 (G4 M9 1라운드 b4)
-        suspendFocusId = XamlRoot is { } xr && Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(xr) is UIElement f && FocusWithin(content)
-            ? AutomationProperties.GetAutomationId(f) : null;
+        var focused = XamlRoot is { } xr ? Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(xr) as UIElement : null;
+        suspendFocusId = focused is not null && FocusWithin(content) ? AutomationProperties.GetAutomationId(focused) : null;
+        suspendSelection = focused is TextBox tb && suspendFocusId is not null ? (tb.SelectionStart, tb.SelectionLength) : null;   // 커서·선택 (2라운드 b6)
         suspendScroll = scroll.VerticalOffset;
         renderGen++;                    // 이미 디스패처에 넘어간 조각은 세대가 달라 아무것도 하지 않는다
         perFrame.Clear();
@@ -403,8 +407,11 @@ public sealed class RecordsScreen : Screen
             // 다시 그리면 칸이 새로 만들어진다: 숨기기 전 초점과 스크롤을 돌려준다 (G4 M9 1라운드 b4)
             double y = suspendScroll;
             OnePerFrame(() => scroll.ChangeView(null, y, null, true));
-            if (!string.IsNullOrEmpty(suspendFocusId)) FocusLater(suspendFocusId, mode);
+            var selection = suspendSelection;
+            if (!string.IsNullOrEmpty(suspendFocusId))
+                FocusLater(suspendFocusId, mode, requestGen, detailKey, 10, c => { if (c is TextBox t && selection is { } s) t.Select(Math.Min(s.Start, t.Text.Length), Math.Min(s.Length, Math.Max(0, t.Text.Length - s.Start))); });
             suspendFocusId = null;
+            suspendSelection = null;
         }
         else renderedKey = "";
     }
@@ -413,6 +420,8 @@ public sealed class RecordsScreen : Screen
 
     public override void Render(HostSnapshot snapshot)
     {
+        // 숨긴 동안은 그리지 않는다: 숨기기 직전에 시작한 읽기·비교·메모 저장이 늦게 끝나도 상태만 남기고, 다시 열 때 그린다 (G4 M9 2라운드 b3)
+        if (Suspended) { renderedKey = ""; return; }
         var items = Context.Records.Items;
         string key = $"{mode}|{items.Count}|{string.Join(",", items.Select(i => i.Stamp.Length + (i.Summary.Analyzing ? "a" : "d")))}|{Context.Records.Listed}"
             + $"|{shown}|{picking}|{string.Join(",", picked)}|{detail?.Stamp}|{loadError}|{expanded}|{string.Join(",", editing)}|{comparison is null}|{diagnosesLoaded}|{openDiagnosis?.StartedAt}";
@@ -699,6 +708,7 @@ public sealed class RecordsScreen : Screen
     /// </summary>
     private void OnePerFrame(Action action)
     {
+        if (Suspended) return;   // 숨긴 동안 프레임 구독을 새로 만들지 않는다 (다시 열면 OnResume이 처음부터 다시 그린다)
         perFrame.Enqueue(action);
         if (frameHooked) return;
         frameHooked = true;

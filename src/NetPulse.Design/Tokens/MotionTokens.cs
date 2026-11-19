@@ -78,6 +78,8 @@ public static class Waits
     public static readonly TimeSpan TrayTooltip = TimeSpan.FromSeconds(1);
     /// <summary>시험 주입 <c>--move-fail hold</c>: 옮기기가 파일마다 이만큼 멈춘다 ("옮기는 중" 장면, 옮기는 중 세션 종료 시험). 세션 종료 한도보다 짧게</summary>
     public static readonly TimeSpan MoveHoldTest = TimeSpan.FromMilliseconds(700);
+    /// <summary>시험 주입 <c>--move-fail hold-long</c>: 파일 하나가 닫기의 옮기기 대기 한도(CloseWrites)보다 오래 걸린다 (G4 M9 2라운드 b1)</summary>
+    public static readonly TimeSpan MoveHoldLongTest = TimeSpan.FromSeconds(5);
     /// <summary>시험 주입 <c>--report-fail slow</c>: 내보내기를 이만큼 늦춘다 (M8 "내보내는 중" 장면)</summary>
     public static readonly TimeSpan ReportSlowTest = TimeSpan.FromSeconds(4);
 

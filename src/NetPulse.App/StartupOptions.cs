@@ -119,7 +119,7 @@ public sealed record StartupOptions
                 "--exit" => o with { Exit = true },
                 "--close-to-tray" => o with { CloseToTray = OnOff(Next()) },
                 "--pick-folder" => o with { PickFolder = Next() },
-                "--move-fail" => o with { MoveFail = Next() is var mf && (mf == "cross" || mf == "hold" || mf.StartsWith("copy:", StringComparison.Ordinal) || mf.StartsWith("delete:", StringComparison.Ordinal) || mf.StartsWith("kill-after:", StringComparison.Ordinal)) ? mf : throw new ArgumentException("copy:<id>, delete:<id>, kill-after:<n>, cross 중 하나") },
+                "--move-fail" => o with { MoveFail = Next() is var mf && (mf == "cross" || mf == "hold" || mf == "hold-long" || mf.StartsWith("copy:", StringComparison.Ordinal) || mf.StartsWith("delete:", StringComparison.Ordinal) || mf.StartsWith("kill-after:", StringComparison.Ordinal)) ? mf : throw new ArgumentException("copy:<id>, delete:<id>, kill-after:<n>, cross 중 하나") },
                 "--theme" => o with
                 {
                     Theme = Next() switch

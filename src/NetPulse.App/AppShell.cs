@@ -388,8 +388,14 @@ public sealed partial class AppShell : Window
             await diagnosisStop;   // 진단을 먼저 멈춘다: 억제 → 취소 → 최대 3초 (M6 설계 3.4)
             // 옮기기가 멈추고 되돌림·정리·독점 놓기까지 끝날 때를 기다린다 (기록 하나 복사 중이면 그 파일 사이에서 멈춘다).
             // 출입문 상태를 엿보는 대신 작업 자체에 합류한다 (G4 M9 1라운드 b1). 한도를 넘으면 기록하고 계속한다
+            // 한도를 넘어도 끝까지 기다린다 (G4 M9 2라운드 b1): 옮기기가 독점을 놓기 전에는 초안 메모가 저장되지 않고, 끊으면 정리도 남는다.
+            // 멈춤을 받았으니 지금 파일 하나를 끝내거나 되돌리면 곧 끝난다 (리포트 내보내기와 같은 선택: 남는 파일보다 늦은 닫기)
             var moving = Resident.Moves.Running;
-            if (await Task.WhenAny(moving, Task.Delay(Waits.CloseWrites)) != moving) log.Write("moveCloseTimeout", new { });
+            if (await Task.WhenAny(moving, Task.Delay(Waits.CloseWrites)) != moving)
+            {
+                log.Write("moveCloseWait", new { });
+                await moving;
+            }
             // 기록 화면의 메모 저장은 쓰기 큐에 들어가기 전(저장 시작 알림·앞 요청 대기)일 수 있어 호스트 종료와 함께 따로 기다린다
             // (호스트는 쓰기 큐만 기다린다, G4 M7 3라운드 1). 둘은 세대로 서로의 옛 글을 건너뛰므로 동시에 해도 된다
             var memoWrites = memos.DrainAsync(Waits.CloseWrites);

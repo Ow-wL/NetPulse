@@ -348,7 +348,7 @@ public sealed class SettingsScreen : Screen
         {
             var moves = R.Moves;
             var token = moveStop.Token;
-            report = await Task.Run(() => moves.RunAsync(kind, picked, progressSink, token));
+            report = await moves.RunInBackground(kind, picked, progressSink, token);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

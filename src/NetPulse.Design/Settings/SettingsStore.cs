@@ -57,6 +57,7 @@ public sealed class SettingsStore
         failure = null;
         lock (gate)
         {
+            var before = current;
             next = change(current);
             if (recordsBlocked) next = next with { Records = current.Records };
             current = next;
@@ -73,6 +74,13 @@ public sealed class SettingsStore
                     failure = ex.GetType().Name;
                     result = SettingsSaveResult.Failed;
                 }
+            }
+            // 기록 위치 묶음은 파일에 저장됐을 때만 바뀐다 (G4 M9 2라운드 a1): 저장에 실패했는데 메모리에만 새 위치·일지가 남으면
+            // 실제 위치(세계)와 어긋나 다음 [다시 옮기기]가 원본과 목적지를 같은 곳으로 잡을 수 있었다. 다른 묶음은 이 실행에 적용한다
+            if (result != SettingsSaveResult.Saved && !ReferenceEquals(before.Records, next.Records))
+            {
+                next = next with { Records = before.Records };
+                current = next;
             }
         }
         Changed?.Invoke(next);

@@ -46,8 +46,14 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
         return new KnownLocations(world.CurrentRecordFolder, f.Extra, world.FallbackRecordFolder, userData, world.DefaultRecordFolder);
     }
 
-    /// <summary>종류별 원본들과 목적지.</summary>
+    /// <summary>종류별 원본들과 목적지. 목적지와 같은 위치는 원본에서 뺀다 (자기 자신으로 옮기면 "이미 있음"으로 보고 지운다).</summary>
     public (IReadOnlyList<string> Sources, string Destination) Route(MoveKind kind, string? picked)
+    {
+        var (sources, dest) = RouteRaw(kind, picked);
+        return ([.. sources.Where(s => !RecordFolderRules.Same(s, dest))], dest);
+    }
+
+    private (IReadOnlyList<string> Sources, string Destination) RouteRaw(MoveKind kind, string? picked)
     {
         var f = settings.Read();
         return kind switch
@@ -86,7 +92,7 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
     /// </summary>
     public Task Running => Volatile.Read(ref running);
 
-    /// <summary>옮긴다 (백그라운드에서 부른다). 진행: (옮긴 수, 전체).</summary>
+    /// <summary>옮긴다 (부른 스레드에서 이어 간다, 시험용). 진행: (옮긴 수, 전체).</summary>
     public async Task<MoveReport> RunAsync(MoveKind kind, string? picked, IProgress<(int Done, int Total)>? progress, CancellationToken stop)
     {
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -95,8 +101,22 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
         finally { done.TrySetResult(); }
     }
 
+    /// <summary>
+    /// 백그라운드에서 옮긴다. <see cref="Running"/>을 <b>예약하기 전에 이 스레드에서</b> 등록한다 (G4 M9 2라운드 b2: 작업자가 돌기 전에 종료가 오면
+    /// 지난 완료 작업을 기다렸다). 이미 멈춤을 받았으면 작업자는 처음에 바로 돌아온다.
+    /// </summary>
+    public Task<MoveReport> RunInBackground(MoveKind kind, string? picked, IProgress<(int Done, int Total)>? progress, CancellationToken stop)
+    {
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Volatile.Write(ref running, done.Task);
+        var work = Task.Run(() => RunCoreAsync(kind, picked, progress, stop));
+        work.ContinueWith(_ => done.TrySetResult(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        return work;
+    }
+
     private async Task<MoveReport> RunCoreAsync(MoveKind kind, string? picked, IProgress<(int Done, int Total)>? progress, CancellationToken stop)
     {
+        if (stop.IsCancellationRequested) return Report(MoveState.Stopped, null);
         if (!settings.Writable) return Report(MoveState.NotPersisted, "설정 파일을 저장할 수 없는 실행이라 옮길 수 없습니다.");
         if (host.Snapshot.State is not (HostState.Idle or HostState.NoProfile)) return Report(MoveState.Busy, "측정 중에는 바꿀 수 없습니다.");
         if (!await gate.EnterExclusiveAsync(GateLimit).ConfigureAwait(false)) return Report(MoveState.Busy, "지금은 옮길 수 없습니다 (진행 중인 작업).");
@@ -105,6 +125,10 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
             if (host.Snapshot.State is not (HostState.Idle or HostState.NoProfile)) return Report(MoveState.Busy, "측정 중에는 바꿀 수 없습니다.");
             var (sources, dest) = Route(kind, picked);
             if (kind == MoveKind.Default) Directory.CreateDirectory(dest);
+            // 설정의 기록 위치가 실제 위치(세계)와 어긋나 있으면 옮기지 않는다: 원본·목적지 판정의 근거가 무너진다 (G4 M9 2라운드 a1)
+            if (!RecordFolderRules.Same(world.CurrentRecordFolder, settings.Read().Folder ?? world.DefaultRecordFolder))
+                return Report(MoveState.Invalid, "설정의 기록 위치가 지금 위치와 다릅니다. 앱을 다시 시작하세요.");
+            if (stop.IsCancellationRequested) return Report(MoveState.Stopped, null);
             // 잠근 뒤 다시 판정 [2-3]: 이 결과가 유일한 근거
             var plans = Plans(kind, sources, dest);
             int longest = plans.Length == 0 ? 0 : plans.Max(p => p.LongestRelative);
@@ -113,7 +137,8 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
             var conflicts = plans.SelectMany(p => p.Conflicts).ToArray();
             if (conflicts.Length > 0) return new(MoveState.Conflict, 0, 0, new Dictionary<string, string>(), [], conflicts, "새 위치에 같은 이름의 다른 기록이 있습니다.");
 
-            int total = plans.Sum(p => p.Items.Count(i => !i.Segments.Any(s => s.Duplicate))), moved = 0;
+            // 측정 단위로 센다 (G4 M9 2라운드 a3·b5): 같은 측정의 조각이 여러 원본에 나뉘어 있어도 하나
+            int total = plans.SelectMany(p => p.Items).Select(i => i.Id).Distinct(StringComparer.Ordinal).Count(), moved = 0;
             var movedIds = new HashSet<string>(StringComparer.Ordinal);
             var failed = new Dictionary<string, string>(StringComparer.Ordinal);
             var leftovers = new List<string>();
@@ -205,5 +230,5 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return true; }
     }
 
-    private static MoveReport Report(MoveState s, string reason) => new(s, 0, 0, new Dictionary<string, string>(), [], [], reason);
+    private static MoveReport Report(MoveState s, string? reason) => new(s, 0, 0, new Dictionary<string, string>(), [], [], reason);
 }

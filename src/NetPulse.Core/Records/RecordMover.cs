@@ -92,6 +92,10 @@ public static class RecordMover
             if (dirs.Any(d => Directory.Exists(Path.Combine(to, Path.GetFileName(d) + MovingSuffix)) && !IsOurs(Path.Combine(to, Path.GetFileName(d) + MovingSuffix))))
             {
                 foreign.Add(id);
+                // 옮기지 않아도 정본 정보는 내놓는다 (G4 M9 2라운드 a2): 뒤 원본의 같은 조각은 이것과 비교해 충돌·사본이 되고,
+                // 이 측정은 옮겨지지 않았으므로 사본도 지우지 않는다 (뒤 사본이 정본을 대신하지 않는다)
+                foreach (var dir in dirs)
+                    if (SegmentNumber(dir) is int s && !(earlier?.ContainsKey((id, s)) ?? false)) claims.TryAdd((id, s), FolderHash(dir).Hash);
                 continue;
             }
             // 목적지의 같은 측정: 조각 번호 → 폴더 (앞 것)
