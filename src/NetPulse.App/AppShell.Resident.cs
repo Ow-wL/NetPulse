@@ -93,9 +93,10 @@ public sealed partial class AppShell
             }
             catch (Exception ex)
             {
-                // 처리 중 예외를 반환 Task로 잇는다: 두 번째 실행은 closing으로 답을 받고, 기록에는 종류만 (G4 M10 2라운드 2)
-                log.Write("instanceCommandFailed", new { command, type = ex.GetType().Name });
+                // 처리 중 예외를 반환 Task로 잇는다: 두 번째 실행은 closing으로 답을 받는다. 답을 먼저 정하고 기록은 그다음 (기록이 실패해도 답은 간다, G4 M10 3라운드 2)
                 accepted.TrySetResult(false);
+                try { log.Write("instanceCommandFailed", new { command, type = ex.GetType().Name }); }
+                catch (Exception) { /* 기록 실패는 무시 */ }
             }
         })) accepted.TrySetResult(false);
         return accepted.Task;

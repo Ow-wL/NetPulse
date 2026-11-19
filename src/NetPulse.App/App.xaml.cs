@@ -75,7 +75,11 @@ public partial class App : Application
         if (uiQueue is null || !uiQueue.TryEnqueue(async () =>
         {
             try { done.TrySetResult(await instanceHandler(command)); }
-            catch (Exception ex) { log?.Write("instanceCommandFailed", new { type = ex.GetType().Name }); done.TrySetResult(false); }
+            catch (Exception ex)
+            {
+                done.TrySetResult(false);   // 답을 먼저 (기록이 실패해도 두 번째 실행은 답을 받는다)
+                try { log?.Write("instanceCommandFailed", new { type = ex.GetType().Name }); } catch (Exception) { /* 기록 실패는 무시 */ }
+            }
         })) done.TrySetResult(false);
         return done.Task;
     }

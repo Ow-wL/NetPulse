@@ -378,25 +378,26 @@ public sealed partial class AppShell : Window
     {
         if (closing) return;
         closing = true;
-        TestHolds.ReleaseAll();    // 시험 전용 멈춤이 있으면 풀어 작업이 끝나게 한다 (M10 D3)
-        instance?.MarkClosing();   // 두 번째 실행의 요청에는 closing으로 답한다 (A5)
-        host.BlockStarts();
-        runTimer?.Stop();
-        // 기록을 옮기는 중이면 멈춤을 보낸다: 지금 기록 하나를 끝내거나 되돌리고 멈춘다 (M9 설계 A1 표). 아래에서 독점이 풀리기를 기다린다
-        if (screens.Prepared("settings") is SettingsScreen settingsScreen) settingsScreen.StopMove();
-        // 종료를 시작하면 화면의 프레임 구독·쌓인 프레임 작업부터 끊는다 (M7 이월 4, M9 설계 C2)
-        screens.Suspend();
-        ui.Pacer.Pause();
-        log.Write("closeStep", new { step = "begin", thread = Environment.CurrentManagedThreadId, hidden });
-        // 진단 억제는 첫 await 전에 (테마 정리를 기다리는 동안 결과를 저장·게시하지 않게, G4 1라운드 b4). 끝나기는 아래에서 기다린다
-        var diagnosisStop = diagnosis.ShutdownAsync();
-        // 리포트 내보내기 취소도 첫 await 전에 보낸다: 쓰는 중이면 조각 사이에서 멈추고 임시 파일을 지운다 (G4 M8 2라운드 b1)
-        var reportStop = screens.Prepared("report") is ReportScreen report ? report.StopExportAsync() : Task.CompletedTask;
-        await ui.Theme.ShutdownAsync(Waits.ThemeCleanup);
-        log.Write("closeCleanup", new { snapshotLayers = ui.Theme.SnapshotLayersInTree, inTransition = ui.Theme.InTransition, rendering = ui.Theme.RenderingSubscribed });
-        AppWindow.Hide();
+        // 닫기 전체를 한 try에 둔다: async void라 첫 await 전 예외도 부른 쪽에 가지 않는다. 어디서 실패해도 아래 finally가 창을 닫는다 (G4 M10 3라운드 1)
         try
         {
+            TestHolds.ReleaseAll();    // 시험 전용 멈춤이 있으면 풀어 작업이 끝나게 한다 (M10 D3)
+            instance?.MarkClosing();   // 두 번째 실행의 요청에는 closing으로 답한다 (A5)
+            host.BlockStarts();
+            runTimer?.Stop();
+            // 기록을 옮기는 중이면 멈춤을 보낸다: 지금 기록 하나를 끝내거나 되돌리고 멈춘다 (M9 설계 A1 표). 아래에서 독점이 풀리기를 기다린다
+            if (screens.Prepared("settings") is SettingsScreen settingsScreen) settingsScreen.StopMove();
+            // 종료를 시작하면 화면의 프레임 구독·쌓인 프레임 작업부터 끊는다 (M7 이월 4, M9 설계 C2)
+            screens.Suspend();
+            ui.Pacer.Pause();
+            log.Write("closeStep", new { step = "begin", thread = Environment.CurrentManagedThreadId, hidden });
+            // 진단 억제는 첫 await 전에 (테마 정리를 기다리는 동안 결과를 저장·게시하지 않게, G4 1라운드 b4). 끝나기는 아래에서 기다린다
+            var diagnosisStop = diagnosis.ShutdownAsync();
+            // 리포트 내보내기 취소도 첫 await 전에 보낸다: 쓰는 중이면 조각 사이에서 멈추고 임시 파일을 지운다 (G4 M8 2라운드 b1)
+            var reportStop = screens.Prepared("report") is ReportScreen report ? report.StopExportAsync() : Task.CompletedTask;
+            await ui.Theme.ShutdownAsync(Waits.ThemeCleanup);
+            log.Write("closeCleanup", new { snapshotLayers = ui.Theme.SnapshotLayersInTree, inTransition = ui.Theme.InTransition, rendering = ui.Theme.RenderingSubscribed });
+            AppWindow.Hide();
             await diagnosisStop;   // 진단을 먼저 멈춘다: 억제 → 취소 → 최대 3초 (M6 설계 3.4)
             // 옮기기가 멈추고 되돌림·정리·독점 놓기까지 끝날 때를 기다린다 (기록 하나 복사 중이면 그 파일 사이에서 멈춘다).
             // 출입문 상태를 엿보는 대신 작업 자체에 합류한다 (G4 M9 1라운드 b1). 한도를 넘으면 기록하고 계속한다
@@ -413,14 +414,16 @@ public sealed partial class AppShell : Window
             var memoWrites = memos.DrainAsync(Waits.CloseWrites);
             var shutdown = Task.WhenAll(host.ShutdownAsync(), memoWrites, reportStop);
             if (await Task.WhenAny(shutdown, Task.Delay(Waits.CloseWrites + Waits.CloseWrites + Waits.CloseWrites)) != shutdown)
+            {
                 log.Write("closeTimeout", new { state = host.Snapshot.State.ToString() });
+                // 한도 뒤에도 남은 종료 작업의 실패를 관찰한다 (G4 M10 3라운드 3)
+                _ = shutdown.ContinueWith(t => MarkCloseFailed(t.Exception!.GetBaseException()), CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            }
+            else await shutdown;   // 끝났으면 실제로 기다려 실패를 아래 catch로 (WhenAny는 실패를 넘기지 않는다)
             // 리포트 내보내기는 시간 한도 없이 끝까지 기다린다: 취소를 받았으니 곧 끝나고, 끝나기 전에 닫으면 임시 파일이 남을 수 있다
             // (G4 M8 1·2라운드 b1. 입출력 자체가 멈추면 운영체제가 오류로 끝낼 때까지 기다린다 — 남는 파일보다 늦은 닫기를 택함)
-            if (!reportStop.IsCompleted)
-            {
-                log.Write("reportCloseWait", new { });
-                await reportStop;
-            }
+            if (!reportStop.IsCompleted) log.Write("reportCloseWait", new { });
+            await reportStop;   // 이미 끝났어도 기다려 실패를 관찰한다
             if (memoWrites.IsCompleted && !memoWrites.Result) log.Write("memoCloseTimeout", new { });
             var left = host.UnsavedDrafts();
             if (left.Count > 0) log.Write("memoUnsaved", new { marks = left });   // 메모 글은 남기지 않는다
@@ -428,22 +431,40 @@ public sealed partial class AppShell : Window
         }
         catch (Exception ex)
         {
-            // async void라 예외가 부른 쪽(창 닫기·트레이·두 번째 실행)에 가지 않는다: 여기서 관찰해 기록하고, 아래에서 창은 닫되
-            // 종료 코드로 실패를 드러낸다 (정상 종료 0과 구별, G4 M10 2라운드 2). 예외 종류만 남긴다
-            log.Write("closeFailed", new { type = ex.GetType().Name });
-            Environment.ExitCode = 70;   // EX_SOFTWARE: 닫기 중 예외로 저장·정리를 다 하지 못했다 (잘못된 인수 64와 같은 방식)
+            // async void라 예외가 부른 쪽(창 닫기·트레이·두 번째 실행)에 가지 않는다: 여기서 관찰하고, 아래에서 창은 닫되
+            // 종료 코드로 실패를 드러낸다 (정상 종료 0과 구별, G4 M10 2라운드 2)
+            MarkCloseFailed(ex);
         }
         finally
         {
             // 닫은 뒤에는 화면 요소를 건드리는 큐 작업·타이머가 돌지 않게 먼저 끊는다
-            // (게이트에서 닫을 때 드물게 WinUI 내부 예외 0xC000027B로 끝났다, G4 M5 2라운드 반영 중)
+            // (게이트에서 닫을 때 드물게 WinUI 내부 예외 0xC000027B로 끝났다, G4 M5 2라운드 반영 중).
+            // 정리 단계 하나가 실패해도 나머지와 마지막 창 닫기는 한다 (G4 M10 3라운드 1)
             closeAllowed = true;
-            log.Write("closeStep", new { step = "detach", thread = Environment.CurrentManagedThreadId });
-            toasts.StopAll();
-            tray?.Dispose();
-            ui.Detach();
-            log.Write("closeStep", new { step = "close", thread = Environment.CurrentManagedThreadId });
-            Close();
+            CloseStep(() => log.Write("closeStep", new { step = "detach", thread = Environment.CurrentManagedThreadId }));
+            CloseStep(toasts.StopAll);
+            CloseStep(() => tray?.Dispose());
+            CloseStep(ui.Detach);
+            CloseStep(() => log.Write("closeStep", new { step = "close", thread = Environment.CurrentManagedThreadId }));
+            try { Close(); }
+            catch (Exception ex) { MarkCloseFailed(ex); Application.Current.Exit(); }
         }
+    }
+
+    private void CloseStep(Action step)
+    {
+        try { step(); }
+        catch (Exception ex) { MarkCloseFailed(ex); }
+    }
+
+    /// <summary>
+    /// 닫기 실패 표시: 종료 코드 70(EX_SOFTWARE, 잘못된 인수 64와 같은 방식)을 먼저 정하고, 기록은 그다음 (기록이 실패해도 종료 코드는 남는다,
+    /// G4 M10 3라운드 2). 예외 종류만 남긴다. 다른 스레드(남은 종료 작업의 실패)에서도 부른다.
+    /// </summary>
+    private void MarkCloseFailed(Exception ex)
+    {
+        Environment.ExitCode = 70;
+        try { log.Write("closeFailed", new { type = ex.GetType().Name }); }
+        catch (Exception) { /* 기록 실패는 무시: 종료 코드로 이미 드러났다 */ }
     }
 }
