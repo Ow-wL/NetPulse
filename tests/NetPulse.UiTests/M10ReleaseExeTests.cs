@@ -34,7 +34,7 @@ public sealed class M10ReleaseExeTests
             Assert.True(startup.GetProperty("fonts").GetBoolean());                         // 글꼴·시나리오가 exe 안에서 풀렸다
             Assert.True(startup.GetProperty("scenarios").GetBoolean());
             Assert.Equal(0, app.Close());
-            Assert.Equal(["NetPulse-1.0.0-win-x64.exe", "extract"], Directory.EnumerateFileSystemEntries(folder).Select(Path.GetFileName).Order().ToArray());
+            Assert.Equal(["NetPulse-1.0.0-win-x64.exe", "extract"], Directory.EnumerateFileSystemEntries(folder).Select(Path.GetFileName).Order(StringComparer.Ordinal).ToArray());   // 순서 비교 (문화권 비교면 extract가 앞에 온다)
         }
         finally
         {

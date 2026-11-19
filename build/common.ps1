@@ -146,20 +146,23 @@ function Get-BannedValues {
 
 function Find-BannedInBytes([byte[]] $Bytes, [object[]] $Banned) {
     <#
-      바이트를 Latin-1 글로 보고 UTF-8·UTF-16LE 표기를 대소문자 무시로 찾는다. 찾은 종류 목록.
-      Latin-1로 본 UTF-8 바이트는 ASCII 밖 글자의 대소문자 관계를 잃는다(예: J-ö-rg와 J-Ö-RG의 UTF-8): 값 그대로·전부 대문자·전부 소문자
-      세 가지 표기를 따로 찾는다 (G4 M10 1라운드 a5). 비ASCII 글자가 섞인 대소문자 혼합 변형은 찾지 못한다 (ASCII 부분은 대소문자 무시).
+      바이트를 UTF-8 글과 UTF-16LE 글(짝수·홀수 시작 두 가지)로 각각 풀어 금지 값을 유니코드 대소문자 무시(OrdinalIgnoreCase)로 찾는다. 찾은 종류 목록.
+      잘못된 바이트는 대체 문자로 풀리고 그 앞뒤의 올바른 글은 그대로 남는다 (UTF-8은 스스로 맞춰진다, UTF-16은 두 시작점을 다 본다).
+      전에는 바이트를 Latin-1로 보고 찾아 ASCII 밖 글자의 대소문자 변형(예: o 움라우트 대·소문자가 섞인 이름)을 놓쳤다 (G4 M10 1·2라운드 a5).
     #>
-    $latin = [Text.Encoding]::GetEncoding(28591)
-    $hay = $latin.GetString($Bytes)
+    $utf8 = New-Object Text.UTF8Encoding($false, $false)
+    $utf16 = New-Object Text.UnicodeEncoding($false, $false, $false)
+    $views = New-Object System.Collections.Generic.List[object]
+    $views.Add(@{ Enc = 'utf-8'; Text = $utf8.GetString($Bytes) })
+    foreach ($start in 0, 1) {
+        $count = $Bytes.Length - $start
+        $count -= $count % 2
+        if ($count -gt 0) { $views.Add(@{ Enc = 'utf-16'; Text = $utf16.GetString($Bytes, $start, $count) }) }
+    }
     $found = New-Object System.Collections.Generic.List[string]
     foreach ($b in $Banned) {
-        $forms = @($b.Value, $b.Value.ToUpperInvariant(), $b.Value.ToLowerInvariant()) | Select-Object -Unique
-        foreach ($enc in @([Text.Encoding]::UTF8, [Text.Encoding]::Unicode)) {
-            foreach ($form in $forms) {
-                $needle = $latin.GetString($enc.GetBytes($form))
-                if ($hay.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $found.Add("$($b.Kind)/$($enc.WebName)"); break }
-            }
+        foreach ($v in $views) {
+            if ($v.Text.IndexOf($b.Value, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $found.Add("$($b.Kind)/$($v.Enc)") }
         }
     }
     return @($found | Sort-Object -Unique)
@@ -172,13 +175,18 @@ function Test-BannedScanner([object[]] $Banned) {
         $bytes = [byte[]](@(0, 1, 2) + $enc.GetBytes('xx' + $marker[0].Value.ToUpperInvariant() + 'yy') + @(3, 4))
         if ((Find-BannedInBytes $bytes $marker).Count -eq 0) { throw "이진 검사기 자체 시험 실패: $($enc.WebName) 표식을 찾지 못했습니다." }
     }
-    # 비ASCII 이름 (o 움라우트): 값과 대문자·소문자 표기 (G4 M10 1라운드 a5)
-    $name = 'C:/np-home/J' + [char]0xF6 + 'rg-' + [guid]::NewGuid().ToString('N').Substring(0, 6)
+    # 비ASCII 이름 (o 움라우트, A 움라우트): 대문자·소문자와, 두 글자를 서로 다른 방향으로 바꾼 혼합 표기를
+    # UTF-8과 UTF-16LE(짝수·홀수 시작)로 넣어 모두 찾아야 한다 (G4 M10 1·2라운드 a5)
+    $tag = [guid]::NewGuid().ToString('N').Substring(0, 6)
+    $name = 'C:/np-home/J' + [char]0xF6 + 'rg' + [char]0xC4 + '-' + $tag
+    $mixed = 'c:/NP-HOME/j' + [char]0xD6 + 'RG' + [char]0xE4 + '-' + $tag.ToUpperInvariant()
     $wide = @(@{ Kind = 'marker'; Value = $name })
     foreach ($enc in @([Text.Encoding]::UTF8, [Text.Encoding]::Unicode)) {
-        foreach ($form in @($name.ToUpperInvariant(), $name.ToLowerInvariant())) {
-            $bytes = [byte[]](@(9) + $enc.GetBytes($form) + @(9))
-            if ((Find-BannedInBytes $bytes $wide).Count -eq 0) { throw "이진 검사기 자체 시험 실패: 비ASCII 이름의 $($enc.WebName) 대소문자 표기를 찾지 못했습니다." }
+        foreach ($form in @($name.ToUpperInvariant(), $name.ToLowerInvariant(), $mixed)) {
+            foreach ($pad in @(@(9), @(9, 9))) {
+                $bytes = [byte[]]($pad + $enc.GetBytes($form) + @(9))
+                if ((Find-BannedInBytes $bytes $wide).Count -eq 0) { throw "이진 검사기 자체 시험 실패: 비ASCII 이름의 $($enc.WebName) 대소문자 변형을 찾지 못했습니다." }
+            }
         }
     }
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ('np-scan-' + [guid]::NewGuid().ToString('N').Substring(0, 8))

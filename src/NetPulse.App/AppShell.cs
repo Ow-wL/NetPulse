@@ -426,6 +426,13 @@ public sealed partial class AppShell : Window
             if (left.Count > 0) log.Write("memoUnsaved", new { marks = left });   // 메모 글은 남기지 않는다
             await beforeClose();
         }
+        catch (Exception ex)
+        {
+            // async void라 예외가 부른 쪽(창 닫기·트레이·두 번째 실행)에 가지 않는다: 여기서 관찰해 기록하고, 아래에서 창은 닫되
+            // 종료 코드로 실패를 드러낸다 (정상 종료 0과 구별, G4 M10 2라운드 2). 예외 종류만 남긴다
+            log.Write("closeFailed", new { type = ex.GetType().Name });
+            Environment.ExitCode = 70;   // EX_SOFTWARE: 닫기 중 예외로 저장·정리를 다 하지 못했다 (잘못된 인수 64와 같은 방식)
+        }
         finally
         {
             // 닫은 뒤에는 화면 요소를 건드리는 큐 작업·타이머가 돌지 않게 먼저 끊는다

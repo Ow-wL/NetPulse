@@ -84,10 +84,19 @@ public sealed partial class AppShell
         var accepted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!DispatcherQueue.TryEnqueue(() =>
         {
-            if (closing || sessionEnding) { accepted.TrySetResult(false); return; }   // 종료 중: closing으로 답한다
-            if (command == "exit") BeginClose();
-            else Reopen(toMeasure: false, "secondInstance");
-            accepted.TrySetResult(true);
+            try
+            {
+                if (closing || sessionEnding) { accepted.TrySetResult(false); return; }   // 종료 중: closing으로 답한다
+                if (command == "exit") BeginClose();
+                else Reopen(toMeasure: false, "secondInstance");
+                accepted.TrySetResult(true);
+            }
+            catch (Exception ex)
+            {
+                // 처리 중 예외를 반환 Task로 잇는다: 두 번째 실행은 closing으로 답을 받고, 기록에는 종류만 (G4 M10 2라운드 2)
+                log.Write("instanceCommandFailed", new { command, type = ex.GetType().Name });
+                accepted.TrySetResult(false);
+            }
         })) accepted.TrySetResult(false);
         return accepted.Task;
     }
