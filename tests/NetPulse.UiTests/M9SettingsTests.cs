@@ -173,6 +173,29 @@ public sealed class M9SettingsTests
         finally { Cleanup(userData, dest); }
     }
 
+    /// <summary>
+    /// G4 M9 2라운드 b1: 파일 하나가 닫기의 대기 한도(3초)보다 오래 걸리는 옮기기 중 창 닫기 → 한도를 넘어도 옮기기 정리에 끝까지 합류한 뒤 끝난다.
+    /// </summary>
+    [Fact]
+    public void ClosingDuringASlowMoveWaitsForTheMoveCleanup()
+    {
+        var (userData, dest, ids) = Prepare(2);
+        var old = Path.Combine(userData, "records");
+        try
+        {
+            using var app = AppDriver.LaunchWith(userData, "--demo", "steady", "--screen", "settings", "--pick-folder", dest, "--move-fail", "hold-long");
+            ConfirmMove(app, "settings.records.change");
+            app.WaitDiag(RecState, s => s == "Moving", "옮기는 중");
+            Assert.Equal(0, app.Close());
+            var log = app.ReadLog();
+            Assert.Contains(log, e => e.GetProperty("kind").GetString() == "moveCloseWait");             // 한도를 넘겨 기다렸다
+            Assert.DoesNotContain(log, e => e.GetProperty("kind").GetString() == "closeTimeout");
+            Assert.Equal(ids, Ids(dest).Concat(Ids(old)).Order().ToArray());                                // 하나도 잃지 않았다
+            Assert.Empty(Directory.EnumerateDirectories(dest, "*" + RecordMover.MovingSuffix));            // 임시 폴더도 남지 않는다
+        }
+        finally { Cleanup(userData, dest); }
+    }
+
     [Fact]
     public void FolderCannotBeChangedWhileMeasuring()
     {

@@ -256,4 +256,96 @@ public sealed class M9ReviewR1Tests : IDisposable
         var after = At(45_000, ObservationKind.LinkDown).Where(x => x.Balloon).Select(x => x.Kind).ToArray();
         Assert.Equal([NoticeKind.SegmentEnd, NoticeKind.SegmentStart], after);
     }
+
+    // ---------------- G4 2라운드 ----------------
+
+    private (RecordMoveService Service, DemoAppWorld World, Folders Settings, RecordWorkGate Gate) NewService()
+    {
+        var userData = dir.Sub("u2");
+        var text = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "scenarios", "steady.json"));
+        var world = new DemoAppWorld(new DemoWorld(Scenario.Parse(text), new DemoTimeBase(Start, 600)), userData, new DemoRunRules(), dir.Sub("fb2"));
+        Directory.CreateDirectory(world.CurrentRecordFolder);
+        var gate = new RecordWorkGate();
+        var settings = new Folders();
+        return (new RecordMoveService(world, gate, new MeasurementHost(world, userData, new HostOptions { WorkGate = gate }), settings, _ => null), world, settings, gate);
+    }
+
+    /// <summary>2라운드 a1: 목적지와 같은 위치는 원본이 되지 않고, 설정 위치가 실제 위치와 어긋나 있으면 옮기지 않는다 (자기 기록을 "이미 있음"으로 지우지 않게).</summary>
+    [Fact]
+    public async Task ARetryNeverTreatsTheDestinationAsASource()
+    {
+        var (service, world, settings, _) = NewService();
+        var current = world.CurrentRecordFolder;
+        var id = Id(7, "gggggg");
+        M9RecordMoveTests.Make(current, id, 7);
+        settings.Current = new RecordFolders(null, [current], null);              // 지금 위치가 옛 위치 목록에도 있음
+        Assert.Empty(service.Route(MoveKind.Retry, null).Sources);
+        // 저장 실패로 설정만 B를 가리키고 실제 위치는 A인 상태
+        settings.Current = new RecordFolders(dir.Sub("b-not-saved"), [current], null);
+        var report = await service.RunAsync(MoveKind.Retry, null, null, Ct);
+        Assert.Equal(MoveState.Invalid, report.State);
+        Assert.True(Directory.Exists(Path.Combine(current, id)), "원본이 그대로");
+    }
+
+    /// <summary>2라운드 a2: 남의 .moving 때문에 옮기지 않는 앞 원본도 정본 정보를 내놓아, 뒤 원본의 같은 조각이 대신 옮겨지지 않는다.</summary>
+    [Fact]
+    public void AFrontSourceExcludedByAForeignMovingFolderStillShadowsLaterCopies()
+    {
+        var id = Id(8, "hhhhhh");
+        var a = dir.Sub("fa");
+        var b = dir.Sub("fb-src");
+        var dest = dir.Sub("fdest");
+        M9RecordMoveTests.Make(a, id, 8, 0, 30);
+        Directory.CreateDirectory(Path.Combine(dest, id + RecordMover.MovingSuffix));   // 우리 표시 없는 .moving (남의 것)
+        var planA = RecordMover.Plan(MoveKind.Retry, a, dest);
+        Assert.Equal([id], planA.ForeignMoving);
+        Assert.Empty(planA.Items);
+        // 다른 내용의 뒤 사본: 충돌
+        MakeAs(b, id, 0, id + "~5", 20);
+        Assert.Equal([id], RecordMover.Plan(MoveKind.Retry, b, dest, planA.Claims).Conflicts);
+        // 같은 내용의 뒤 사본: 사본이지만 앞 원본이 옮겨지지 않았으므로 그대로 둔다
+        // (같은 이름 id면 그것도 남의 .moving에 걸려 빠진다: 다른 이름의 같은 조각으로)
+        var b2 = dir.Sub("fb2-src");
+        var made = M9RecordMoveTests.Make(dir.Sub("fb2-tmp"), id, 8, 0, 30);
+        Directory.Move(made, Path.Combine(b2, id + "~5"));
+        var planB2 = RecordMover.Plan(MoveKind.Retry, b2, dest, planA.Claims);
+        Assert.True(Assert.Single(Assert.Single(planB2.Items).Segments).Duplicate);
+        Assert.Equal("shadowed", Run(planB2, _ => false).Failed[id]);
+        Assert.True(Directory.Exists(Path.Combine(b2, id + "~5")));
+        Assert.False(Directory.Exists(Path.Combine(dest, id + "~5")));
+    }
+
+    /// <summary>2라운드 a3·b5: 같은 측정의 조각이 두 옛 위치에 나뉘어 있어도 측정 하나로 센다 (모두 옮기면 다 옮김).</summary>
+    [Fact]
+    public async Task ARecordSplitAcrossTwoOldLocationsCountsOnce()
+    {
+        var (service, world, settings, _) = NewService();
+        var id = Id(9, "iiiiii");
+        var a = dir.Sub("sa");
+        var b = dir.Sub("sb");
+        M9RecordMoveTests.Make(a, id, 9, 0);
+        M9RecordMoveTests.Make(b, id, 9, 1);
+        settings.Current = new RecordFolders(null, [a, b], null);
+        var report = await service.RunAsync(MoveKind.Retry, null, null, Ct);
+        Assert.Equal(MoveState.Done, report.State);
+        Assert.Equal((1, 1), (report.Moved, report.Total));
+        Assert.Equal(2, RecordReader.FindSegments(id, [world.CurrentRecordFolder]).Count);
+    }
+
+    /// <summary>2라운드 b2: 백그라운드 옮기기는 예약하기 전에 Running을 등록하고, 이미 멈춘 요청은 처음에 돌아온다.</summary>
+    [Fact]
+    public async Task BackgroundMoveIsRegisteredBeforeItIsScheduled()
+    {
+        var (service, _, settings, gate) = NewService();
+        settings.Current = new RecordFolders(null, [dir.Sub("empty-old")], null);
+        var ticket = gate.TryEnter()!;                                             // 작업자가 독점을 기다리게
+        var work = service.RunInBackground(MoveKind.Retry, null, null, Ct);
+        Assert.False(service.Running.IsCompleted);                                  // 부른 즉시 등록됨
+        ticket.Dispose();
+        await work.WaitAsync(TestSupport.SessionLimit, Ct);
+        await service.Running.WaitAsync(TestSupport.SessionLimit, Ct);
+        using var stopped = new CancellationTokenSource();
+        await stopped.CancelAsync();
+        Assert.Equal(MoveState.Stopped, (await service.RunInBackground(MoveKind.Retry, null, null, stopped.Token)).State);
+    }
 }

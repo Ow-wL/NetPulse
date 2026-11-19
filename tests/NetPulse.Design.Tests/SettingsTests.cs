@@ -182,4 +182,23 @@ public sealed class SettingsTests : IDisposable
         Assert.Equal(50, store.Current.Records.ExtraFolders.Count);          // 묶음 단위로 최신 값 위에
         Assert.Equal(50, SettingsFormat.Load(folder).Settings.Records.ExtraFolders.Count);
     }
+
+    /// <summary>G4 M9 2라운드 a1: 기록 위치 묶음은 파일에 저장됐을 때만 바뀐다. 다른 묶음은 저장에 실패해도 이 실행에 적용한다.</summary>
+    [Fact]
+    public void RecordsChangeOnlyWhenSaved()
+    {
+        const string a = @"D:\a", b = @"D:\b";
+        var store = new SettingsStore(folder, SettingsFormat.Load(folder));
+        Assert.Equal(SettingsSaveResult.Saved, store.Update(f => f with { Records = f.Records with { Folder = a } }));
+        File.SetAttributes(FilePath, FileAttributes.ReadOnly);
+        try
+        {
+            var r = store.Update(f => f with { Records = f.Records with { Folder = b, ExtraFolders = [a] }, Look = f.Look with { Aurora = !f.Look.Aurora } });
+            Assert.Equal(SettingsSaveResult.Failed, r);
+            Assert.Equal(a, store.Current.Records.Folder);                  // 위치는 그대로
+            Assert.Empty(store.Current.Records.ExtraFolders);
+            Assert.NotEqual(SettingsFormat.Load(folder).Settings.Look.Aurora, store.Current.Look.Aurora);   // 보기 설정은 이 실행에 적용
+        }
+        finally { File.SetAttributes(FilePath, FileAttributes.Normal); }
+    }
 }
