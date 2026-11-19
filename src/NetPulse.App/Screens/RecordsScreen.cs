@@ -234,7 +234,7 @@ public sealed class RecordsScreen : Screen
         detailArrived++;                       // 열기 완료가 화면 반영 단계에 왔다 (옛 완료 도착 증거)
         DispatcherQueue.TryEnqueue(() =>
         {
-            if (Context.IsClosing() || req != requestGen || detailKey != key || mode != Mode.Detail) return;
+            if (Context.IsClosing() || req != requestGen || detailKey != key || mode != Mode.Detail) { detailDiscarded++; return; }   // 옛 요청의 완료는 버린다 (시험이 버려졌음을 확인, G4 M10 1라운드 b3)
             detail = opened;
             if (prepared is { } p) { timelineData = p.Timeline; detailView = (opened!, p.View); }
             loadError = opened is null ? "기록을 읽지 못했습니다." : null;
@@ -358,7 +358,7 @@ public sealed class RecordsScreen : Screen
         });
     }
 
-    private int renders, detailArrived, rendersAtSuspend = -1;
+    private int renders, detailArrived, detailDiscarded, rendersAtSuspend = -1;
     private (int Req, bool Cached) lastDetailOpen = (-1, false);
 
     private void Rerender()
@@ -1505,7 +1505,8 @@ public sealed class RecordsScreen : Screen
             } : null,
             detailLoading = mode == Mode.Detail && detail is null && loadError is null,
             renders,
-            detailOpen = new { req = lastDetailOpen.Req, cached = lastDetailOpen.Cached, arrived = detailArrived },
+            detailOpen = new { req = lastDetailOpen.Req, cached = lastDetailOpen.Cached, arrived = detailArrived, discarded = detailDiscarded },
+            detailListed = detail is { } shownDetail && Context.Records.Items.Any(i => i.Key == shownDetail.Key),   // 보이는 상세가 지금 목록의 출처(위치)에서 왔는가
             detailComplete = DetailReady,   // 아래 카드까지 그려짐 (한 프레임 늦게 만든다)
             loadError,
             editing = editing.LastOrDefault(),

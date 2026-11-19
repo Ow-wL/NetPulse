@@ -44,15 +44,16 @@ Write-Host "산출물 확인: 파일 $($expected.Count)개, 커밋 $($head.Subst
 New-Item -ItemType Directory -Force $uiDir | Out-Null
 $env:NETPULSE_EXE = Join-Path $app 'NetPulse.exe'
 $env:NETPULSE_UITEST_OUT = Join-Path $uiDir 'captures'
-# 단일 파일 추출 위치를 새 빈 폴더로 (M10 설계 B2): 이전 추출 캐시가 묶음 누락을 가리지 않게. 시험이 끝나면 지운다
-$extract = Join-Path ([IO.Path]::GetTempPath()) ('netpulse-extract-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
-New-Item -ItemType Directory $extract | Out-Null
-$env:DOTNET_BUNDLE_EXTRACT_BASE_DIR = $extract
 $commands = @()
 $commands += Invoke-Step 'ui-build' 300 'dotnet' @('build', 'tests/NetPulse.UiTests', '-c', 'Release') $uiDir
 $trxDir = Join-Path $uiDir 'trx'
 $failed = $null
+# 단일 파일 추출 위치를 새 빈 폴더로 (M10 설계 B2): 이전 추출 캐시가 묶음 누락을 가리지 않게.
+# 만들기·환경 변수부터 정리까지 한 try/finally 안 (G4 M10 1라운드 a6: 실패·시간 초과에도 지운다)
+$extract = Join-Path ([IO.Path]::GetTempPath()) ('netpulse-extract-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 try {
+    New-Item -ItemType Directory $extract | Out-Null
+    $env:DOTNET_BUNDLE_EXTRACT_BASE_DIR = $extract
     # M5: 캡처 매트릭스(약 8분)와 측정 화면 bench(약 7분)가 더해져 10분으로는 모자란다.
     # 실측 시나리오(M5·M6 LiveRunTests)는 이 PC 네트워크를 쓰고 결과를 공개하지 않으므로 게이트에서 빼고 따로 돌린다.
     # 클래스 이름 대신 특성으로 뺀다 (M6 설계 7.5): 새 실측 시험이 클래스 목록에서 빠지는 일이 없게

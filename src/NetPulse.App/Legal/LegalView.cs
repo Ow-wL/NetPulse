@@ -195,7 +195,11 @@ public sealed class LegalView : Grid
 
     private EventHandler<object>? frameTick;
 
-    private void StopFrames()
+    /// <summary>펼친 뒤 프레임 측정 구독이 살아 있는가 (숨긴 뒤 프레임 구독 수에 센다).</summary>
+    public bool FramesHooked => frameTick is not null;
+
+    /// <summary>프레임 측정을 그만둔다 (대화상자 닫기·트레이로 숨기기). 결과는 보내지 않는다.</summary>
+    public void StopFrames()
     {
         if (frameTick is null) return;
         Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= frameTick;

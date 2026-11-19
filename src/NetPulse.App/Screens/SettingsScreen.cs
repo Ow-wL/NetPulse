@@ -31,6 +31,12 @@ public sealed class SettingsScreen : Screen
     private readonly GlassTextBox tcp0, tcp1, domain0, domain1;
     private readonly GlassButton diagSave, diagReset;
     private readonly TextBlock diagStatus;
+    private NetPulse.App.Legal.LegalView? legalView;   // 마지막으로 연 고지 보기 (프레임 측정 구독을 숨길 때 푼다)
+
+    /// <summary>고지 펼친 뒤 1초 프레임 측정 (G4 M10 1라운드 b2: 숨긴 뒤 구독 수에 세고, 숨길 때 푼다).</summary>
+    public override int FrameHooks => legalView?.FramesHooked == true ? 1 : 0;
+
+    protected override void OnSuspend() => legalView?.StopFrames();
     private RecordsState state;
     private string? reason;
     private (int Done, int Total) moved;
@@ -143,6 +149,7 @@ public sealed class SettingsScreen : Screen
         legalButton.Click += (_, _) =>
         {
             var view = new NetPulse.App.Legal.LegalView(Ui, "legal", 360);
+            legalView = view;
             view.Opened += (i, ms) => Context.Log.Write("legal", new { step = "expanded", index = i, chars = view.Items![i].Text.Length, ms = Math.Round(ms, 1) });
             view.Frames += (i, max, over, samples) => Context.Log.Write("legal", new { step = "frames", index = i, maxMs = Math.Round(max, 1), over33 = over, samples });
             Context.Dialog.OpenContent(legalButton, "라이선스와 고지", view, "닫기", Size.GuideWidth, 520);

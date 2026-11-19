@@ -8236,5 +8236,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
 === 구성요소: System.Diagnostics.EventLog | 10.0.3 | MIT ===
 
+--- 원문: LICENSE.TXT (Microsoft.NETCore.App.Runtime.win-x64 10.0.3에서, 같은 dotnet/runtime 저장소의 MIT) ---
+(앞의 'Microsoft.NETCore.App.Runtime.win-x64 LICENSE.TXT' 원문과 같습니다)
+
 --- 원문: THIRD-PARTY-NOTICES.TXT ---
 (앞의 'Microsoft.NETCore.App.Runtime.win-x64 THIRD-PARTY-NOTICES.TXT' 원문과 같습니다)

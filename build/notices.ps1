@@ -11,6 +11,8 @@
     - 앱 자체 파일(NetPulse 어셈블리·설정·리소스·데모 시나리오) → NetPulse (LICENSE, 고지 목록에는 넣지 않음)
   출처를 못 정한 파일, 원문이 없는 출처가 하나라도 있으면 실패한다 (조용히 건너뛰지 않는다).
   패키지에 원문이 없으면 build/notices/<패키지 id>.txt (사람이 확인해 커밋한 원문)를 쓴다.
+  출처마다 라이선스 원문(LICENSE* 또는 build/notices 원문)이 반드시 있어야 한다: NOTICE·THIRD-PARTY-NOTICES만 있는 출처는 실패한다 (G4 M10 1라운드 a2).
+  예외는 $licenseFrom 표뿐이다: nuspec 라이선스가 MIT이고 같은 dotnet/runtime 저장소에서 나온 패키지는 묶음의 .NET 런타임 팩 LICENSE.TXT(MIT)를 그 원문으로 싣는다.
   Windows App SDK 구성요소가 있으면 같은 버전 Base 패키지의 NOTICE.txt(구성요소 전체의 제3자 고지)도 넣는다.
 
   -Write : src/NetPulse.App/Legal/THIRD-PARTY-NOTICES.txt를 새로 쓴다.
@@ -82,7 +84,12 @@ function License-Name([string] $nuspecPath, [string] $firstText) {
     return '원문 참조'
 }
 
+# 라이선스 파일이 없는 패키지의 라이선스 원문 출처 (패키지 id → 원문을 가진 패키지 id). nuspec 식이 MIT일 때만 쓴다.
+# System.Diagnostics.EventLog: dotnet/runtime 저장소의 패키지(nuspec repository), 패키지 안에는 THIRD-PARTY-NOTICES.TXT만 있다.
+$licenseFrom = @{ 'system.diagnostics.eventlog' = 'microsoft.netcore.app.runtime.win-x64' }
+
 $runtimeVersion = $null
+$deferred = New-Object System.Collections.Generic.List[string]
 foreach ($key in ($packages.Keys | Sort-Object)) {
     $id, $ver = $key.Split('/')
     $dir = Join-Path $nugetRoot "$id/$ver"
@@ -90,16 +97,33 @@ foreach ($key in ($packages.Keys | Sort-Object)) {
     [xml] $x = Get-Content $nuspec.FullName -Encoding UTF8 -Raw
     $name = [string]$x.package.metadata.id
     $texts = New-Object System.Collections.Generic.List[object]
+    $licenseCount = 0
     foreach ($f in (Get-ChildItem $dir -File | Where-Object { $_.Name -imatch '^(license|notice|third-party-notices)(\.[a-z]+)?$' } | Sort-Object Name)) {
         $texts.Add(@{ File = $f.Name; Text = (Read-Text $f.FullName) })
+        if ($f.Name -imatch '^license') { $licenseCount++ }
     }
     $override = Join-Path $root "build/notices/$id.txt"
-    if (Test-Path $override) { $texts.Add(@{ File = "build/notices/$id.txt"; Text = (Read-Text $override) }) }
-    if ($texts.Count -eq 0) { throw "원문이 없는 출처입니다: $name $ver (build/notices/$id.txt에 확인한 원문을 두세요)" }
+    if (Test-Path $override) { $texts.Add(@{ File = "build/notices/$id.txt"; Text = (Read-Text $override) }); $licenseCount++ }
+    if ($licenseCount -eq 0 -and $licenseFrom.ContainsKey($id)) {
+        $lic = $x.package.metadata.license
+        if (-not ($lic -and $lic.type -eq 'expression' -and [string]$lic.'#text' -eq 'MIT')) { throw "$name $ver : 라이선스 원문을 빌려 올 수 있는 것은 nuspec 라이선스가 MIT일 때뿐입니다." }
+        $deferred.Add($key)   # 원문을 가진 패키지를 읽은 뒤에 붙인다
+    }
+    elseif ($licenseCount -eq 0) { throw "라이선스 원문이 없는 출처입니다: $name $ver (NOTICE·제3자 고지만 있음. build/notices/$id.txt에 확인한 원문을 두세요)" }
     $components[$key] = @{ Name = $name; Version = $ver; License = (License-Name $nuspec.FullName $texts[0].Text); Texts = $texts }
     if ($id -eq 'microsoft.netcore.app.runtime.win-x64') { $runtimeVersion = $ver }
 }
 if ($hasHost -and -not $runtimeVersion) { throw '단일 파일 호스트가 있는데 .NET 런타임 팩이 묶음 목록에 없습니다.' }
+foreach ($key in $deferred) {
+    $c = $components[$key]
+    $fromId = $licenseFrom[$key.Split('/')[0]]
+    $from = @($components.GetEnumerator() | Where-Object { $_.Key.StartsWith("$fromId/") } | ForEach-Object { $_.Value }) | Select-Object -First 1
+    if (-not $from) { throw "$($c.Name)의 라이선스 원문 출처($fromId)가 묶음에 없습니다." }
+    $fromText = @($from.Texts | Where-Object { $_.File -imatch '^license' }) | Select-Object -First 1
+    if (-not $fromText -or $fromText.Text -notmatch '^\s*(The )?MIT License') { throw "$($from.Name)의 LICENSE가 MIT 원문이 아닙니다." }
+    # 라이선스 원문을 맨 앞에 (같은 원문이라 글에는 "앞의 … 원문과 같습니다"로 이어진다)
+    $c.Texts.Insert(0, @{ File = "$($fromText.File) ($($from.Name) $($from.Version)에서, 같은 dotnet/runtime 저장소의 MIT)"; Text = $fromText.Text })
+}
 
 # Windows App SDK 구성요소 전체의 제3자 고지 (Base의 NOTICE.txt)
 $wasdk = @($components.Values | Where-Object { $_.Name -like 'Microsoft.WindowsAppSDK.*' } | Select-Object -First 1)

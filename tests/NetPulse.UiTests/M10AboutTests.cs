@@ -103,6 +103,32 @@ public sealed class M10AboutTests
         Assert.Equal(0, app.Close());
     }
 
+    /// <summary>고지를 펼친 직후(1초 프레임 측정 중) 트레이로 숨기면 측정 구독이 풀리고 숨긴 뒤 구독 수가 0 (G4 M10 1라운드 b2).</summary>
+    [Fact]
+    public void HidingRightAfterExpandingANoticeLeavesNoFrameHook()
+    {
+        var userData = AppDriver.NewUserData();
+        M5Fixtures.SaveProfile(userData, "steady");
+        M9ResidentTests.HintAlreadyShown(userData);
+        try
+        {
+            using var app = AppDriver.LaunchWith(userData, "--demo", "steady", "--demo-speed", "20", "--start", "--screen", "settings", "--close-to-tray", "on");
+            app.WaitDiag(d => M5Fixtures.Str(d, "host"), h => h == "Measuring", "측정 중");
+            app.Invoke("settings.about.legal");
+            app.WaitDiag(d => d.GetProperty("dialogOpen").GetBoolean(), o => o, "대화상자");
+            app.Invoke("legal.item.1");
+            app.RequestClose();                                                     // 펼친 지 1초 안에 숨김
+            M9ResidentTests.WaitHidden(app);                                        // 숨긴 뒤 프레임 구독 0 (숨김 기록)
+            var hidden = app.ReadLog().Last(e => e.GetProperty("kind").GetString() == "resident" && e.GetProperty("data").GetProperty("what").GetString() == "hidden");
+            Thread.Sleep(1500);
+            // 숨기며 그만둔 측정은 결과를 남기지 않는다 (숨긴 뒤 렌더링 콜백이 오지 않았다는 뜻이기도 하다)
+            Assert.DoesNotContain(app.ReadLog(), e => e.GetProperty("kind").GetString() == "legal" && e.GetProperty("data").GetProperty("step").GetString() == "frames"
+                && e.GetProperty("t").GetDateTimeOffset() > hidden.GetProperty("t").GetDateTimeOffset());
+            Assert.Equal((0, 0), app.Exit());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
     [Fact]
     public void UnreadableNoticesShowTheFailedState()
     {

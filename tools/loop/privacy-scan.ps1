@@ -9,13 +9,15 @@
   -Staged          스테이징된 변경의 추가된 줄을 검사한다.
   -Range a..b      범위 안의 커밋을 하나씩 검사한다. 중간 커밋에 넣었다 지운 값도 찾는다.
   -Text "..."      주어진 문자열(PR 본문 등)을 검사한다.
+  -SelfTest        diff 읽기와 이메일 예외의 자체 시험만 한다 (합성 diff, 저장소를 읽지 않는다).
 
   찾으면 종료 코드 1, 없으면 0.
 #>
 param(
     [switch] $Staged,
     [string] $Range,
-    [string] $Text
+    [string] $Text,
+    [switch] $SelfTest
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -87,32 +89,63 @@ function Test-Lines([string[]] $lines, [string] $where, [string[]] $paths = @())
     }
 }
 
-function Get-AddedLines([string[]] $diff) {
-    if (-not $diff) { return @() }   # 변경이 없으면 빈 목록
-    $diff | Where-Object { $_ } | Where-Object { $_.StartsWith('+') -and -not $_.StartsWith('+++') } | ForEach-Object { $_.Substring(1) }
+# diff를 한 번만 훑어 추가된 줄과 그 줄의 파일 경로를 짝으로 만든다 (G4 M10 1라운드 a1).
+# 파일 머리(diff --git ~ 첫 @@)의 '+++ '만 경로로 읽고, 조각(@@ 뒤) 안의 '+'로 시작하는 줄은 내용이 '++'로 시작해도 모두 추가된 줄이다.
+# (전에는 두 함수가 '+++'를 다르게 걸러 '++…' 내용 한 줄에 경로 배열이 어긋났고, 그런 줄은 검사에서 빠졌다)
+function Get-AddedEntries([string[]] $diff) {
+    $entries = New-Object System.Collections.Generic.List[object]
+    if (-not $diff) { return ,$entries }
+    $current = ''
+    $inHunk = $false
+    foreach ($l in $diff) {
+        if ($null -eq $l) { continue }
+        if ($l.StartsWith('diff --git ')) { $inHunk = $false; $current = ''; continue }
+        if (-not $inHunk) {
+            if ($l.StartsWith('+++ ')) { $current = if ($l.StartsWith('+++ b/')) { $l.Substring(6) } else { '' } }
+            elseif ($l.StartsWith('@@')) { $inHunk = $true }
+            continue
+        }
+        if ($l.StartsWith('@@')) { continue }
+        if ($l.StartsWith('+')) { $entries.Add([pscustomobject]@{ Path = $current; Text = $l.Substring(1) }) }
+    }
+    return ,$entries
 }
 
-# 추가된 줄마다 그 줄이 속한 파일 경로 (Get-AddedLines와 같은 순서)
-function Get-AddedPaths([string[]] $diff) {
-    if (-not $diff) { return @() }
-    $current = ''
-    foreach ($l in ($diff | Where-Object { $_ })) {
-        if ($l.StartsWith('+++ ')) { $current = if ($l.StartsWith('+++ b/')) { $l.Substring(6) } else { '' }; continue }
-        if ($l.StartsWith('+')) { $current }
-    }
+function Test-Diff([string[]] $diff, [string] $where) {
+    $entries = Get-AddedEntries $diff
+    if ($entries.Count -eq 0) { return @() }
+    Test-Lines @($entries | ForEach-Object { $_.Text }) $where @($entries | ForEach-Object { $_.Path })
+}
+
+if ($SelfTest) {
+    $mail = 'np.selftest' + '@' + 'gmail.com'
+    $diff = @(
+        'diff --git a/build/notices/x.txt b/build/notices/x.txt', '--- a/build/notices/x.txt', '+++ b/build/notices/x.txt', '@@ -0,0 +1,3 @@',
+        '+++marker', "+contributor $mail", '+plain',
+        'diff --git a/src/a.cs b/src/a.cs', '--- a/src/a.cs', '+++ b/src/a.cs', '@@ -1,0 +1,2 @@',
+        "+// $mail", "+++$mail"
+    )
+    $entries = Get-AddedEntries $diff
+    if ($entries.Count -ne 5) { throw "자체 시험 실패: 추가된 줄 $($entries.Count)개 (5개여야 함)" }
+    if ($entries[0].Text -ne '++marker' -or $entries[0].Path -ne 'build/notices/x.txt') { throw '자체 시험 실패: ++로 시작하는 내용 줄' }
+    if ($entries[3].Path -ne 'src/a.cs' -or $entries[4].Path -ne 'src/a.cs') { throw '자체 시험 실패: 경로가 어긋났다' }
+    $hits = @(Test-Diff $diff 'selftest' | Where-Object { $_ -like '*이메일 주소*' })
+    if ($hits.Count -ne 2) { throw "자체 시험 실패: 일반 파일의 이메일 $($hits.Count)건 (2건이어야 함, 예외 파일 줄은 0건)" }
+    Write-Output '공개 전 검사 자체 시험 통과'
+    exit 0
 }
 
 $total = 0
 if ($Staged) {
     $diff = git -c core.quotepath=off diff --cached --unified=0 --no-color
-    $hits = @(Test-Lines @(Get-AddedLines $diff) 'staged' @(Get-AddedPaths $diff))
+    $hits = @(Test-Diff $diff 'staged')
     $hits | Out-Host
     $total += $hits.Count
 }
 if ($Range) {
     foreach ($sha in (git rev-list --reverse $Range)) {
         $diff = git -c core.quotepath=off show --unified=0 --no-color --format= $sha
-        $hits = @(Test-Lines @(Get-AddedLines $diff) $sha.Substring(0, 8) @(Get-AddedPaths $diff))
+        $hits = @(Test-Diff $diff $sha.Substring(0, 8))
         $hits | Out-Host
         $total += $hits.Count
     }

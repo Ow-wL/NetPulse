@@ -119,6 +119,37 @@ public sealed class M10TermsTests
         Assert.Equal(0, app.WaitExit(TimeSpan.FromSeconds(20)));
     }
 
+    /// <summary>
+    /// 동의 → 셸 전환과 겹친 두 번째 실행 (G4 M10 1라운드 b1): 동의를 누르자마자 열기·종료를 보내도 요청은 그때의 처리기(동의 화면 아니면 셸)가 받고,
+    /// 닫힌 동의 창을 다루지 않으며 앱은 저장 후 정상 종료한다. 순서를 바꿔 가며 여러 번.
+    /// </summary>
+    [Fact]
+    public void SecondRunRacingTheConsentTransitionIsHandledByTheCurrentWindow()
+    {
+        for (int round = 0; round < 4; round++)
+        {
+            using var app = AppDriver.LaunchUnconsented(null, "--demo", "steady", "--screen", "home");
+            app.WaitDiag(Screen, s => s == "terms", "사용 조건 화면");
+            int secondExit = -1;
+            string[] secondArgs = round % 2 == 0 ? ["--demo", "steady"] : ["--exit"];
+            var second = new Thread(() => secondExit = app.RunSecond(secondArgs));
+            second.Start();
+            if (round >= 2) Thread.Sleep(30 * round);
+            try { app.Invoke("terms.accept"); }
+            catch (Exception ex) when (round % 2 == 1 && ex is ElementNotAvailableException or System.Runtime.InteropServices.COMException) { }   // 종료 요청을 동의 화면이 먼저 받아 이미 닫힘
+            Assert.True(second.Join(TimeSpan.FromSeconds(30)), "두 번째 실행이 끝나지 않았다");
+            Assert.Equal(0, secondExit);
+            if (round % 2 == 0)
+            {
+                app.FollowNextWindow();                                              // 열기 요청이 어디로 갔든 셸이 뜨고 쓸 수 있다
+                app.WaitDiag(Screen, s => s == "home", "홈");
+                Assert.Equal(0, app.Close());
+            }
+            else Assert.Equal(0, app.WaitExit(TimeSpan.FromSeconds(30)));           // 종료 요청: 동의 화면이 받았으면 그냥, 셸이 받았으면 저장 후 종료
+            Assert.DoesNotContain(app.ReadLog(), e => e.GetProperty("kind").GetString() is "instanceCommandFailed" or "crash" or "unhandled");
+        }
+    }
+
     [Fact]
     public void UnreadableTermsCannotBeAccepted()
     {
@@ -164,14 +195,29 @@ public sealed class M10TermsTests
     [Fact]
     public void InjectionNeedsDemoAndExplicitUserData()
     {
-        // 시험 주입 인수는 --demo와 --user-data가 둘 다 있어야 시작한다 (M10 설계 D3): 하나라도 없으면 시작하지 않는다
-        foreach (var args in new[] { new[] { "--notices-fail" }, new[] { "--demo", "steady", "--fake-version", "1.0.0" } })
+        // 시험 주입 인수는 --demo와 --user-data가 둘 다 있어야 시작한다 (M10 설계 D3): 하나라도 없으면 아무것도 만들지 않고 종료 코드 64.
+        // 주입 넷을 각각 (데모만, 사용자 폴더만, 둘 다 없음) 조합으로, 실측 풍선은 데모·환경 변수 없음으로 본다 (G4 M10 1라운드 b4)
+        var userData = AppDriver.NewUserData();
+        string[][] injections = [["--fake-version", "1.0.0"], ["--notices-fail"], ["--memo-hold", "1"], ["--records-apply-hold"]];
+        var cases = new List<string[]>();
+        foreach (var inj in injections)
+        {
+            cases.Add(["--demo", "steady", .. inj]);
+            cases.Add(["--user-data", userData, .. inj]);
+            cases.Add([.. inj]);
+        }
+        cases.Add(["--user-data", userData, "--live-balloon-test"]);                 // NETPULSE_LIVE 없음
+        cases.Add(["--demo", "steady", "--user-data", userData, "--live-balloon-test"]);   // 데모는 실측이 아니다
+        cases.Add(["--demo", "steady", "--user-data", userData, "--memo-hold", "0"]);      // 형식 (1~99)
+        foreach (var args in cases)
         {
             var info = new System.Diagnostics.ProcessStartInfo(AppDriver.Executable) { UseShellExecute = false };
             foreach (var a in args) info.ArgumentList.Add(a);
+            info.Environment.Remove("NETPULSE_LIVE");
             using var p = System.Diagnostics.Process.Start(info)!;
-            Assert.True(p.WaitForExit(30000), "인수를 거절하고 끝나야 한다");
-            Assert.NotEqual(0, p.ExitCode);
+            Assert.True(p.WaitForExit(30000), "인수를 거절하고 끝나야 한다: " + string.Join(' ', args));
+            Assert.True(p.ExitCode == 64, $"종료 코드 {p.ExitCode} (64여야 함): {string.Join(' ', args)}");
         }
+        Assert.False(Directory.Exists(userData), "거절한 실행이 사용자 폴더를 만들었다");
     }
 }

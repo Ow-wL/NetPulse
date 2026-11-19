@@ -145,14 +145,21 @@ function Get-BannedValues {
 }
 
 function Find-BannedInBytes([byte[]] $Bytes, [object[]] $Banned) {
-    <# 바이트를 Latin-1 글로 보고 UTF-8·UTF-16LE 표기를 대소문자 무시로 찾는다. 찾은 종류 목록 #>
+    <#
+      바이트를 Latin-1 글로 보고 UTF-8·UTF-16LE 표기를 대소문자 무시로 찾는다. 찾은 종류 목록.
+      Latin-1로 본 UTF-8 바이트는 ASCII 밖 글자의 대소문자 관계를 잃는다(예: J-ö-rg와 J-Ö-RG의 UTF-8): 값 그대로·전부 대문자·전부 소문자
+      세 가지 표기를 따로 찾는다 (G4 M10 1라운드 a5). 비ASCII 글자가 섞인 대소문자 혼합 변형은 찾지 못한다 (ASCII 부분은 대소문자 무시).
+    #>
     $latin = [Text.Encoding]::GetEncoding(28591)
     $hay = $latin.GetString($Bytes)
     $found = New-Object System.Collections.Generic.List[string]
     foreach ($b in $Banned) {
+        $forms = @($b.Value, $b.Value.ToUpperInvariant(), $b.Value.ToLowerInvariant()) | Select-Object -Unique
         foreach ($enc in @([Text.Encoding]::UTF8, [Text.Encoding]::Unicode)) {
-            $needle = $latin.GetString($enc.GetBytes($b.Value))
-            if ($hay.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $found.Add("$($b.Kind)/$($enc.WebName)") }
+            foreach ($form in $forms) {
+                $needle = $latin.GetString($enc.GetBytes($form))
+                if ($hay.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $found.Add("$($b.Kind)/$($enc.WebName)"); break }
+            }
         }
     }
     return @($found | Sort-Object -Unique)
@@ -164,6 +171,15 @@ function Test-BannedScanner([object[]] $Banned) {
     foreach ($enc in @([Text.Encoding]::UTF8, [Text.Encoding]::Unicode)) {
         $bytes = [byte[]](@(0, 1, 2) + $enc.GetBytes('xx' + $marker[0].Value.ToUpperInvariant() + 'yy') + @(3, 4))
         if ((Find-BannedInBytes $bytes $marker).Count -eq 0) { throw "이진 검사기 자체 시험 실패: $($enc.WebName) 표식을 찾지 못했습니다." }
+    }
+    # 비ASCII 이름 (o 움라우트): 값과 대문자·소문자 표기 (G4 M10 1라운드 a5)
+    $name = 'C:/np-home/J' + [char]0xF6 + 'rg-' + [guid]::NewGuid().ToString('N').Substring(0, 6)
+    $wide = @(@{ Kind = 'marker'; Value = $name })
+    foreach ($enc in @([Text.Encoding]::UTF8, [Text.Encoding]::Unicode)) {
+        foreach ($form in @($name.ToUpperInvariant(), $name.ToLowerInvariant())) {
+            $bytes = [byte[]](@(9) + $enc.GetBytes($form) + @(9))
+            if ((Find-BannedInBytes $bytes $wide).Count -eq 0) { throw "이진 검사기 자체 시험 실패: 비ASCII 이름의 $($enc.WebName) 대소문자 표기를 찾지 못했습니다." }
+        }
     }
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ('np-scan-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
     New-Item -ItemType Directory $tmp | Out-Null
@@ -202,11 +218,21 @@ function Test-OwnAssembliesHaveNoDebugInfo([string[]] $Paths) {
     }
 }
 
+function Get-CommitVersion([string] $Commit) {
+    <# 그 커밋의 Directory.Build.props에 적힌 Version (버전의 유일한 출처를 커밋에서 직접 읽는다, G4 M10 1라운드 a3) #>
+    $props = (git show "${Commit}:Directory.Build.props") -join "`n"
+    if ($LASTEXITCODE -ne 0) { throw "커밋 $Commit 의 Directory.Build.props를 읽지 못했습니다." }
+    $m = [regex]::Matches($props, '<Version>\s*([^<\s]+)\s*</Version>')
+    if ($m.Count -ne 1 -or $m[0].Groups[1].Value -notmatch '^\d+\.\d+\.\d+$') { throw "커밋 $Commit 의 Version을 하나로 정하지 못했습니다." }
+    return $m[0].Groups[1].Value
+}
+
 function Test-Release([string] $Artifacts, [string] $Commit) {
     <#
       배포 묶음 검사 (B1 [1-4][2-8]). 빌드와 마감이 함께 쓴다. 하나라도 어긋나면 예외.
-      manifest의 app 해시 재계산, release.json의 커밋·버전·manifest 해시, release 파일 목록(정확히 4개)·크기·해시,
-      SHA256SUMS, zip 항목 목록·해시, zip 안 exe = 따로 낸 exe = app/NetPulse.exe.
+      manifest의 app 해시 재계산, release.json의 커밋·manifest 해시, 버전 = 그 커밋의 Directory.Build.props Version = exe 제품 버전(+커밋),
+      release 파일 목록(정확히 4개)과 release.json의 파일 기록(정확히 3개, 이름별 크기·해시), SHA256SUMS,
+      zip 항목(정해진 5개, 순서)과 release.json의 zip 기록(정확히 5개, 이름별 크기·해시), zip 안 exe = 따로 낸 exe = app/NetPulse.exe.
     #>
     $manifestPath = Join-Path $Artifacts 'manifest.json'
     $manifest = Get-Content $manifestPath -Encoding UTF8 -Raw | ConvertFrom-Json
@@ -218,24 +244,35 @@ function Test-Release([string] $Artifacts, [string] $Commit) {
     $info = Get-Content (Join-Path $releaseDir 'release.json') -Encoding UTF8 -Raw | ConvertFrom-Json
     if ($info.sourceCommit -ne $Commit) { throw "release.json의 커밋이 다릅니다: $($info.sourceCommit)" }
     if ($info.manifestSha256 -ne (Get-Sha256Text $manifestPath)) { throw 'release.json의 manifest 해시가 실제 manifest와 다릅니다.' }
-    $names = Get-ReleaseNames $info.version
+    $version = Get-CommitVersion $Commit
+    if ($info.version -ne $version) { throw "release.json의 버전($($info.version))이 커밋의 Version($version)과 다릅니다." }
+    $exeVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $Artifacts 'app/NetPulse.exe'))
+    if ($exeVersion.ProductVersion -ne "$version+$Commit") { throw "exe 제품 버전($($exeVersion.ProductVersion))이 $version+<커밋>이 아닙니다." }
+    if ($exeVersion.FileVersion -ne "$version.0") { throw "exe 파일 버전($($exeVersion.FileVersion))이 $version.0이 아닙니다." }
+    $names = Get-ReleaseNames $version
     $files = @(Get-ChildItem $releaseDir -File | Sort-Object Name | ForEach-Object Name)
     $want = @($names.zip, $names.exe, $names.sums, $names.info | Sort-Object)
     if (($files -join '|') -ne ($want -join '|')) { throw "release 파일 목록이 다릅니다: $($files -join ', ')" }
-    foreach ($f in $info.files) {
-        $p = Join-Path $releaseDir $f.name
-        if ((Get-Item $p).Length -ne $f.size -or (Get-Sha256Text $p) -ne $f.sha256) { throw "release 파일이 기록과 다릅니다: $($f.name)" }
+    $records = @($info.files)
+    $recordNames = @($records | ForEach-Object { [string]$_.name })
+    $wantRecords = @($names.zip, $names.exe, $names.sums)
+    if ($records.Count -ne 3 -or (($recordNames | Sort-Object -Unique) -join '|') -ne (($wantRecords | Sort-Object) -join '|')) { throw "release.json의 파일 기록이 정해진 3개가 아닙니다: $($recordNames -join ', ')" }
+    foreach ($name in $wantRecords) {
+        $f = @($records | Where-Object { $_.name -eq $name })[0]
+        $p = Join-Path $releaseDir $name
+        if ((Get-Item $p).Length -ne [long]$f.size -or (Get-Sha256Text $p) -ne $f.sha256) { throw "release 파일이 기록과 다릅니다: $name" }
     }
     $sums = @(Get-Content (Join-Path $releaseDir $names.sums) -Encoding UTF8 | Where-Object { $_.Trim() })
     $wantSums = @($names.zip, $names.exe | ForEach-Object { "$((Get-Sha256Text (Join-Path $releaseDir $_)).ToLowerInvariant())  $_" })
     if (($sums -join '|') -ne ($wantSums -join '|')) { throw 'SHA256SUMS.txt가 파일과 맞지 않습니다.' }
     $entries = @(Get-ZipEntryHashes (Join-Path $releaseDir $names.zip))
     if ((($entries | ForEach-Object { $_.name }) -join '|') -ne ($script:ReleaseZipEntries -join '|')) { throw "zip 항목이 다릅니다: $(($entries | ForEach-Object { $_.name }) -join ', ')" }
+    $zipRecords = @($info.zipEntries)
+    if ((($zipRecords | ForEach-Object { [string]$_.name }) -join '|') -ne ($script:ReleaseZipEntries -join '|')) { throw "release.json의 zip 기록이 정해진 5개(순서)가 아닙니다." }
     for ($i = 0; $i -lt $entries.Count; $i++) {
-        if ($entries[$i].sha256 -ne $info.zipEntries[$i].sha256) { throw "zip 항목 해시가 기록과 다릅니다: $($entries[$i].name)" }
+        if ($entries[$i].sha256 -ne $zipRecords[$i].sha256 -or [long]$entries[$i].size -ne [long]$zipRecords[$i].size) { throw "zip 항목이 기록과 다릅니다: $($entries[$i].name)" }
     }
     $exeHash = (Get-Sha256Text (Join-Path $releaseDir $names.exe))
     if ($entries[0].sha256 -ne $exeHash -or $exeHash -ne $actual[0].sha256) { throw 'zip 안 exe, 따로 낸 exe, app/NetPulse.exe가 같지 않습니다.' }
-    if ($info.version -notmatch '^\d+\.\d+\.\d+$') { throw "release.json의 버전이 이상합니다: $($info.version)" }
     return $info
 }

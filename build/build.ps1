@@ -76,6 +76,9 @@ try {
     Test-OwnAssembliesHaveNoDebugInfo @($inputs | Where-Object { $_.Rel -match '^NetPulse(\.(Core|Design|Platform))?\.dll$' } | ForEach-Object { $_.Full })
     $banned = Get-BannedValues
     Test-BannedScanner $banned
+    # 공개 전 검사의 diff 읽기·이메일 예외 자체 시험 (G4 M10 1라운드 a1)
+    & (Join-Path $root 'tools/loop/privacy-scan.ps1') -SelfTest | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw '공개 전 검사 자체 시험 실패' }
     $scanHits = New-Object System.Collections.Generic.List[string]
     foreach ($f in $inputs) { foreach ($k in (Find-BannedInBytes ([IO.File]::ReadAllBytes($f.Full)) $banned)) { $scanHits.Add("bundle:$k") } }
     foreach ($k in (Find-BannedInBytes ([IO.File]::ReadAllBytes((Join-Path $app 'NetPulse.exe'))) $banned)) { $scanHits.Add("exe:$k") }

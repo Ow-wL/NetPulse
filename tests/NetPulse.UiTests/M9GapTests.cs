@@ -159,11 +159,18 @@ public sealed class M9GapTests
             Assert.Equal("Done", Sd(app.Diag()).GetProperty("records").GetProperty("state").GetString());
             app.Select("nav.records");
             app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "records", "기록");
+            // 옮기기 완료가 상세를 새 위치로 다시 이었다 (아직 여는 중이었다)
+            Assert.Contains(app.ReadLog(), e => e.GetProperty("kind").GetString() == "recordsRelinked" && e.GetProperty("data").GetProperty("loading").GetBoolean());
+            int discarded = Sd(app.Diag()).GetProperty("detailOpen").GetProperty("discarded").GetInt32();
             app.Invoke("diag.release");                                             // 옛 위치의 열기 완료가 이제 도착
+            // 옛 완료가 화면 반영 단계에서 버려질 때까지 기다린 뒤 본다 (새 상세가 먼저 끝나 있어도 옛 완료 처리 뒤의 상태를 본다, G4 M10 1라운드 b3)
+            app.WaitDiag(x => Sd(x).GetProperty("detailOpen").GetProperty("discarded").GetInt32(), n => n > discarded, "옛 완료 버림");
             WaitDetail(app);
+            Thread.Sleep(500);
             var d = Sd(app.Diag());
             Assert.False(d.GetProperty("detailLoading").GetBoolean());
             Assert.Equal(id, d.GetProperty("detail").GetProperty("Id").GetString());
+            Assert.True(d.GetProperty("detailListed").GetBoolean(), "보이는 상세가 지금 목록(새 위치)의 출처");
             Assert.True(Directory.EnumerateDirectories(dest).Any(f => Path.GetFileName(f).StartsWith(id, StringComparison.Ordinal)), "새 위치에 그 측정");
             Assert.Equal(0, app.Close());
         }

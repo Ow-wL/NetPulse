@@ -59,8 +59,26 @@ public partial class App : Application
         }
     }
 
-    /// <summary>두 번째 실행이 보낸 요청을 받는 곳. 동의 화면 → 셸 순서로 바뀐다 (단일 실행 서버는 한 번만 연다).</summary>
+    /// <summary>
+    /// 두 번째 실행이 보낸 요청을 처리하는 곳. 동의 화면 → 셸 순서로 바뀐다 (단일 실행 서버는 한 번만 연다).
+    /// UI 스레드에서만 읽고 바꾼다: 요청은 <see cref="RouteInstance"/>가 UI 큐에 넣은 뒤 <b>실행할 때</b> 이 값을 고른다.
+    /// 동의 → 셸 전환(셸 만들기·처리기 교체·동의 창 닫기)은 UI 스레드의 한 동작이라, 요청은 그 앞(동의 화면) 아니면 뒤(셸)에서만 처리된다
+    /// (G4 M10 1라운드 b1: 받을 때 처리기를 고르면 전환 직전 큐에 넣은 작업이 닫힌 동의 창을 다뤘다).
+    /// </summary>
     private Func<string, Task<bool>> instanceHandler = _ => Task.FromResult(false);
+    private Microsoft.UI.Dispatching.DispatcherQueue? uiQueue;
+
+    /// <summary>단일 실행 서버(다른 스레드)에서 받은 요청을 UI 스레드로 넘기고, 그때의 처리기에 맡긴다. 큐에 넣지 못하면 false (closing).</summary>
+    private Task<bool> RouteInstance(string command)
+    {
+        var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (uiQueue is null || !uiQueue.TryEnqueue(async () =>
+        {
+            try { done.TrySetResult(await instanceHandler(command)); }
+            catch (Exception ex) { log?.Write("instanceCommandFailed", new { type = ex.GetType().Name }); done.TrySetResult(false); }
+        })) done.TrySetResult(false);
+        return done.Task;
+    }
 
     /// <summary>
     /// 시작 (M10 설계 A2 [2-1]): 동의 전에는 인수 읽기, 앱 기록, 단일 실행 소유권, 사용 조건 화면만 한다.
@@ -78,11 +96,12 @@ public partial class App : Application
             TestHolds.Configure(options);
         }
         SingleInstance? owner = null;
+        uiQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         if (!options.Showcase)
         {
             owner = ClaimInstance(options, log);
             if (owner is null) return;   // 요청을 넘기고 끝남 (Environment.Exit)
-            owner.Serve(command => instanceHandler(command));
+            owner.Serve(RouteInstance);
         }
         if (TermsConsent.IsAccepted(options.UserData))
         {
@@ -91,11 +110,12 @@ public partial class App : Application
         }
         var terms = new TermsWindow(options, log);
         window = terms;
-        instanceHandler = command => OnUi(terms, () =>
+        instanceHandler = command =>
         {
             if (command == "exit") { terms.CloseNow(); Quit(owner); }
             else terms.BringToFront();
-        });
+            return Task.FromResult(true);
+        };
         terms.Declined += () => { terms.CloseNow(); Quit(owner); };
         terms.Accepted += saved =>
         {
@@ -104,14 +124,6 @@ public partial class App : Application
             terms.CloseNow();
         };
         terms.Activate();
-    }
-
-    /// <summary>창의 UI 스레드에서 한다. 큐에 넣지 못하면 false (두 번째 실행에 closing으로 답한다).</summary>
-    private static Task<bool> OnUi(Window w, Action action)
-    {
-        var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!w.DispatcherQueue.TryEnqueue(() => { action(); done.TrySetResult(true); })) done.TrySetResult(false);
-        return done.Task;
     }
 
     /// <summary>동의하지 않음·동의 화면 중 종료 요청: 기록·설정을 만들지 않고 끝낸다 (종료 코드 0).</summary>
