@@ -150,12 +150,17 @@ public sealed class M9MatrixTests
         finally { AppDriver.DeleteUserData(userData); }
     }
 
-    /// <summary>아이콘: 실행 파일 옆 NetPulse.ico의 각 크기를 밝은·어두운 작업 표시줄 색 위에 그려 맥박 선의 대비를 잰다.</summary>
+    /// <summary>
+    /// 아이콘: 실행 파일에 아이콘이 들어 있는지 확인하고, 실행 파일에 넣는 원본 NetPulse.ico(시험 출력으로 복사)의 각 크기를
+    /// 밝은·어두운 작업 표시줄 색 위에 그려 맥박 선의 대비를 잰다. 배포본은 단일 파일이라 옆에 .ico가 없다(게이트 1회차).
+    /// </summary>
     [Fact]
     public void IconReadsOnLightAndDarkTaskbars()
     {
-        var ico = Path.Combine(Path.GetDirectoryName(AppDriver.Executable)!, "Assets", "NetPulse.ico");
-        Assert.True(File.Exists(ico), "아이콘 파일");
+        // 실행 파일 안의 아이콘 리소스 수 (없으면 0. ExtractAssociatedIcon은 없을 때도 기본 아이콘을 돌려줘 증거가 못 된다)
+        Assert.True(ExtractIconExW(AppDriver.Executable, -1, null, null, 0) > 0, "실행 파일에 아이콘 리소스가 없음");
+        var ico = Path.Combine(AppContext.BaseDirectory, "NetPulse.ico");
+        Assert.True(File.Exists(ico), "원본 아이콘 파일");
         var results = new List<object>();
         foreach (int size in new[] { 16, 20, 24, 32, 48 })
         {
@@ -184,6 +189,9 @@ public sealed class M9MatrixTests
         }
         Record("m9-icon", new { results });
     }
+
+    [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern uint ExtractIconExW(string file, int index, IntPtr[]? large, IntPtr[]? small, uint count);
 
     private static int DistinctColors(Bitmap b)
     {
