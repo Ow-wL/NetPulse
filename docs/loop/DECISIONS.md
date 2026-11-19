@@ -1587,3 +1587,22 @@ M9 병합(`3ed5671`) 뒤 M10 설계 전에 코드를 조사하고 사용자에�
 | 10 (낮음) Debug·Release 시험 설명 | 빌드·CI 시험은 Release라고 고침 |
 
 - Codex 원문 대조 의견: 적용되는 Microsoft 조건 전문을 동의 전에 보이고 명시 동의받는 방향은 타당하나, 원문 포함만으로 3(b)(ii) 충족을 확정할 수는 없다. `TERMS.txt` 문구는 G4에서 원문과 대조 검토받는다. 법률 판단은 사용자 몫이라고 보고한다.
+
+## 2026-11-20 · M10 구현 중 결정 (구현 1·2차, `54a2c73`·`f8db2c7`)
+
+| 주제 | 결정·사실 |
+| --- | --- |
+| 구성요소 빼기 (B3) | 메타패키지 대신 Base·Foundation·WinUI·InteractiveExperiences·DWrite·Runtime (한 변수 `WindowsAppSdkVersion` 2.6.5). 묶음 파일 66개가 빠지고 새로 생긴 파일 없음(ML 43 MB·AI 11 MB·Search 4 MB·Widgets 3 MB·System.Numerics.Tensors). exe 244,964,365 → 183,343,503 바이트 (고지 내장 포함). Base·Runtime은 묶음 파일을 내지 않지만 빌드 대상과 고지(NOTICE)를 준다 |
+| exe 하나 (B2) | 묶음 목록에 `NetPulse.pri`·`App.xaml`이 들어 있다 (M0 때의 복사 대상은 묶음 밖 사본이었다). 복사 대상 제거 뒤 배포 폴더는 exe 하나. 빈 추출 위치에서 측정 화면까지 정상(창만 캡처로 확인). 전체 UI 시험은 게이트에서 |
+| 고지 수집 | 출처 10개: .NET 런타임 팩, WebView2(BSD 스타일), Windows SDK 투영(원문은 패키지에 없어 `aka.ms/WinSDKLicenseURL`이 가리키는 문서를 글로 바꿔 `build/notices/`에 커밋, EULAID WIN10SDK.RTM.AUG_2018, C#/WinRT는 MIT), WinAppSDK 구성요소 4개, WinAppSDK 구성요소 전체 고지(Base의 NOTICE.txt), Pretendard, EventLog. 같은 원문은 한 번만 싣는다. `Legal/` 글 파일이 콘텐츠로도 묶여 출처 없음으로 걸려 콘텐츠에서 뺐다(내장 리소스만) |
+| Windows SDK 조건 | 재배포 요건에 "프로그램에 유효한 저작권 표시"가 있다: exe 파일 속성 `Copyright (c) 2026 Ow-wL`과 정보 카드에 넣었다 |
+| 공개 전 검사 | 고지 원문의 오픈 소스 기여자 이메일(56건)은 라이선스상 지울 수 없다. `tools/loop/privacy-scan.ps1`이 `src/NetPulse.App/Legal/THIRD-PARTY-NOTICES.txt`와 `build/notices/`에서만 '이메일 주소' 규칙을 건너뛰고, 대신 git 사용자 이메일을 모든 파일에서 찾는다. 자체 시험: 다른 파일의 일반 이메일과 예외 파일 안의 git 이메일을 모두 잡았다 |
+| 동의 기록 | `terms.json` (설계 3판). 동의 저장 실패 홈 띠는 닫기 단추 없이 그 실행 내내 보인다 (설계의 "닫을 수 있음"에서 바꿈: 띠 부품에 닫기가 없고 한 실행 동안의 안내라 남겨 둔다) |
+| 동의 전 경계 검사 | 설계는 G2(가짜 세계로 시작 조립)였지만 앱 조립(`App.Launch`)은 WinUI 밖에서 시험할 수 없어 G3으로 한다: 동의 화면에서 앱 기록에 startup·settings·records·detection이 없고 사용자 폴더에 설정·구성·기록·진단 폴더가 없음 (`M10TermsTests.AssertNothingStarted`) |
+| 잘못된 인수 | 인수 읽기를 시작 앞으로 빼서 잘못된 인수(시험 주입 조건 포함)는 아무것도 만들지 않고 종료 코드 64 (전에는 처리되지 않은 예외로 끝났다) |
+| 메모 멈춤 | `--memo-hold n`만 (설계의 `:fail`은 쓸 시험이 없어 뺐다) |
+| 고지 펼침 시간 | 원문 글 상자가 처음 배치될 때까지(Loaded)의 시간을 기록하고 bench(`bench-legal`)로 남긴다. 기준은 실제 값을 본 뒤 정한다 (UI 시험 미실행) |
+| 옛·새 버전 기록 | 리포트의 앱 버전 줄에 `0.5.0.0`·`1.0.0` 시험을 더했다. 비교·읽기는 버전을 쓰지 않는다 (설계 1라운드 Codex 확인) |
+| 배포 빌드 결과 (작업 트리, 증거 아님) | `release/`: zip 69,144,709 B, exe 183,343,503 B, 결정적 zip 두 번 같음, 이진 검사 0건(검사기 자체 시험 통과), 고지 일치, 묶음 입력 459개 |
+
+- UI 시험: 디버그 빌드로 M10 동의 시험을 돌리던 중 사용자 요청("컴터 써야해서 ui 테스트 이따가")으로 멈췄다. 멈추기 전 `FullTermsAndLicensesCanBeReadBeforeConsent` 1건 실패(Assert.True, 원인 미확인). 나머지 M10·D3 UI 시험은 아직 돌리지 않았다.
