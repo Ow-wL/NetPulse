@@ -57,6 +57,9 @@ public sealed class LegalView : Grid
 
     public event Action? Changed;
 
+    /// <summary>펼친 원문이 처음 배치될 때까지 걸린 시간 (항목 번호, ms) — bench (M10 설계 5절).</summary>
+    public event Action<int, double>? Opened;
+
     /// <summary>첫 항목 단추 (초점 보낼 곳).</summary>
     public Control? FirstFocus => rows.Count > 0 ? rows[0].Row : null;
 
@@ -75,6 +78,7 @@ public sealed class LegalView : Grid
         Expanded = -1;
         if (open)
         {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
             var text = new TextBox
             {
                 Text = Items[index].Text,
@@ -90,6 +94,7 @@ public sealed class LegalView : Grid
             ScrollViewer.SetVerticalScrollBarVisibility(text, ScrollBarVisibility.Auto);
             AutomationProperties.SetAutomationId(text, $"{prefix}.text.{index}");
             AutomationProperties.SetName(text, Items[index].Name + " 원문");
+            text.Loaded += (_, _) => Opened?.Invoke(index, watch.Elapsed.TotalMilliseconds);
             rows[index].Holder.Child = text;
             rows[index].Holder.Visibility = Visibility.Visible;
             AutomationProperties.SetItemStatus(rows[index].Row, "펼침");

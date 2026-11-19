@@ -67,3 +67,175 @@ function Write-BenchSummary($Bench, [string] $Path) {
     $lines += "- 남은 것: 찍은 화면 $($l.snapshotLayers), 반복 모션 $($l.repeatsAtStart)→$($l.repeatsAtEnd), 모드 구독자 $($l.subscribersAtStart)→$($l.subscribersAtEnd)"
     $lines | Set-Content $Path -Encoding UTF8
 }
+
+# ================= 배포 묶기·검사 (M10 설계 B1·B4) =================
+
+$script:ReleaseZipEntries = @('NetPulse.exe', 'LICENSE.txt', 'TERMS.txt', 'THIRD-PARTY-NOTICES.txt', '읽어보기.txt')
+
+function Get-ReleaseVersion([string] $Root) {
+    <# 버전의 유일한 출처: Directory.Build.props의 Version (MSBuild가 읽은 값) #>
+    $v = (& dotnet msbuild (Join-Path $Root 'src/NetPulse.App/NetPulse.App.csproj') -getProperty:Version -p:Configuration=Release -nologo).Trim()
+    if ($LASTEXITCODE -ne 0 -or $v -notmatch '^\d+\.\d+\.\d+$') { throw "버전을 읽지 못했습니다: $v" }
+    return $v
+}
+
+function Get-ReleaseNames([string] $Version) {
+    [ordered]@{ zip = "NetPulse-$Version-win-x64.zip"; exe = "NetPulse-$Version-win-x64.exe"; sums = 'SHA256SUMS.txt'; info = 'release.json' }
+}
+
+function New-DeterministicZip([string] $Path, [object[]] $Entries, [DateTimeOffset] $Stamp) {
+    <#
+      같은 입력이면 같은 zip (B1 [1-12]): 항목 순서는 주어진 순서, 시각은 Stamp(UTC)를 ZIP 2초 정밀도로 내림,
+      압축 Optimal, 외부 속성 0, 주석 없음. Entries: @{ Name; Source }.
+    #>
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+    $utc = $Stamp.ToUniversalTime()
+    $time = New-Object DateTimeOffset ($utc.Year, $utc.Month, $utc.Day, $utc.Hour, $utc.Minute, ($utc.Second - ($utc.Second % 2)), [TimeSpan]::Zero)
+    if (Test-Path $Path) { Remove-Item $Path }
+    $fs = [IO.File]::Open($Path, [IO.FileMode]::CreateNew)
+    try {
+        $zip = New-Object IO.Compression.ZipArchive($fs, [IO.Compression.ZipArchiveMode]::Create, $false, [Text.Encoding]::UTF8)
+        try {
+            foreach ($e in $Entries) {
+                $entry = $zip.CreateEntry($e.Name, [IO.Compression.CompressionLevel]::Optimal)
+                $entry.LastWriteTime = $time
+                $entry.ExternalAttributes = 0
+                $out = $entry.Open()
+                try { $in = [IO.File]::OpenRead($e.Source); try { $in.CopyTo($out) } finally { $in.Dispose() } } finally { $out.Dispose() }
+            }
+        } finally { $zip.Dispose() }
+    } finally { $fs.Dispose() }
+}
+
+function Get-ZipEntryHashes([string] $Path) {
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+    $zip = [IO.Compression.ZipFile]::OpenRead($Path)
+    try {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        @($zip.Entries | ForEach-Object {
+            $s = $_.Open()
+            try { $h = [BitConverter]::ToString($sha.ComputeHash($s)).Replace('-', '') } finally { $s.Dispose() }
+            [ordered]@{ name = $_.FullName; size = $_.Length; sha256 = $h }
+        })
+    } finally { $zip.Dispose() }
+}
+
+function Get-BannedValues {
+    <#
+      이 PC(또는 CI 실행기)의 식별 값 (B4): 사용자 이름, 컴퓨터 이름, 사용자 폴더, 저장소 절대 경로, NuGet 캐시, 임시 폴더.
+      값 자체는 산출물·로그에 쓰지 않는다 (종류만).
+    #>
+    $sep = [string][char]92
+    $list = New-Object System.Collections.Generic.List[object]
+    $add = { param($kind, $value)
+        if (-not $value -or $value.Length -lt 4) { return }
+        $v = $value.TrimEnd($sep, '/')
+        $list.Add(@{ Kind = $kind; Value = $v })
+        if ($v.Contains($sep)) { $list.Add(@{ Kind = $kind; Value = $v.Replace($sep, '/') }) }
+    }
+    & $add 'user' $env:USERNAME
+    & $add 'computer' $env:COMPUTERNAME
+    & $add 'profile' $env:USERPROFILE
+    & $add 'repo' ((Get-Location).Path)
+    & $add 'temp' ([IO.Path]::GetTempPath())
+    $nuget = $env:NUGET_PACKAGES
+    if (-not $nuget) { $nuget = (((& dotnet nuget locals global-packages --list) | Select-Object -First 1) -replace '^\s*global-packages:\s*', '').Trim() }
+    & $add 'nuget' $nuget
+    return $list
+}
+
+function Find-BannedInBytes([byte[]] $Bytes, [object[]] $Banned) {
+    <# 바이트를 Latin-1 글로 보고 UTF-8·UTF-16LE 표기를 대소문자 무시로 찾는다. 찾은 종류 목록 #>
+    $latin = [Text.Encoding]::GetEncoding(28591)
+    $hay = $latin.GetString($Bytes)
+    $found = New-Object System.Collections.Generic.List[string]
+    foreach ($b in $Banned) {
+        foreach ($enc in @([Text.Encoding]::UTF8, [Text.Encoding]::Unicode)) {
+            $needle = $latin.GetString($enc.GetBytes($b.Value))
+            if ($hay.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $found.Add("$($b.Kind)/$($enc.WebName)") }
+        }
+    }
+    return @($found | Sort-Object -Unique)
+}
+
+function Test-BannedScanner([object[]] $Banned) {
+    <# 검사기 자체 시험 (B4): 표식 값을 UTF-8·UTF-16LE로 넣은 바이트와 zip 항목에서 모두 찾아야 한다 #>
+    $marker = @(@{ Kind = 'marker'; Value = 'C:/np-marker-' + [guid]::NewGuid().ToString('N').Substring(0, 8) })
+    foreach ($enc in @([Text.Encoding]::UTF8, [Text.Encoding]::Unicode)) {
+        $bytes = [byte[]](@(0, 1, 2) + $enc.GetBytes('xx' + $marker[0].Value.ToUpperInvariant() + 'yy') + @(3, 4))
+        if ((Find-BannedInBytes $bytes $marker).Count -eq 0) { throw "이진 검사기 자체 시험 실패: $($enc.WebName) 표식을 찾지 못했습니다." }
+    }
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('np-scan-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    New-Item -ItemType Directory $tmp | Out-Null
+    try {
+        $src = Join-Path $tmp 'a.txt'
+        [IO.File]::WriteAllText($src, 'zz ' + $marker[0].Value, (New-Object Text.UTF8Encoding($false)))
+        $zipPath = Join-Path $tmp 'a.zip'
+        New-DeterministicZip $zipPath @(@{ Name = 'a.txt'; Source = $src }) ([DateTimeOffset]::new(2000, 1, 1, 0, 0, 0, [TimeSpan]::Zero))
+        if ((Find-BannedInZip $zipPath $marker).Count -eq 0) { throw '이진 검사기 자체 시험 실패: zip 항목 안 표식을 찾지 못했습니다.' }
+    } finally { Remove-Item -Recurse -Force $tmp }
+}
+
+function Find-BannedInZip([string] $Path, [object[]] $Banned) {
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+    $zip = [IO.Compression.ZipFile]::OpenRead($Path)
+    $found = New-Object System.Collections.Generic.List[string]
+    try {
+        foreach ($e in $zip.Entries) {
+            $ms = New-Object IO.MemoryStream
+            $s = $e.Open(); try { $s.CopyTo($ms) } finally { $s.Dispose() }
+            foreach ($k in (Find-BannedInBytes $ms.ToArray() $Banned)) { $found.Add("$($e.FullName):$k") }
+        }
+    } finally { $zip.Dispose() }
+    return @($found)
+}
+
+function Test-OwnAssembliesHaveNoDebugInfo([string[]] $Paths) {
+    <#
+      자체 빌드 어셈블리(NetPulse*.dll)에 디버그 정보가 없는지 (B4 [2-3], DebugType=none): CodeView(RSDS)·내장 PDB(MPDB) 표식이 없어야 한다.
+      제3자 어셈블리의 CodeView 경로는 허용하고 금지 값 검사만 한다.
+    #>
+    $latin = [Text.Encoding]::GetEncoding(28591)
+    foreach ($p in $Paths) {
+        $hay = $latin.GetString([IO.File]::ReadAllBytes($p))
+        if ($hay.Contains('RSDS') -or $hay.Contains('MPDB')) { throw "자체 어셈블리에 디버그 정보가 있습니다: $([IO.Path]::GetFileName($p))" }
+    }
+}
+
+function Test-Release([string] $Artifacts, [string] $Commit) {
+    <#
+      배포 묶음 검사 (B1 [1-4][2-8]). 빌드와 마감이 함께 쓴다. 하나라도 어긋나면 예외.
+      manifest의 app 해시 재계산, release.json의 커밋·버전·manifest 해시, release 파일 목록(정확히 4개)·크기·해시,
+      SHA256SUMS, zip 항목 목록·해시, zip 안 exe = 따로 낸 exe = app/NetPulse.exe.
+    #>
+    $manifestPath = Join-Path $Artifacts 'manifest.json'
+    $manifest = Get-Content $manifestPath -Encoding UTF8 -Raw | ConvertFrom-Json
+    $actual = @(Get-FileManifest (Join-Path $Artifacts 'app'))
+    $expected = @($manifest.files)
+    if ($actual.Count -ne 1 -or $actual[0].path -ne 'NetPulse.exe') { throw '배포 폴더(app)는 NetPulse.exe 하나여야 합니다.' }
+    if ($expected.Count -ne 1 -or $expected[0].sha256 -ne $actual[0].sha256) { throw '배포 exe가 manifest와 다릅니다.' }
+    $releaseDir = Join-Path $Artifacts 'release'
+    $info = Get-Content (Join-Path $releaseDir 'release.json') -Encoding UTF8 -Raw | ConvertFrom-Json
+    if ($info.sourceCommit -ne $Commit) { throw "release.json의 커밋이 다릅니다: $($info.sourceCommit)" }
+    if ($info.manifestSha256 -ne (Get-Sha256Text $manifestPath)) { throw 'release.json의 manifest 해시가 실제 manifest와 다릅니다.' }
+    $names = Get-ReleaseNames $info.version
+    $files = @(Get-ChildItem $releaseDir -File | Sort-Object Name | ForEach-Object Name)
+    $want = @($names.zip, $names.exe, $names.sums, $names.info | Sort-Object)
+    if (($files -join '|') -ne ($want -join '|')) { throw "release 파일 목록이 다릅니다: $($files -join ', ')" }
+    foreach ($f in $info.files) {
+        $p = Join-Path $releaseDir $f.name
+        if ((Get-Item $p).Length -ne $f.size -or (Get-Sha256Text $p) -ne $f.sha256) { throw "release 파일이 기록과 다릅니다: $($f.name)" }
+    }
+    $sums = @(Get-Content (Join-Path $releaseDir $names.sums) -Encoding UTF8 | Where-Object { $_.Trim() })
+    $wantSums = @($names.zip, $names.exe | ForEach-Object { "$((Get-Sha256Text (Join-Path $releaseDir $_)).ToLowerInvariant())  $_" })
+    if (($sums -join '|') -ne ($wantSums -join '|')) { throw 'SHA256SUMS.txt가 파일과 맞지 않습니다.' }
+    $entries = @(Get-ZipEntryHashes (Join-Path $releaseDir $names.zip))
+    if ((($entries | ForEach-Object { $_.name }) -join '|') -ne ($script:ReleaseZipEntries -join '|')) { throw "zip 항목이 다릅니다: $(($entries | ForEach-Object { $_.name }) -join ', ')" }
+    for ($i = 0; $i -lt $entries.Count; $i++) {
+        if ($entries[$i].sha256 -ne $info.zipEntries[$i].sha256) { throw "zip 항목 해시가 기록과 다릅니다: $($entries[$i].name)" }
+    }
+    $exeHash = (Get-Sha256Text (Join-Path $releaseDir $names.exe))
+    if ($entries[0].sha256 -ne $exeHash -or $exeHash -ne $actual[0].sha256) { throw 'zip 안 exe, 따로 낸 exe, app/NetPulse.exe가 같지 않습니다.' }
+    if ($info.version -notmatch '^\d+\.\d+\.\d+$') { throw "release.json의 버전이 이상합니다: $($info.version)" }
+    return $info
+}

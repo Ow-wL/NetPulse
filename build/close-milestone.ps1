@@ -101,6 +101,9 @@ try {
     if (-not $verdict) { throw 'G4 답변에 판정 줄이 없습니다 (미완료).' }
     if ($verdict -notmatch $script:ApprovePattern) { throw "G4가 승인하지 않았습니다: $($verdict.Trim())" }
     $gate.g4 = [ordered]@{ request = $req.File.Name; round = $req.Round; verdict = $verdict.Trim() }
+    # 배포 파일 (M10 설계 B1 [1-4]): 빌드와 같은 검사 함수로 다시 계산한다
+    $release = Test-Release $artifacts $X
+    $gate.release = [ordered]@{ version = $release.version; files = @($release.files | ForEach-Object { [ordered]@{ name = $_.name; sha256 = $_.sha256 } }) }
     Complete-Step 'gate' $gate
 
     # ---- 2. 조상 확인 ----

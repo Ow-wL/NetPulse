@@ -22,7 +22,7 @@ public sealed class AppDriver : IDisposable
     private readonly bool ownsUserData;
     private readonly DateTime startedUtc;
     private bool closed;
-    private readonly IntPtr windowHandle;
+    private IntPtr windowHandle;
 
     private AppDriver(Process process, AutomationElement window, string userData, bool ownsUserData, DateTime startedUtc)
     {
@@ -36,7 +36,21 @@ public sealed class AppDriver : IDisposable
 
     public int ProcessId => process.Id;
 
-    public AutomationElement Window { get; }
+    public AutomationElement Window { get; private set; }
+
+    /// <summary>
+    /// 사용 조건 동의 뒤 셸 창으로 바뀐다 (M10 A2: 동의 창이 닫히고 셸 창이 뜬다). 이 프로세스의 다른 창이 나타날 때까지 기다려 바꿔 든다.
+    /// </summary>
+    public void FollowNextWindow()
+    {
+        var old = windowHandle;
+        var condition = new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty, process.Id), new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window));
+        var next = WaitFor(() => AutomationElement.RootElement.FindAll(TreeScope.Children, condition).Cast<AutomationElement>()
+            .FirstOrDefault(w => { try { return new IntPtr(w.Current.NativeWindowHandle) != old && w.Current.AutomationId != "terms.root"; } catch (ElementNotAvailableException) { return false; } }),
+            w => w is not null, "동의 뒤 셸 창")!;
+        Window = next;
+        windowHandle = new IntPtr(next.Current.NativeWindowHandle);
+    }
     public string UserData { get; }
 
     public static string Executable =>

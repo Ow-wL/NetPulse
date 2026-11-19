@@ -86,8 +86,13 @@ public sealed class TermsWindow : Window
         AutomationProperties.SetAutomationId(scroll, "terms.scroll");
         diag = new TextBlock { Opacity = 0, IsHitTestVisible = false, Width = 0, Height = 0, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
         AutomationProperties.SetAutomationId(diag, "diag.state");
+        // 시험 전용: 누르면 이 화면의 배치 검사를 기록에 남긴다 (셸과 같은 진단 단추, G5 장면)
+        var layoutProbe = new Button { Opacity = 0, Width = 0, Height = 0, IsTabStop = false, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
+        AutomationProperties.SetAutomationId(layoutProbe, "diag.layout");
+        layoutProbe.Click += (_, _) => log.Write("selftest", new { kind = "layout", screen = "terms", report = LayoutProbe.Report(root, diag) });
         root.Children.Add(scroll);
         root.Children.Add(diag);
+        root.Children.Add(layoutProbe);
 
         Content = ui.Theme.Host(ScaleHost(options));
         ui.Root = root;

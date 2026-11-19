@@ -1,0 +1,11 @@
+# M10 캡처 장면 목록 (설계 4절 상태표, 6절 G5). 시험(M10MatrixTests)과 build/ui-test.ps1이 같은 파일을 읽는다. 형식은 m5-scenes.txt와 같다.
+# 준비 추가: noconsent(동의 기록 없음 → 사용 조건 화면), termsblocked(동의를 쓰지 못함). 동작 추가: follow (동의 뒤 셸 창으로)
+terms|noconsent|--demo steady|wait:screen=terms
+terms-full|noconsent|--demo steady|wait:screen=terms;invoke:terms.full;scroll:terms.scroll=40
+terms-failed|noconsent|--demo steady --notices-fail|wait:screen=terms
+home-terms-not-persisted|termsblocked|--demo steady --screen home|wait:screen=terms;invoke:terms.accept;follow;wait:screen=home
+settings-about|profile|--demo steady --screen settings|wait:screen=settings;scroll:settings.scroll=100
+settings-about-unknown|profile|--demo steady --screen settings --fake-version 1.0.0|wait:screen=settings;scroll:settings.scroll=100
+about-legal|profile|--demo steady --screen settings|wait:screen=settings;invoke:settings.about.legal;wait:dialog
+about-legal-expanded|profile|--demo steady --screen settings|wait:screen=settings;invoke:settings.about.legal;wait:dialog;invoke:legal.item.2
+about-legal-failed|profile|--demo steady --screen settings --notices-fail|wait:screen=settings;invoke:settings.about.legal;wait:dialog

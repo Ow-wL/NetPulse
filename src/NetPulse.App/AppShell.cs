@@ -42,6 +42,7 @@ public sealed partial class AppShell : Window
     private readonly DialogHost dialog;
     private readonly TextBlock diag;
     private readonly Button layoutProbe;
+    private readonly Button? holdRelease;
     private readonly RowButton statusPill;
     private readonly TextBlock statusTop, statusBottom;
     private readonly Microsoft.UI.Xaml.Shapes.Ellipse statusDot;
@@ -106,6 +107,13 @@ public sealed partial class AppShell : Window
         layoutProbe = new Button { Opacity = 0, Width = 0, Height = 0, IsTabStop = false, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
         AutomationProperties.SetAutomationId(layoutProbe, "diag.layout");
         layoutProbe.Click += (_, _) => log.Write("selftest", new { kind = "layout", screen = screens.CurrentId, report = LayoutProbe.Report(root, diag, [toasts]) });
+        // 시험 전용 (M10 D3): 멈춤 지점을 모두 푼다 (시험 주입이 켜진 실행에서만 만든다)
+        if (TestHolds.Active)
+        {
+            holdRelease = new Button { Opacity = 0, Width = 0, Height = 0, IsTabStop = false, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
+            AutomationProperties.SetAutomationId(holdRelease, "diag.release");
+            holdRelease.Click += (_, _) => TestHolds.ReleaseAll();
+        }
 
         var context = new ScreenContext
         {
@@ -141,6 +149,7 @@ public sealed partial class AppShell : Window
         ui.Theme.TransitionChanged += QueueDiag;
         dialog.Closed += _ => QueueDiag();
         if (options.MoveFail is not null) NetPulse.App.Resident.FaultMoveOps.HoldEnteredChanged += () => DispatcherQueue.TryEnqueue(QueueDiag);
+        if (TestHolds.Active) TestHolds.Changed += () => DispatcherQueue.TryEnqueue(QueueDiag);
         root.GotFocus += (_, _) => QueueDiag();
         AddAccelerators();
 
@@ -219,6 +228,7 @@ public sealed partial class AppShell : Window
         root.Children.Add(dialog);
         root.Children.Add(diag);
         root.Children.Add(layoutProbe);
+        if (holdRelease is not null) root.Children.Add(holdRelease);
     }
 
     /// <summary>150% 상당 배치 (M2 설계 5.8와 같음).</summary>
@@ -368,6 +378,7 @@ public sealed partial class AppShell : Window
     {
         if (closing) return;
         closing = true;
+        TestHolds.ReleaseAll();    // 시험 전용 멈춤이 있으면 풀어 작업이 끝나게 한다 (M10 D3)
         instance?.MarkClosing();   // 두 번째 실행의 요청에는 closing으로 답한다 (A5)
         host.BlockStarts();
         runTimer?.Stop();

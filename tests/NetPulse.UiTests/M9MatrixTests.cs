@@ -33,7 +33,7 @@ public sealed class M9MatrixTests
     }
 
     /// <summary>공개 전 검사와 같은 뜻: 데모 캡처의 글에 이 PC의 사용자 이름·호스트 이름·드라이브 절대 경로·UNC가 없어야 한다 (B2 [1-13]).</summary>
-    private static IReadOnlyList<string> PrivateText(AutomationElement window)
+    internal static IReadOnlyList<string> PrivateText(AutomationElement window)
     {
         var problems = new List<string>();
         var user = Environment.UserName;

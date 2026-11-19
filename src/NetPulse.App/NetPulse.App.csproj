@@ -35,6 +35,8 @@
     <Content Include="..\..\assets\fonts\*.otf;..\..\assets\fonts\OFL-Pretendard.txt" Link="Fonts\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\NetPulse.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- 사용 조건·라이선스·제3자 고지 (M10 설계 A2·A3): 앱 안에 내장해 exe 하나로도 보인다. LICENSE는 저장소 루트 파일 하나만 둔다 -->
+    <None Remove="Legal/**" />
+    <Content Remove="Legal/**" />
     <EmbeddedResource Include="Legal\TERMS.txt" LogicalName="NetPulse.Legal.TERMS.txt" />
     <EmbeddedResource Include="Legal\THIRD-PARTY-NOTICES.txt" LogicalName="NetPulse.Legal.THIRD-PARTY-NOTICES.txt" />
     <EmbeddedResource Include="..\..\LICENSE" Link="Legal\LICENSE.txt" LogicalName="NetPulse.Legal.LICENSE.txt" />

@@ -139,7 +139,16 @@ public sealed partial class AppShell
         AppWindow.Hide();
         // 숨긴 뒤 남은 프레임 구독 수 (화면·테마·프레임 측정기, 0이어야 한다: 설계 A1, G4 M9 1라운드 b2)
         log.Write("resident", new { what = "hidden", host = host.Snapshot.State.ToString(), frameHooks = FrameHooks() });
+        // 실측 시험 전용 (M10 D4): 처음 숨길 때 시험 풍선을 정확히 한 번. 호출 결과만 남긴다 (실제로 보였는지는 사용자가 확인)
+        if (options.LiveBalloonTest && !liveBalloonSent)
+        {
+            liveBalloonSent = true;
+            bool called = tray?.ShowBalloon("NetPulse 시험 풍선", "실측 시험입니다. 이 풍선이 보이면 확인해 주세요.", false) == true;
+            log.Write("liveBalloon", new { called });
+        }
     }
+
+    private bool liveBalloonSent;
 
     /// <summary>다시 열기. 화면은 그대로(강제 이동 없음), 풍선 클릭만 측정 화면으로.</summary>
     private void Reopen(bool toMeasure, string by)

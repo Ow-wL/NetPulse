@@ -1,39 +1,76 @@
 # NetPulse
 
-> **재작성 중입니다.** NetPulse를 WinUI 3로 처음부터 다시 만들고 있습니다. 진행 계획은 [`docs/loop-plan.md`](docs/loop-plan.md), 현재 상태는 [`docs/loop/STATE.md`](docs/loop/STATE.md)에 있습니다.
-> 아래 설명은 기존 앱입니다. 기존 앱 소스는 `legacy/`로 옮겼고 `legacy\Build.ps1`로 빌드합니다.
+NetPulse는 Windows 11에서 **간헐적인 네트워크 끊김을 기록하고, 어디서 끊겼는지 근거를 모아 보여 주는** 진단 앱입니다.
+측정을 켜 두면 공유기와 외부 대상까지 여러 곳을 함께 재고, 끊김이 생기면 그 순간의 근거(응답, 경로, 링크 상태)를 기록합니다.
+통신사에 보낼 리포트도 만들 수 있습니다.
 
-NetPulse는 Windows 11에서 간헐적인 네트워크 끊김을 기록하고 비교하는 진단 도구입니다. C#과 WPF로 작성했습니다.
+![측정 중인 홈 화면](docs/images/home.png)
 
 ## 주요 기능
 
-- **빠른 진단**은 현재 Windows 어댑터, IPv4 기본 게이트웨이, 외부 TCP, Windows DNS, HTTPS, 네트워크 로그인 응답 및 최근 Intel 유선 링크 이벤트를 단계별로 확인합니다.
-- 특정 사이트는 도메인을 입력해 DNS와 HTTPS를 따로 확인할 수 있습니다. 네트워크·Wi‑Fi·프록시 설정을 앱에서 열 수 있고, DNS 캐시를 비우면 이전 검사와 비교해 다시 확인할 수 있습니다.
+- **측정**: 공유기·외부 대상 여러 곳에 1초마다 Ping(또는 TCP 포트)을 보내 손실과 지연을 겹친 타임라인으로 보여 줍니다. 처음 실행하면 연결을 확인해 측정 대상을 제안합니다.
+- **끊김 판정**: 끊김마다 어느 구간(내 PC·공유기·통신사 쪽 등)을 먼저 확인할지 관측한 근거와 함께 보여 줍니다. 단정하지 않고 근거 상태를 함께 적습니다.
+- **증상 표시와 메모**: 끊김을 느낀 순간을 버튼 하나로 표시하고 메모를 남깁니다.
+- **빠른 진단**: 어댑터, 게이트웨이, 외부 연결, DNS, HTTPS, 네트워크 로그인, 링크 상태를 단계별로 확인합니다. 사이트 하나의 DNS·HTTPS도 따로 확인할 수 있습니다.
+- **기록**: 지난 측정을 다시 열고, 끊김 목록·통계를 보고, 두 측정을 비교합니다.
+- **리포트**: 측정 하나를 HTML 파일 하나로 내보냅니다. 기본으로 주소 같은 식별 정보를 가립니다.
+- **상주**: 측정 중에 창을 닫으면 알림 영역(트레이)에서 측정을 계속하고, 끊기면 풍선 알림으로 알려 줍니다.
+- **보기**: 다크·라이트 테마, 고대비·효과 줄이기·움직임 줄이기, 키보드 조작, 배율 150%를 지원합니다.
 
-- **Mesh 경유 / 직접 Wi‑Fi** 모드에서 1초마다 내부·외부 IPv4 대상에 병렬 Ping을 보냅니다. 기본 측정 시간은 10분이며 1~720분으로 설정할 수 있습니다.
-- 측정이 끝나면 원본 Ping, 대상별 요약, 연속 손실 구간, 진단 보조 기록을 CSV로 저장합니다.
-- **증상 표시**를 누르면 사용자가 끊김을 느낀 시각을 기록합니다.
-- **끊김 분석**에서 같은 회차의 응답과 당시 Windows 경로, 전후 3초의 Intel `e2fexpress` 시스템 이벤트 27·32를 비교합니다.
-- **결과 비교**에서는 두 모드의 손실률과 지연을 나란히 볼 수 있습니다.
+| 측정 | 진단 |
+| --- | --- |
+| ![측정 화면의 타임라인](docs/images/measure.png) | ![빠른 진단 결과](docs/images/diagnose.png) |
+| **기록** | **리포트** |
+| ![기록 상세](docs/images/records.png) | ![리포트 미리 보기](docs/images/report.png) |
 
-## 빌드와 실행
+화면 캡처는 모두 데모 모드(합성 데이터)에서 찍었습니다.
 
-Windows PowerShell에서 저장소를 받은 뒤 아래 명령을 실행합니다. Windows 11 기본 .NET Framework 컴파일러를 사용합니다.
+## 받기와 실행
+
+1. [Releases](https://github.com/Ow-wL/NetPulse/releases)에서 `NetPulse-<버전>-win-x64.zip`을 받아 압축을 풀거나, `NetPulse-<버전>-win-x64.exe` 하나만 받습니다.
+2. 설치하지 않습니다. 원하는 폴더에서 실행하면 됩니다.
+3. 처음 실행할 때 **사용 조건**에 동의해야 합니다 (아래 "라이선스").
+
+- 요구 사항: Windows 11 (x64). 다른 런타임을 따로 설치할 필요가 없습니다.
+- 코드 서명이 없어 Windows SmartScreen 경고가 나올 수 있습니다. [추가 정보] → [실행]으로 열 수 있습니다.
+- 받은 파일은 같은 Release의 `SHA256SUMS.txt`로 확인할 수 있습니다.
+
+## 개인정보
+
+- 기록과 설정은 이 PC에만 저장됩니다 (`%LOCALAPPDATA%\NetPulse`, 기록 위치는 설정에서 바꿀 수 있음).
+- 관리자 권한을 요청하지 않고 네트워크 설정을 바꾸지 않습니다. DNS 캐시 비우기는 확인한 뒤에만 합니다.
+- 리포트는 내보낼 때만 파일로 만들어지고, 기본으로 주소·어댑터 이름 같은 식별 정보를 가립니다.
+
+## 직접 빌드
+
+필요한 것: Windows 11, `global.json`에 적힌 .NET SDK.
 
 ```powershell
 git clone https://github.com/Ow-wL/NetPulse.git
 cd NetPulse
-.\legacy\Build.ps1
+./build/build.ps1
 ```
 
-생성된 `NetPulse.exe`를 실행합니다. 앱은 관리자 권한을 요청하지 않으며, DNS 캐시 비우기는 버튼을 누르고 확인한 경우에만 실행합니다. 측정 결과는 실행 파일 옆 `결과` 폴더에 저장됩니다.
+복원 → 빌드 → 로직·통합 시험 → 단일 파일 배포 → 고지·경로 검사 → 묶기 순서로 돌고, 결과는 `artifacts/<커밋 앞 10자리>/release/`에 생깁니다.
 
-## 측정 대상 설정
+| 파일 | 내용 |
+| --- | --- |
+| `NetPulse-<버전>-win-x64.zip` | `NetPulse.exe`, `LICENSE.txt`, `TERMS.txt`, `THIRD-PARTY-NOTICES.txt`, `읽어보기.txt` |
+| `NetPulse-<버전>-win-x64.exe` | zip 안과 같은 exe |
+| `SHA256SUMS.txt` | 두 파일의 SHA-256 |
+| `release.json` | 버전, 원본 커밋, 파일 해시 |
 
-이 버전의 IPv4 대상은 코드에 정의되어 있습니다. 다른 네트워크에서 사용할 때는 `legacy/Dashboard.cs`의 대상 주소와 `legacy/Analysis.cs`의 대응 주소를 함께 수정하고 다시 빌드하세요.
+## 개발
 
-모드 선택은 기록과 대상 선택에 적용됩니다. 실제 Ping은 Windows가 선택한 경로를 사용하므로 시작 전에 원하는 네트워크에 연결되어 있는지 확인하세요. 분석 화면의 구간 후보는 함께 관측된 증거를 바탕으로 우선 확인할 위치를 보여줍니다.
+- 구조: `src/NetPulse.Core`(측정·판정·기록), `src/NetPulse.Platform`(Windows 연동), `src/NetPulse.Design`(디자인 토큰·설정), `src/NetPulse.App`(WinUI 3 앱).
+- 로직 시험: `dotnet test --project tests/NetPulse.Core.Tests` (Design·Platform도 같은 방식). CI가 `build/build.ps1`을 돌립니다.
+- UI 시험: `./build/build.ps1 -Gate` 뒤 `./build/ui-test.ps1 -Artifacts artifacts/<sha10>` (PC 화면을 쓰므로 실행 중에는 PC를 쓰지 않습니다).
+- 데모 모드: `NetPulse.exe --demo steady` (합성 데이터로 실제 네트워크 없이 화면을 봅니다).
+- 개발 기록: [`docs/loop-plan.md`](docs/loop-plan.md), [`docs/loop/STATE.md`](docs/loop/STATE.md), [`docs/loop/DECISIONS.md`](docs/loop/DECISIONS.md).
 
-## 글꼴
+## 라이선스
 
-내장한 Pretendard 1.3.9의 라이선스는 [SIL Open Font License](assets/fonts/OFL-Pretendard.txt)에서 확인할 수 있습니다.
+- NetPulse의 코드와 문서는 [MIT 라이선스](LICENSE)입니다. Copyright (c) 2026 Ow-wL
+- 배포 파일에는 Microsoft Windows App SDK, .NET 런타임 같은 제3자 구성요소가 들어 있고, 각자의 조건이 적용됩니다: [제3자 고지](src/NetPulse.App/Legal/THIRD-PARTY-NOTICES.txt).
+- 그래서 앱을 쓰거나 다시 배포하려면 [사용 조건](src/NetPulse.App/Legal/TERMS.txt)에 동의해야 합니다. 다시 배포할 때는 사용 조건, LICENSE, 제3자 고지를 함께 전해야 합니다.
+- 내장한 Pretendard 1.3.9 글꼴은 [SIL Open Font License](assets/fonts/OFL-Pretendard.txt)입니다.

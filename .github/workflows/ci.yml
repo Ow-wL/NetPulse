@@ -30,3 +30,23 @@ jobs:
           Write-Host "head:     ${{ github.event.pull_request.head.sha || github.sha }}"
       - name: Build, test, publish (UI tests run locally as G3)
         run: ./build/build.ps1
+      # 깨끗한 실행기에서 같은 절차로 만든 배포 파일 (M10 설계 B5): build.ps1이 배포 검사·이진 검사를 통과한 경우에만 여기에 온다.
+      # 공개 저장소의 워크플로 산출물은 공개로 다룬다 (4.7): 허용 4개만 올린다 (TRX·로그·manifest 원본은 올리지 않음).
+      - name: Collect release files (allow list)
+        run: |
+          $dir = Get-ChildItem artifacts -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'release/release.json') } | Select-Object -First 1
+          if (-not $dir) { throw 'release 폴더가 없습니다.' }
+          $info = Get-Content (Join-Path $dir.FullName 'release/release.json') -Encoding UTF8 -Raw | ConvertFrom-Json
+          $allow = @("NetPulse-$($info.version)-win-x64.zip", "NetPulse-$($info.version)-win-x64.exe", 'SHA256SUMS.txt', 'release.json')
+          $have = @(Get-ChildItem (Join-Path $dir.FullName 'release') -File | ForEach-Object Name | Sort-Object)
+          if (($have -join '|') -ne (($allow | Sort-Object) -join '|')) { throw "release 파일이 허용 목록과 다릅니다: $($have -join ', ')" }
+          New-Item -ItemType Directory upload | Out-Null
+          foreach ($f in $allow) { Copy-Item (Join-Path $dir.FullName "release/$f") upload }
+          Write-Host "release: $($info.version) $($info.sourceCommit)"
+          Get-Content upload/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: netpulse-release-${{ github.event.pull_request.head.sha || github.sha }}
+          path: upload/
+          if-no-files-found: error
+          retention-days: 14

@@ -1,13 +1,14 @@
 ﻿<#
 .SYNOPSIS
-  NetPulse 빌드 절차 (M1 설계 4절). 복원 → 빌드 → 로직·통합 테스트 → 단일 파일 배포 → manifest.
+  NetPulse 빌드 절차 (M1 설계 4절, M10 설계 B). 복원 → 빌드 → 로직·통합 테스트 → 단일 파일 배포 → 고지·이진 검사 → manifest → 배포 묶기.
+  배포 파일(zip, exe, SHA256SUMS, release.json)을 만드는 문서화된 한 가지 절차다 (완성 정의 4).
 
 .PARAMETER Gate
   게이트 모드. 추적 파일에 커밋되지 않은 변경이 하나라도 있거나(docs/loop 포함) .gitignore 밖의 추적되지 않은 파일이 있으면 실패한다.
   게이트 증거(evidence: true)는 이 모드로만 만든다.
 
 .OUTPUTS
-  artifacts/<SHA 앞 10자리>/ 아래에 app/(배포 폴더), tests/(TRX), manifest.json.
+  artifacts/<SHA 앞 10자리>/ 아래에 app/(배포 exe 하나), tests/(TRX), manifest.json, release/(배포 파일 4개).
   시작할 때 같은 SHA의 이전 산출물을 지우고, 임시 폴더에 만든 뒤 모든 단계가 성공했을 때만 옮긴다.
 #>
 param([switch] $Gate)
@@ -59,13 +60,26 @@ try {
 
     # ---- 4. 단일 파일 배포 ----
     $app = Join-Path $work 'app'
+    $bundleList = Join-Path $root 'src/NetPulse.App/obj/Release/net10.0-windows10.0.22621.0/win-x64/bundle-inputs.tsv'
+    if (Test-Path $bundleList) { Remove-Item $bundleList }   # 이번 publish가 새로 쓴 목록만 쓴다
     $commands += Invoke-Step 'publish' 300 'dotnet' @('publish', 'src/NetPulse.App/NetPulse.App.csproj', '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
         '-p:EnableMsixTooling=true', '-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true', '-o', $app) $work
-    Get-ChildItem $app -Recurse -Filter *.pdb | Remove-Item
-    # 실행 파일 옆에 있어야 하는 파일. 글꼴·데모 시나리오는 실행 파일 안에 묶이고, 앱이 찾는지는 G3가 시작 기록으로 확인한다.
-    foreach ($required in 'NetPulse.exe', 'App.xbf', 'NetPulse.pri') {
-        if (-not (Test-Path (Join-Path $app $required))) { throw "배포 폴더에 $required 이(가) 없습니다." }
-    }
+    # 배포 폴더는 exe 하나 (M10 설계 B2): App.xbf·.pri·글꼴·데모 시나리오는 모두 exe 안에 묶인다
+    $appFiles = @(Get-ChildItem $app -Recurse -File | ForEach-Object Name)
+    if ($appFiles.Count -ne 1 -or $appFiles[0] -ne 'NetPulse.exe') { throw "배포 폴더는 NetPulse.exe 하나여야 합니다: $($appFiles -join ', ')" }
+    if (-not (Test-Path $bundleList)) { throw '묶음 파일 목록(bundle-inputs.tsv)이 만들어지지 않았습니다.' }
+
+    # ---- 4-1. 고지·디버그 정보·이진 검사 (M10 설계 B4, 고지 수집) ----
+    & (Join-Path $PSScriptRoot 'notices.ps1') -Check -BundleList $bundleList
+    if ($LASTEXITCODE -ne 0) { throw '제3자 고지가 묶음 목록과 맞지 않습니다.' }
+    $inputs = @(Get-Content $bundleList -Encoding UTF8 | Where-Object { $_.Trim() } | ForEach-Object { $c = $_.Split("`t"); @{ Rel = $c[0]; Full = $c[1] } })
+    Test-OwnAssembliesHaveNoDebugInfo @($inputs | Where-Object { $_.Rel -match '^NetPulse(\.(Core|Design|Platform))?\.dll$' } | ForEach-Object { $_.Full })
+    $banned = Get-BannedValues
+    Test-BannedScanner $banned
+    $scanHits = New-Object System.Collections.Generic.List[string]
+    foreach ($f in $inputs) { foreach ($k in (Find-BannedInBytes ([IO.File]::ReadAllBytes($f.Full)) $banned)) { $scanHits.Add("bundle:$k") } }
+    foreach ($k in (Find-BannedInBytes ([IO.File]::ReadAllBytes((Join-Path $app 'NetPulse.exe'))) $banned)) { $scanHits.Add("exe:$k") }
+    if ($scanHits.Count -gt 0) { throw "배포 파일에 이 PC의 경로·이름이 있습니다 ($($scanHits.Count)건, 종류: $(($scanHits | Sort-Object -Unique) -join ', '))" }
 
     # ---- 5. manifest ----
     $manifest = [ordered]@{
@@ -80,6 +94,53 @@ try {
         testFiles    = @(Get-ChildItem $testDir -Filter *.trx | ForEach-Object { [ordered]@{ path = "tests/$($_.Name)"; sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash } })
     }
     $manifest | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $work 'manifest.json') -Encoding UTF8
+
+    # ---- 6. 배포 묶기 (M10 설계 B1): zip, 같은 바이트의 exe, SHA256SUMS, release.json ----
+    $version = Get-ReleaseVersion $root
+    $names = Get-ReleaseNames $version
+    $releaseDir = Join-Path $work 'release'
+    New-Item -ItemType Directory -Force $releaseDir | Out-Null
+    $stage = Join-Path $work 'release-stage'
+    New-Item -ItemType Directory -Force $stage | Out-Null
+    $utf8 = New-Object Text.UTF8Encoding($false)
+    $readme = (Get-Content (Join-Path $PSScriptRoot 'release-readme.txt') -Encoding UTF8 -Raw).Replace('{version}', $version).Replace("`r`n", "`n").Replace("`n", "`r`n")
+    [IO.File]::WriteAllText((Join-Path $stage 'readme.txt'), $readme, $utf8)
+    $entries = @(
+        @{ Name = 'NetPulse.exe'; Source = (Join-Path $app 'NetPulse.exe') },
+        @{ Name = 'LICENSE.txt'; Source = (Join-Path $root 'LICENSE') },
+        @{ Name = 'TERMS.txt'; Source = (Join-Path $root 'src/NetPulse.App/Legal/TERMS.txt') },
+        @{ Name = 'THIRD-PARTY-NOTICES.txt'; Source = (Join-Path $root 'src/NetPulse.App/Legal/THIRD-PARTY-NOTICES.txt') },
+        @{ Name = '읽어보기.txt'; Source = (Join-Path $stage 'readme.txt') })
+    if ((($entries | ForEach-Object { $_.Name }) -join '|') -ne ($script:ReleaseZipEntries -join '|')) { throw 'zip 항목 목록이 정해진 순서와 다릅니다.' }
+    $stamp = [DateTimeOffset]::Parse((git show -s --format=%cI HEAD).Trim(), [Globalization.CultureInfo]::InvariantCulture)
+    $zipPath = Join-Path $releaseDir $names.zip
+    New-DeterministicZip $zipPath $entries $stamp
+    $again = Join-Path $stage 'again.zip'
+    New-DeterministicZip $again $entries $stamp
+    if ((Get-Sha256Text $zipPath) -ne (Get-Sha256Text $again)) { throw '같은 입력으로 만든 zip 두 개가 다릅니다 (결정적 zip).' }
+    Copy-Item (Join-Path $app 'NetPulse.exe') (Join-Path $releaseDir $names.exe)
+    $sums = @($names.zip, $names.exe | ForEach-Object { "$((Get-Sha256Text (Join-Path $releaseDir $_)).ToLowerInvariant())  $_" })
+    [IO.File]::WriteAllText((Join-Path $releaseDir $names.sums), (($sums -join "`n") + "`n"), $utf8)
+    foreach ($k in (Find-BannedInZip $zipPath $banned)) { $scanHits.Add("zip:$k") }
+    if ($scanHits.Count -gt 0) { throw "배포 zip에 이 PC의 경로·이름이 있습니다 ($($scanHits.Count)건)" }
+    $info = [ordered]@{
+        version        = $version
+        sourceCommit   = $sha
+        manifestSha256 = Get-Sha256Text (Join-Path $work 'manifest.json')
+        files          = @($names.zip, $names.exe, $names.sums | ForEach-Object { $p = Join-Path $releaseDir $_; [ordered]@{ name = $_; size = (Get-Item $p).Length; sha256 = Get-Sha256Text $p } })
+        zipEntries     = @(Get-ZipEntryHashes $zipPath)
+        exeSize        = (Get-Item (Join-Path $app 'NetPulse.exe')).Length
+        exeSizeBefore  = 244964365   # M9 배포 exe (메타패키지, M10 설계 B3 비교 기준)
+        bundleFiles    = $inputs.Count
+        scan           = [ordered]@{ checkedKinds = @($banned | ForEach-Object { $_.Kind } | Sort-Object -Unique); hits = 0; selfTest = 'passed' }
+        deterministicZip = $true
+    }
+    $infoText = $info | ConvertTo-Json -Depth 6
+    foreach ($k in (Find-BannedInBytes ($utf8.GetBytes($infoText + (($sums -join "`n")))) $banned)) { throw "release.json·SHA256SUMS 글에 이 PC의 값이 있습니다 ($k)" }
+    [IO.File]::WriteAllText((Join-Path $releaseDir $names.info), $infoText, $utf8)
+    Remove-Item -Recurse -Force $stage
+    $null = Test-Release $work $sha
+    Write-Host "배포 파일: release/$($names.zip), release/$($names.exe) (exe $([math]::Round($info.exeSize / 1MB, 1)) MB)"
 
     Move-Item $work $final
     Write-Host "빌드 성공: artifacts/$short (evidence: $($manifest.evidence))"

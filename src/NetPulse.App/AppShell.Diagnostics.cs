@@ -48,6 +48,7 @@ public sealed partial class AppShell
             analysis = s.AnalysisAt is { } a ? new { a.Seq, a.ElapsedMs, a.Rounds, a.Events, a.DurationMs, grade = s.Analysis?.Grade.Grade.ToString() } : null,
             finished = s.Finished is { } f ? new { f.Result.Id, end = f.Result.EndReason.ToString(), grade = f.Analysis?.Grade.Grade.ToString(), outages = f.Analysis?.Episodes.Count, f.Result.Unsaved } : null,
             startError = s.StartError,
+            holds = TestHolds.Active ? TestHolds.Diag() : null,   // 시험 전용 멈춤 (M10 D3)
             profile = s.Profile?.Name,
             loadStatus = host.LoadStatus.ToString(),
             recent = new { listed = recent.Listed, items = recent.Items.Select(i => new { i.Entry.Id, i.Analyzing, grade = i.Grade?.ToString(), i.Outages, i.Error, life = i.Entry.Lifecycle.ToString() }) },

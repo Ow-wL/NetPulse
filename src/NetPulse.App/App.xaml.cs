@@ -39,7 +39,16 @@ public partial class App : Application
         // 화면 앱: 전체(2세대) 수집이 프레임을 막지 않게 (M5 이월 2, M6 bench: 긴 측정의 잠정 분석이 2세대 수집을 일으켜
         // 화면 이동 프레임이 예산 가까이 튀었다). 메모리가 모자라면 런타임이 그래도 막는 수집을 한다
         System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.SustainedLowLatency;
-        try { Launch(); }
+        StartupOptions parsed;
+        try { parsed = StartupOptions.Parse(Environment.GetCommandLineArgs().Skip(1).ToArray()); }
+        catch (Exception ex) when (ex is ArgumentException or FormatException or OverflowException)
+        {
+            // 잘못된 인수 (시험 주입 조건 포함, M10 D3): 아무것도 만들지 않고 종료 코드 64로 끝낸다 (충돌 보고 없이)
+            File.WriteAllText(Path.Combine(Path.GetTempPath(), "netpulse-startup-error.log"), "arguments: " + ex.GetType().Name);
+            Environment.Exit(64);
+            return;
+        }
+        try { Launch(parsed); }
         catch (Exception ex)
         {
             // 기록을 만들기 전에 실패해도 원인을 남긴다 (임시 폴더, 예외 종류와 메시지만)
@@ -58,15 +67,15 @@ public partial class App : Application
     /// 설정·세계·기록 복구·도서관·측정 호스트·진단·트레이·셸은 동의 뒤(<see cref="LaunchAfterConsent"/>)에 만든다.
     /// 명령줄 기능 요청(<c>--start</c>, <c>--screen</c>, 기록 열기)은 그 뒤에서 한 번 처리된다.
     /// </summary>
-    private void Launch()
+    private void Launch(StartupOptions options)
     {
-        var options = StartupOptions.Parse(Environment.GetCommandLineArgs().Skip(1).ToArray());
         Directory.CreateDirectory(options.UserData);
         log = new AppLog(options.UserData);
         if (options.TestInjectionAllowed)
         {
             if (options.FakeVersion is { } fake) AppInfo.Override(fake);
             NetPulse.App.Legal.LegalTexts.FailForTest = options.NoticesFail;
+            TestHolds.Configure(options);
         }
         SingleInstance? owner = null;
         if (!options.Showcase)

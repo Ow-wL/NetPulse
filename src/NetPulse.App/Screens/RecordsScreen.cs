@@ -225,9 +225,13 @@ public sealed class RecordsScreen : Screen
 
     private async Task LoadDetailAsync(string key, int req)
     {
-        var opened = await Context.Records.OpenAsync(key);
+        var opening = Context.Records.OpenAsync(key);
+        lastDetailOpen = (req, opening.IsCompleted);   // 캐시에서 바로 왔는가 (시험이 캐시를 안 탔음을 확인, M10 D3)
+        var opened = await opening;
         // 타임라인의 창과 무관한 부분은 UI 밖에서 미리 구한다 (12시간 기록에서 UI 프레임을 막지 않게)
         (TimelineData Timeline, RecordDetailView View)? prepared = opened?.Record.Header is null ? null : await Task.Run(() => (Timeline: TimelineData.Build(opened).Warm(), View: RecordView.Detail(opened.Record, opened.Analysis, opened.Lifecycle)));
+        await TestHolds.RecordsApplyAsync();   // 시험 전용 멈춤 (M10 D3): 읽기를 마치고 작업 표를 놓은 뒤, 화면 반영 직전
+        detailArrived++;                       // 열기 완료가 화면 반영 단계에 왔다 (옛 완료 도착 증거)
         DispatcherQueue.TryEnqueue(() =>
         {
             if (Context.IsClosing() || req != requestGen || detailKey != key || mode != Mode.Detail) return;
@@ -352,6 +356,9 @@ public sealed class RecordsScreen : Screen
         });
     }
 
+    private int renders, detailArrived;
+    private (int Req, bool Cached) lastDetailOpen = (-1, false);
+
     private void Rerender()
     {
         renderedKey = "";
@@ -422,6 +429,7 @@ public sealed class RecordsScreen : Screen
     {
         // 숨긴 동안은 그리지 않는다: 숨기기 직전에 시작한 읽기·비교·메모 저장이 늦게 끝나도 상태만 남기고, 다시 열 때 그린다 (G4 M9 2라운드 b3)
         if (Suspended) { renderedKey = ""; return; }
+        renders++;   // 실제로 그리기에 들어간 횟수 (M10 D3: 숨긴 동안 늘지 않아야 한다)
         var items = Context.Records.Items;
         string key = $"{mode}|{items.Count}|{string.Join(",", items.Select(i => i.Stamp.Length + (i.Summary.Analyzing ? "a" : "d")))}|{Context.Records.Listed}"
             + $"|{shown}|{picking}|{string.Join(",", picked)}|{detail?.Stamp}|{loadError}|{expanded}|{string.Join(",", editing)}|{comparison is null}|{diagnosesLoaded}|{openDiagnosis?.StartedAt}";
@@ -1250,6 +1258,7 @@ public sealed class RecordsScreen : Screen
         bool Mine() => memoSaveSeq.GetValueOrDefault((key, mark.Mark)) == seq;
         SetMemoState(key, mark.Mark, "저장하는 중…", Here(), reveal: true);
         var result = await Context.Memos.SaveAsync(key, item.Entry.Segments, d.Record.Header!.Id, mark.Mark, mark.AtMs, text);
+        await TestHolds.MemoAsync();   // 시험 전용 멈춤 (M10 D3): 쓰기를 마친 뒤 화면 반영 직전
         if (Context.IsClosing()) return;
         if (!result.Latest || !Mine()) return;   // 더 새 요청이 있다: 오래된 완료는 반영하지 않는다
         if (result.State == EventWriteState.Saved)
@@ -1492,6 +1501,8 @@ public sealed class RecordsScreen : Screen
                 window = d.Record.Header is null ? null : view.Window(EndMs(d)).ToString(),
             } : null,
             detailLoading = mode == Mode.Detail && detail is null && loadError is null,
+            renders,
+            detailOpen = new { req = lastDetailOpen.Req, cached = lastDetailOpen.Cached, arrived = detailArrived },
             detailComplete = DetailReady,   // 아래 카드까지 그려짐 (한 프레임 늦게 만든다)
             loadError,
             editing = editing.LastOrDefault(),

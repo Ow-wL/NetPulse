@@ -60,7 +60,7 @@ public sealed record StartupOptions
     public string? FakeVersion { get; init; }
     /// <summary>시험 전용 (M10 A3): 내장 고지를 읽지 못한 것처럼. 데모 + 명시한 사용자 폴더에서만.</summary>
     public bool NoticesFail { get; init; }
-    /// <summary>시험 전용 (M10 D3): n번째 메모 쓰기가 결과를 알리기 직전에 멈춘다 (<c>n</c> 또는 <c>n:fail</c>). 데모 + 명시한 사용자 폴더에서만.</summary>
+    /// <summary>시험 전용 (M10 D3): n번째 메모 쓰기가 쓰기를 마친 뒤 결과를 알리기 직전에 멈춘다. 데모 + 명시한 사용자 폴더에서만.</summary>
     public string? MemoHold { get; init; }
     /// <summary>시험 전용 (M10 D3): 기록 상세 열기가 작업 표를 놓은 뒤 화면 반영 직전에 멈춘다. 데모 + 명시한 사용자 폴더에서만.</summary>
     public bool RecordsApplyHold { get; init; }
@@ -166,7 +166,7 @@ public sealed record StartupOptions
                 "--simulate-tray-off" => o with { SimulateTrayOff = true },
                 "--fake-version" => o with { FakeVersion = Next() },
                 "--notices-fail" => o with { NoticesFail = true },
-                "--memo-hold" => o with { MemoHold = Next() is var mh && System.Text.RegularExpressions.Regex.IsMatch(mh, "^[1-9][0-9]?(:fail)?$") ? mh : throw new ArgumentException("--memo-hold는 n 또는 n:fail") },
+                "--memo-hold" => o with { MemoHold = Next() is var mh && System.Text.RegularExpressions.Regex.IsMatch(mh, "^[1-9][0-9]?$") ? mh : throw new ArgumentException("--memo-hold는 1~99") },
                 "--records-apply-hold" => o with { RecordsApplyHold = true },
                 "--live-balloon-test" => o with { LiveBalloonTest = true },
                 _ => throw new ArgumentException($"알 수 없는 인수입니다: {args[i]}"),
