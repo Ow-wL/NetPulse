@@ -136,7 +136,7 @@ public sealed partial class AppShell
         ui.Pacer.Pause();
         ui.Theme.Suspend();
         ui.Motion.SetReduced(true);
-        toasts.StopAll();
+        toasts.Hold();
         AppWindow.Hide();
         // 숨긴 뒤 남은 프레임 구독 수 (화면·테마·프레임 측정기, 0이어야 한다: 설계 A1, G4 M9 1라운드 b2)
         log.Write("resident", new { what = "hidden", host = host.Snapshot.State.ToString(), frameHooks = FrameHooks() });
@@ -161,6 +161,7 @@ public sealed partial class AppShell
         if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } p) p.Restore();
         Activate();
         if (toMeasure && screens.CurrentId != "measure") Navigate("measure", null);
+        if (was) toasts.Release();   // 숨긴 동안 쌓인 앱 안 알림
         int during = notifier.TakeHiddenSummary();
         if (was && during > 0) toasts.Show(ToastKind.Info, "숨긴 동안 끊김이 관측되었습니다", $"관측 {during}번. 측정 화면의 타임라인에서 확인하세요.");
         log.Write("resident", new { what = "reopened", by, wasHidden = was, hiddenStarts = during });

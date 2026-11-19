@@ -86,12 +86,17 @@ public static partial class RecordFolderRules
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
     }
 
-    public static bool Same(string a, string b) => string.Equals(Trim(a), Trim(b), StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// 같은 폴더인가: 전체 경로로 바꿔(<c>.</c>·<c>..</c>·구분자 표기를 푼다) 대소문자·끝 구분자를 무시하고 비교한다
+    /// (G4 M9 3라운드 a1: <c>C:\x\records\.</c> 같은 다른 표기가 같은 폴더로 보이지 않아 자기 기록을 "이미 옮겨짐"으로 지울 수 있었다).
+    /// 짧은 이름·정션은 부르는 쪽이 실제 경로(resolve)로 푼 뒤 비교한다.
+    /// </summary>
+    public static bool Same(string a, string b) => string.Equals(Trim(SafeFull(a)), Trim(SafeFull(b)), StringComparison.OrdinalIgnoreCase);
 
     /// <summary><paramref name="child"/>가 <paramref name="parent"/>의 아래인가 (경로 구성요소 경계).</summary>
     public static bool Inside(string child, string parent)
     {
-        child = Trim(child); parent = Trim(parent);
+        child = Trim(SafeFull(child)); parent = Trim(SafeFull(parent));
         return child.Length > parent.Length && child.StartsWith(parent, StringComparison.OrdinalIgnoreCase)
             && (child[parent.Length] == Path.DirectorySeparatorChar || parent.EndsWith(Path.DirectorySeparatorChar));
     }

@@ -175,6 +175,12 @@ public static class RecordMover
         var moved = new List<string>();
         var failed = new Dictionary<string, string>(StringComparer.Ordinal);
         var leftovers = new List<string>();
+        // 마지막 방어선: 원본과 목적지가 같은 폴더면 아무것도 지우지 않는다
+        if (RecordFolderRules.Same(plan.From, plan.To))
+        {
+            foreach (var item in plan.Items) failed[item.Id] = "same";
+            return new(moved, failed, leftovers, false);
+        }
         bool same = ops.SameVolume(plan.From, plan.To);
         foreach (var item in plan.Items)
         {

@@ -46,8 +46,32 @@ public sealed class ToastHost : StackPanel
         Children.Clear();
     }
 
+    private bool held;
+    private readonly List<(ToastKind Kind, string Title, string Body, bool AutoClose)> waiting = [];
+
+    /// <summary>
+    /// 창 숨김 (M9 설계 A1): 보이는 알림을 치우고, 숨긴 동안 오는 알림은 요소·모션·타이머를 만들지 않고 쌓아 둔다 (G4 M9 3라운드 b1:
+    /// 숨기기 전에 시작한 메모 저장의 실패가 숨긴 뒤에 알림·페이드·타이머를 만들었다). 다시 열 때 <see cref="Release"/>.
+    /// </summary>
+    public void Hold()
+    {
+        held = true;
+        StopAll();
+    }
+
+    /// <summary>다시 열기: 숨긴 동안 쌓인 알림 중 최근 것 몇 개를 보인다.</summary>
+    public void Release()
+    {
+        if (!held) return;
+        held = false;
+        var list = waiting.TakeLast(3).ToArray();
+        waiting.Clear();
+        foreach (var w in list) Show(w.Kind, w.Title, w.Body, w.AutoClose);
+    }
+
     public void Show(ToastKind kind, string title, string body, bool autoClose = true)
     {
+        if (held) { waiting.Add((kind, title, body, autoClose)); return; }
         var id = "toast." + kind.ToString().ToLowerInvariant() + "." + sequence++;
         var (icon, brush) = kind switch
         {

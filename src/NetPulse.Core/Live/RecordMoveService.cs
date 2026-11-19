@@ -50,8 +50,11 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
     public (IReadOnlyList<string> Sources, string Destination) Route(MoveKind kind, string? picked)
     {
         var (sources, dest) = RouteRaw(kind, picked);
-        return ([.. sources.Where(s => !RecordFolderRules.Same(s, dest))], dest);
+        return ([.. sources.Where(s => !SameReal(s, dest))], dest);
     }
+
+    /// <summary>실제 경로까지 풀어 같은 폴더인가 (표기·짧은 이름·정션이 달라도).</summary>
+    private bool SameReal(string a, string b) => RecordFolderRules.Same(a, b) || RecordFolderRules.Same(resolve(a) ?? a, resolve(b) ?? b);
 
     private (IReadOnlyList<string> Sources, string Destination) RouteRaw(MoveKind kind, string? picked)
     {
@@ -73,11 +76,13 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
         int count = 0, longest = 0;
         long bytes = 0;
         var conflicts = new List<string>();
-        foreach (var plan in Plans(kind, sources, dest))
+        var all = Plans(kind, sources, dest);
+        foreach (var plan in all)
         {
-            count += plan.Count; bytes += plan.Bytes; longest = Math.Max(longest, plan.LongestRelative);
+            bytes += plan.Bytes; longest = Math.Max(longest, plan.LongestRelative);
             conflicts.AddRange(plan.Conflicts);
         }
+        count = all.SelectMany(p => p.Items).Select(i => i.Id).Distinct(StringComparer.Ordinal).Count();   // 진행 표시와 같은 측정 단위
         if (kind == MoveKind.Default) Directory.CreateDirectory(dest);
         var reason = RecordFolderRules.Check(dest, kind, Known(), resolve, longest);
         if (reason is null && conflicts.Count > 0) reason = "새 위치에 같은 이름의 다른 기록이 있습니다.";
@@ -131,6 +136,8 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
             if (stop.IsCancellationRequested) return Report(MoveState.Stopped, null);
             // 잠근 뒤 다시 판정 [2-3]: 이 결과가 유일한 근거
             var plans = Plans(kind, sources, dest);
+            // 실행 경계에서도: 원본과 목적지가 같은 폴더면 아무것도 하지 않는다 (자기 기록을 "이미 옮겨짐"으로 지우지 않게)
+            if (plans.Any(p => SameReal(p.From, p.To))) return Report(MoveState.Invalid, "옮길 원본이 목적지와 같은 폴더입니다.");
             int longest = plans.Length == 0 ? 0 : plans.Max(p => p.LongestRelative);
             var reason = RecordFolderRules.Check(dest, kind, Known(), resolve, longest);
             if (reason is not null) return Report(MoveState.Invalid, reason);
@@ -139,6 +146,8 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
 
             // 측정 단위로 센다 (G4 M9 2라운드 a3·b5): 같은 측정의 조각이 여러 원본에 나뉘어 있어도 하나
             int total = plans.SelectMany(p => p.Items).Select(i => i.Id).Distinct(StringComparer.Ordinal).Count(), moved = 0;
+            // 측정이 다 옮겨졌는가는 그 측정이 든 모든 원본의 결과를 합쳐 정한다 (3라운드 a2·b2): 남은 원본 수가 0이 될 때 센다
+            var pending = plans.SelectMany(p => p.Items).GroupBy(i => i.Id, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
             var movedIds = new HashSet<string>(StringComparer.Ordinal);
             var failed = new Dictionary<string, string>(StringComparer.Ordinal);
             var leftovers = new List<string>();
@@ -164,8 +173,8 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
                 var outcome = RecordMover.Execute(plan, Ops, id =>
                 {
                     done.Add(id);
-                    bool counted = movedIds.Add(id);
-                    if (counted) moved++;
+                    movedIds.Add(id);
+                    if (--pending[id] == 0 && !failed.ContainsKey(id)) moved++;
                     settings.Save(settings.Read() with { Move = log with { Done = [.. done] } });
                     progress?.Report((moved, total));
                     AfterRecordForTest?.Invoke(moved);
@@ -178,7 +187,7 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
                 var keepExtra = HasRecords(plan.From) ? now.Extra : now.Extra.Where(e => !RecordFolderRules.Same(e, plan.From)).ToArray();
                 Persist(new RecordFolders(now.Folder, keepExtra, null));
             }
-            var state = stopped ? MoveState.Stopped : failed.Count == 0 && moved == total ? MoveState.Done : moved == 0 ? MoveState.Failed : MoveState.Partial;
+            var state = stopped ? MoveState.Stopped : failed.Count == 0 && moved == total ? MoveState.Done : movedIds.Count == 0 ? MoveState.Failed : MoveState.Partial;   // 조각 하나라도 옮겼으면 "하나도 못 옮김"이 아니다
             return new(state, moved, total, failed, leftovers, [], null);
         }
         finally { gate.ExitExclusive(); }
