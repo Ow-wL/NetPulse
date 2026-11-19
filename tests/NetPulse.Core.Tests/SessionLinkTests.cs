@@ -210,7 +210,7 @@ public sealed class SessionLinkTests : IDisposable
         Assert.False(s.LinkClosed);
         links.Notify(LinkState.Down);                                  // 계획 끝 뒤 표본
         release.Set();
-        var result = await s.Completion.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        var result = await s.Completion.WaitAsync(TestSupport.SessionLimit, TestContext.Current.CancellationToken);
         Assert.Equal(EndReason.Completed, result.EndReason);
         Assert.Equal(60_000, result.Summary!.EndMs);                  // 끝 = min(종료 처리 시작 60.5초, 계획 끝 60초)
         Assert.Empty(LinkEvidenceBuilder.FromEvents(Reread().Events).Downs);
@@ -518,7 +518,7 @@ public sealed class DemoLinkScenarioTests : IDisposable
             Primary = new DiskRecordRoot(dir.Sub("p"), "primary"), Fallback = new DiskRecordRoot(dir.Sub("f"), "fallback"),
         });
         for (int i = 0; i < 179; i++) await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));
-        var result = await s.Completion.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        var result = await s.Completion.WaitAsync(TestSupport.SessionLimit, TestContext.Current.CancellationToken);
         Assert.Equal(EndReason.Completed, result.EndReason);
 
         var rec = RecordReader.Read(RecordReader.FindSegments("demo-link", [dir.Sub("p")]));

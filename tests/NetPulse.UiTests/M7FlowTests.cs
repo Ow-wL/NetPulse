@@ -302,6 +302,32 @@ public sealed class M7FlowTests
         finally { AppDriver.DeleteUserData(userData); }
     }
 
+    [Fact]
+    public void MemoFailingAfterLeavingAndReturningShowsTheFailureNotSaving()
+    {
+        // 저장이 재시도하는 동안 목록에 갔다 같은 상세로 돌아온 뒤 실패하면, "저장하는 중…"이 남지 않고 실패가 보인다 (M7 이월 1, M9 설계 C2)
+        var userData = AppDriver.NewUserData();
+        try
+        {
+            using var app = Open(userData, "rec-two-memos-blocked", "--demo steady --screen records");
+            WaitAnalyzed(app);
+            app.Invoke("records.row.0");
+            WaitDetail(app);
+            app.Invoke("records.mark.0.edit");
+            AppDriver.WaitFor(() => app.Exists("records.mark.0.text"), e => e, "메모 칸");
+            app.SetText("records.mark.0.text", "실패할 글");
+            app.Invoke("records.mark.0.save");
+            AppDriver.WaitFor(() => app.Exists("records.mark.0.state") ? app.Text("records.mark.0.state") : "", s => s == "저장하는 중…", "저장하는 중");
+            app.Invoke("records.back");
+            WaitAnalyzed(app);
+            app.Invoke("records.row.0");
+            WaitDetail(app);
+            AppDriver.WaitFor(() => app.Exists("records.mark.0.state") ? app.Text("records.mark.0.state") : "", s => s == "저장하지 못했습니다", "돌아온 상세에 실패", TimeSpan.FromSeconds(20));
+            Assert.Equal(0, app.Close());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
     // ---------------- 6. 비교 ----------------
 
     [Fact]

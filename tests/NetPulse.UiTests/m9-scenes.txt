@@ -1,0 +1,28 @@
+# M9 캡처 장면 목록 (설계 4절 상태표, 7.4). 시험(M9MatrixTests)과 build/ui-test.ps1이 같은 파일을 읽는다. 형식은 m5-scenes.txt와 같다.
+# 준비: M5Fixtures (settings-newer, rec-move, rec-move-interrupted, rec-move-bad-journal, settings-missing-folder) + 기존 것.
+# 인수의 {userData}는 그 실행의 사용자 폴더. 옮기기 목적지는 준비가 만든 {userData}-dest.
+# 기다림 추가: records=상태, recordsUsable=True|False, diagState=상태. 동작 추가: close (창 닫기 요청만)
+settings-normal|profile|--demo steady --screen settings|wait:screen=settings;wait:recordsUsable=True
+settings-measuring|profile|--demo steady --start --demo-hold 5 --screen settings|wait:screen=settings;wait:host=Measuring;wait:recordsUsable=True;scroll:settings.scroll=40
+settings-not-persisted|settings-newer|--demo steady --screen settings|wait:screen=settings;wait:recordsUsable=True
+settings-tray-off|profile|--demo steady --screen settings --simulate-tray-off|wait:screen=settings;wait:recordsUsable=True
+settings-folder-invalid|profile|--demo steady --screen settings --pick-folder {userData}|wait:screen=settings;invoke:settings.records.change;wait:records=Invalid;scroll:settings.scroll=40
+settings-move-confirm|rec-move|--demo steady --screen settings --pick-folder {userData}-dest|wait:screen=settings;wait:recordsUsable=True;invoke:settings.records.change;wait:dialog
+settings-moving|rec-move|--demo steady --screen settings --pick-folder {userData}-dest --move-fail hold|wait:screen=settings;invoke:settings.records.change;wait:dialog;invoke:dialog.confirm;wait:records=Moving;scroll:settings.scroll=40
+settings-moved|rec-move|--demo steady --screen settings --pick-folder {userData}-dest|wait:screen=settings;invoke:settings.records.change;wait:dialog;invoke:dialog.confirm;wait:records=Done;scroll:settings.scroll=40
+settings-partial|rec-move|--demo steady --screen settings --pick-folder {userData}-dest --move-fail copy:20261111|wait:screen=settings;invoke:settings.records.change;wait:dialog;invoke:dialog.confirm;wait:records=Partial;scroll:settings.scroll=40
+settings-leftover|rec-move|--demo steady --screen settings --pick-folder {userData}-dest --move-fail delete:20261111|wait:screen=settings;invoke:settings.records.change;wait:dialog;invoke:dialog.confirm;wait:records=Leftover;scroll:settings.scroll=40
+settings-failed|rec-move|--demo steady --screen settings --pick-folder {userData}-dest --move-fail copy:2026111|wait:screen=settings;invoke:settings.records.change;wait:dialog;invoke:dialog.confirm;wait:records=Failed;scroll:settings.scroll=40
+settings-interrupted|rec-move-interrupted|--demo steady --screen settings|wait:screen=settings;wait:records=Interrupted;scroll:settings.scroll=40
+settings-journal-problem|rec-move-bad-journal|--demo steady --screen settings|wait:screen=settings;wait:records=JournalProblem;scroll:settings.scroll=40
+settings-folder-unusable|settings-missing-folder|--demo steady --screen settings|wait:screen=settings;wait:recordsUsable=False;scroll:settings.scroll=40
+settings-diag-errors|profile|--demo steady --screen settings|wait:screen=settings;text:settings.diag.tcp.0=192.0.2;text:settings.diag.domain.1=bad;wait:diagState=dirty;invoke:settings.diag.save;wait:diagState=errors;scroll:settings.scroll=80
+settings-diag-saved|profile|--demo steady --screen settings|wait:screen=settings;text:settings.diag.domain.0=check.example.com;wait:diagState=dirty;invoke:settings.diag.save;wait:diagState=saved;scroll:settings.scroll=80
+settings-stopped|rec-move|--demo steady --screen settings --pick-folder {userData}-dest --move-fail hold|wait:screen=settings;invoke:settings.records.change;wait:dialog;invoke:dialog.confirm;wait:records=Moving;invoke:settings.records.stop;wait:records=Stopped;scroll:settings.scroll=40
+settings-conflict|rec-move-conflict|--demo steady --screen settings --pick-folder {userData}-dest|wait:screen=settings;invoke:settings.records.change;wait:records=Conflict;scroll:settings.scroll=40
+settings-diag-dirty|profile|--demo steady --screen settings|wait:screen=settings;text:settings.diag.domain.0=check.example.com;wait:diagState=dirty;scroll:settings.scroll=80
+settings-diag-failed|settings-readonly|--demo steady --screen settings|wait:screen=settings;text:settings.diag.domain.0=check.example.com;wait:diagState=dirty;invoke:settings.diag.save;wait:diagState=failed;scroll:settings.scroll=80
+settings-diag-notpersisted|settings-newer|--demo steady --screen settings|wait:screen=settings;text:settings.diag.domain.0=check.example.com;wait:diagState=dirty;invoke:settings.diag.save;wait:diagState=notPersisted;scroll:settings.scroll=80
+hint-dialog|profile|--demo steady --start --demo-hold 5 --close-to-tray on|wait:host=Measuring;close;wait:dialog
+profile-tcp|profile|--demo steady --screen profile|wait:screen=profile;select:profile.target.1.method.tcp;wait:exists=profile.target.1.port
+profile-tcp-port-error|profile|--demo steady --screen profile|wait:screen=profile;select:profile.target.1.method.tcp;wait:exists=profile.target.1.port;text:profile.target.1.port=70000;wait:dirty

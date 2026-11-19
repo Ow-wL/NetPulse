@@ -278,10 +278,13 @@ public sealed class DemoWorld
             var kind = net.Kind == "wireless" ? InterfaceKind.Wireless : InterfaceKind.Wired;
             var interfaces = new List<InterfaceInfo> { new(DemoNetwork.InterfaceIndex, kind, net.Virtual ? Tristate.Yes : Tristate.No, local is not null) };
             for (int i = 0; i < net.OtherGateways; i++) interfaces.Add(new(100 + i, InterfaceKind.Other, Tristate.Unknown, true));
-            snapshot = Scenario.Faults?.Detect == "unknown"
-                ? new NetworkSnapshot(interfaces, null, "demo-route-unavailable")
-                : new NetworkSnapshot(interfaces, new BestRoute(DemoNetwork.InterfaceIndex,
-                    local is null ? null : System.Net.IPAddress.Parse(local.Address)), null);
+            snapshot = Scenario.Faults?.Detect switch
+            {
+                "unknown" => new NetworkSnapshot(interfaces, null, "demo-route-unavailable"),
+                "no-ipv4" => new NetworkSnapshot(interfaces, null, null),
+                _ => new NetworkSnapshot(interfaces, new BestRoute(DemoNetwork.InterfaceIndex,
+                    local is null ? null : System.Net.IPAddress.Parse(local.Address)), null),
+            };
         }
         var planned = DetectionPlanner.Plan(snapshot);
         if (planned.Proposal is not { } proposal) return planned;

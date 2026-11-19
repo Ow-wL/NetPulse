@@ -13,8 +13,21 @@ namespace NetPulse.Platform;
 /// </summary>
 public sealed class LiveAppWorld(string userData) : IAppWorld
 {
-    private readonly DiskRecordRoot primary = new(Path.Combine(userData, "records"), "primary");
+    private readonly string defaultFolder = Path.Combine(userData, "records");
+    private volatile DiskRecordRoot primary = new(Path.Combine(userData, "records"), "primary");
+    private volatile IReadOnlyList<string> extra = [];
     private readonly DiskRecordRoot fallback = DiskRecordRoot.Defaults().Fallback;
+
+    public string DefaultRecordFolder => defaultFolder;
+    public string CurrentRecordFolder => primary.Path!;
+    public string FallbackRecordFolder => fallback.Path!;
+
+    /// <summary>기본 위치(설정)와 옛 위치들 (M9 설계 B3). 다음 측정부터 새 위치에 쓴다.</summary>
+    public void SetRecordFolders(string? folder, IReadOnlyList<string> extraFolders)
+    {
+        primary = new DiskRecordRoot(folder ?? defaultFolder, "primary");
+        extra = [.. extraFolders];
+    }
 
     private DiagnosisWorld? diagnostics;
 
@@ -23,7 +36,7 @@ public sealed class LiveAppWorld(string userData) : IAppWorld
 
     public string Kind => "live";
     public DateTimeOffset Now => DateTimeOffset.Now;
-    public IReadOnlyList<string> RecordPaths => [primary.Path!, fallback.Path!];
+    public IReadOnlyList<string> RecordPaths => [primary.Path!, .. extra, fallback.Path!];
 
     public Task<DetectionResult> DetectAsync(CancellationToken cancellationToken) => Task.Run(() =>
     {

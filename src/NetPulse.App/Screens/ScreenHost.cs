@@ -25,6 +25,12 @@ public sealed class ScreenContext
     public required Action<string> OpenReport { get; init; }
     /// <summary>창 핸들 (폴더 선택 대화상자 연결용).</summary>
     public required Func<nint> WindowHandle { get; init; }
+    /// <summary>설정 저장 경계 (M9 설계 B1).</summary>
+    public required NetPulse.Design.Settings.SettingsStore Settings { get; init; }
+    /// <summary>기록 옮기기·출입문·시작 상태 (M9 설계 B3).</summary>
+    public required NetPulse.App.Resident.ResidentServices Resident { get; init; }
+    /// <summary>트레이를 쓸 수 있는가 (상주 카드).</summary>
+    public required Func<bool> TrayAvailable { get; init; }
     public required ToastHost Toasts { get; init; }
     public required DialogHost Dialog { get; init; }
     public required StartupOptions Options { get; init; }
@@ -70,6 +76,25 @@ public abstract class Screen : Grid
 
     /// <summary>진단 값 (UI 시험이 읽는다).</summary>
     public virtual object? Diag() => null;
+
+    /// <summary>창이 숨어 있는 동안 (M9 설계 A1 숨김 계약). 프레임 작업은 이 동안 아무것도 하지 않는다.</summary>
+    public bool Suspended { get; private set; }
+
+    internal void SetSuspended(bool value)
+    {
+        if (value == Suspended) return;
+        Suspended = value;
+        if (value) OnSuspend(); else OnResume();
+    }
+
+    /// <summary>숨김 [2-6]: 프레임 구독·쌓인 프레임 작업을 끊고 예약 표시를 지운다 (세대를 올려 이미 넘긴 작업도 무효).</summary>
+    protected virtual void OnSuspend() { }
+
+    /// <summary>이 화면이 지금 걸어 둔 프레임(CompositionTarget.Rendering) 구독 수 (숨김 계약 확인용 진단).</summary>
+    public virtual int FrameHooks => 0;
+
+    /// <summary>다시 열기 [2-6]: 렌더 캐시를 무효화해 한 번 다시 그린다. 입력 초안·초점·스크롤은 그대로.</summary>
+    protected virtual void OnResume() { }
 }
 
 /// <summary>
@@ -151,4 +176,16 @@ public sealed class ScreenHost : Grid
 
     /// <summary>보이는 화면만 다시 그린다. 숨은 화면은 돌아올 때 Show가 최신 값으로 한 번 그린다.</summary>
     public void Render(HostSnapshot snapshot) => Current?.Render(snapshot);
+
+    /// <summary>창 숨김: 준비된 모든 화면에 (M9 설계 A1).</summary>
+    public void Suspend() { foreach (var s in screens.Values) s.SetSuspended(true); }
+
+    /// <summary>다시 열기: 준비된 모든 화면에.</summary>
+    public void Resume() { foreach (var s in screens.Values) s.SetSuspended(false); }
+
+    /// <summary>진단: 숨김 상태인 화면 수.</summary>
+    public int SuspendedCount => screens.Values.Count(s => s.Suspended);
+
+    /// <summary>모든 화면의 프레임 구독 수.</summary>
+    public int FrameHooks => screens.Values.Sum(s => s.FrameHooks);
 }

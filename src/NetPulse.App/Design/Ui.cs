@@ -11,7 +11,7 @@ namespace NetPulse.App.Design;
 /// </summary>
 public sealed class Ui
 {
-    public Ui(Window window, StartupOptions options, AppLog log, AppSettings settings)
+    public Ui(Window window, StartupOptions options, AppLog log, AppSettings settings, Action<AppSettings>? persist = null)
     {
         Window = window;
         Options = options;
@@ -21,7 +21,7 @@ public sealed class Ui
         Glass = new Glass(Brushes, Motion);
         Lights = new Lights(Motion);
         Lights.Prepare();
-        Effects = new Effects(window.DispatcherQueue, settings, options, log);
+        Effects = new Effects(window.DispatcherQueue, settings, options, log, persist);
         Theme = new Theme(this) { HoldAt = options.RevealHold };
         Effects.Changed += (previous, mode) => Theme.OnModeChanged(previous, mode);
         Pacer = new FramePacer(() => Theme.InTransition, low => Effects.SetLowPerformance(low || options.SimulateLowPerformance));

@@ -32,7 +32,7 @@ public sealed class RecordsScreen : Screen
     private int shown = Size.RecordsPage;
     private bool picking;
     private readonly List<string> picked = [];
-    private string? detailKey, openedFromRowId;
+    private string? detailKey, openedFromRowId, detailId;
     private OpenedRecord? detail;
     private (OpenedRecord A, OpenedRecord B)? comparison;
     private string? loadError;
@@ -99,7 +99,14 @@ public sealed class RecordsScreen : Screen
         AutomationProperties.SetAutomationId(scroll, "records.scroll");
         Grid.SetRow(scroll, 1);
         Children.Add(scroll);
-        Context.Records.Changed += () => DispatcherQueue.TryEnqueue(() => { if (!Context.IsClosing() && Visibility == Visibility.Visible) Render(Context.Host.Snapshot); });
+        Context.Records.Changed += () => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!Context.IsClosing()) RelinkDetail();
+            // 숨긴 동안은 그리지 않는다: 다시 열 때 OnResume이 다시 그린다 (G4 M9 1라운드 b2)
+            if (Context.IsClosing() || Visibility != Visibility.Visible || Suspended) return;
+            // 메모 저장 완료 뒤 갱신·다시 열기가 끝날 때까지는 일반 다시 그리기도 초점을 지킨다 (M7 이월 2, M9 설계 C2)
+            if (keepFocus > 0) RenderKeepingFocus(); else Render(Context.Host.Snapshot);
+        });
     }
 
     public override IReadOnlyList<UIElement> Parts => [header, scroll];
@@ -206,6 +213,7 @@ public sealed class RecordsScreen : Screen
         mode = Mode.Detail;
         SetTab("measurements");
         detailKey = key;
+        detailId = item?.Entry.Id;
         openedFromRowId = fromRow;
         detail = null;
         loadError = null;
@@ -272,13 +280,13 @@ public sealed class RecordsScreen : Screen
     private void FocusLater(string id, Mode expected) => FocusLater(id, expected, requestGen, detailKey, 10);
 
     /// <param name="gen">예약할 때의 요청 세대, <paramref name="key"/>는 그때의 상세: 그 사이 다른 기록을 열었으면 하지 않는다 (G4 M7 2라운드 4)</param>
-    private void FocusLater(string id, Mode expected, int gen, string? key, int tries)
+    private void FocusLater(string id, Mode expected, int gen, string? key, int tries, Action<Control>? then = null)
     {
         OnePerFrame(() =>
         {
             if (mode != expected || gen != requestGen || (expected == Mode.Detail && key != detailKey)) return;
-            if (FindRow(id) is { } c && c.Focus(FocusState.Programmatic)) return;
-            if (tries > 1) FocusLater(id, expected, gen, key, tries - 1);
+            if (FindRow(id) is { } c && c.Focus(FocusState.Programmatic)) { then?.Invoke(c); return; }
+            if (tries > 1) FocusLater(id, expected, gen, key, tries - 1, then);
         });
     }
 
@@ -350,10 +358,70 @@ public sealed class RecordsScreen : Screen
         Render(Context.Host.Snapshot);
     }
 
+    /// <summary>
+    /// 기록 옮기기로 같은 측정의 출처 열쇠(조각 경로)가 바뀌었으면 열린 상세·메모 상태·남겨 둔 글을 새 열쇠로 잇는다 (G4 M9 1라운드 b3, 설계 B3
+    /// "열려 있던 상세를 같은 Id로"). 옮기기는 내용을 바꾸지 않으므로 열린 기록·초안·편집 중인 칸은 그대로 둔다. 잇지 않으면 저장이 항목을 못 찾아 조용히 끝났다.
+    /// </summary>
+    private void RelinkDetail()
+    {
+        if (mode != Mode.Detail || detailKey is not { } old || detailId is not { } id) return;
+        if (Context.Records.Items.Any(i => i.Key == old) || Context.Records.KeyOf(id) is not { } next || next == old) return;
+        detailKey = next;
+        foreach (var k in memoState.Keys.Where(k => k.Key == old).ToArray()) { memoState[(next, k.Mark)] = memoState[k]; memoState.Remove(k); }
+        Context.Memos.Rekey(old, next);
+        Context.Records.SetPinned([next]);
+        Context.Log.Write("recordsRelinked", new { loading = detail is null });
+        renderedKey = "";
+        // 아직 여는 중이었으면 새 열쇠로 다시 연다: 옛 열기의 완료는 열쇠가 달라 버려진다 (G4 M9 2라운드 b4)
+        if (detail is null && loadError is null) _ = LoadDetailAsync(next, ++requestGen);
+    }
+
+    private string? suspendFocusId;
+    private double suspendScroll;
+    private (int Start, int Length)? suspendSelection;
+
+    public override int FrameHooks => frameHooked ? 1 : 0;
+
+    protected override void OnSuspend()
+    {
+        // 다시 열 때 돌려줄 초점·스크롤 (G4 M9 1라운드 b4)
+        var focused = XamlRoot is { } xr ? Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(xr) as UIElement : null;
+        suspendFocusId = focused is not null && FocusWithin(content) ? AutomationProperties.GetAutomationId(focused) : null;
+        suspendSelection = focused is TextBox tb && suspendFocusId is not null ? (tb.SelectionStart, tb.SelectionLength) : null;   // 커서·선택 (2라운드 b6)
+        suspendScroll = scroll.VerticalOffset;
+        renderGen++;                    // 이미 디스패처에 넘어간 조각은 세대가 달라 아무것도 하지 않는다
+        perFrame.Clear();
+        timelineQueued = false;
+        if (frameHooked)
+        {
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= RunOnePerFrame;
+            frameHooked = false;
+        }
+    }
+
+    protected override void OnResume()
+    {
+        if (Visibility == Visibility.Visible)
+        {
+            Rerender();   // 반쯤 그린 상세를 완전히 다시 (초안은 편집 상태에 있다)
+            // 다시 그리면 칸이 새로 만들어진다: 숨기기 전 초점과 스크롤을 돌려준다 (G4 M9 1라운드 b4)
+            double y = suspendScroll;
+            OnePerFrame(() => scroll.ChangeView(null, y, null, true));
+            var selection = suspendSelection;
+            if (!string.IsNullOrEmpty(suspendFocusId))
+                FocusLater(suspendFocusId, mode, requestGen, detailKey, 10, c => { if (c is TextBox t && selection is { } s) t.Select(Math.Min(s.Start, t.Text.Length), Math.Min(s.Length, Math.Max(0, t.Text.Length - s.Start))); });
+            suspendFocusId = null;
+            suspendSelection = null;
+        }
+        else renderedKey = "";
+    }
+
     // ---------------- 그리기 ----------------
 
     public override void Render(HostSnapshot snapshot)
     {
+        // 숨긴 동안은 그리지 않는다: 숨기기 직전에 시작한 읽기·비교·메모 저장이 늦게 끝나도 상태만 남기고, 다시 열 때 그린다 (G4 M9 2라운드 b3)
+        if (Suspended) { renderedKey = ""; return; }
         var items = Context.Records.Items;
         string key = $"{mode}|{items.Count}|{string.Join(",", items.Select(i => i.Stamp.Length + (i.Summary.Analyzing ? "a" : "d")))}|{Context.Records.Listed}"
             + $"|{shown}|{picking}|{string.Join(",", picked)}|{detail?.Stamp}|{loadError}|{expanded}|{string.Join(",", editing)}|{comparison is null}|{diagnosesLoaded}|{openDiagnosis?.StartedAt}";
@@ -640,6 +708,7 @@ public sealed class RecordsScreen : Screen
     /// </summary>
     private void OnePerFrame(Action action)
     {
+        if (Suspended) return;   // 숨긴 동안 프레임 구독을 새로 만들지 않는다 (다시 열면 OnResume이 처음부터 다시 그린다)
         perFrame.Enqueue(action);
         if (frameHooked) return;
         frameHooked = true;
@@ -648,7 +717,7 @@ public sealed class RecordsScreen : Screen
 
     private void RunOnePerFrame(object? sender, object e)
     {
-        if (perFrame.Count == 0 || Context.IsClosing())
+        if (perFrame.Count == 0 || Context.IsClosing() || Suspended)
         {
             Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= RunOnePerFrame;
             frameHooked = false;
@@ -656,7 +725,8 @@ public sealed class RecordsScreen : Screen
             return;
         }
         var next = perFrame.Dequeue();
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { if (!Context.IsClosing()) next(); });
+        int gen = renderGen;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { if (!Context.IsClosing() && !Suspended && gen == renderGen) next(); });
     }
 
     private void QueueTimeline()
@@ -1091,7 +1161,12 @@ public sealed class RecordsScreen : Screen
                     edit.Click += (_, _) => { if (!editing.Contains(mark.Mark)) editing.Add(mark.Mark); focusMark = mark.Mark; Rerender(); };
                     row.Children.Add(edit);
                 }
-                if (memoState.GetValueOrDefault((detailKey!, m.Mark)) is { } st) row.Children.Add(Named($"records.mark.{i}.state", st, Typography.Caption, Ui.Brushes.Muted));
+                if (memoState.GetValueOrDefault((detailKey!, m.Mark)) is { } st)
+                {
+                    var stateText = Named($"records.mark.{i}.state", st, Typography.Caption, Ui.Brushes.Muted);
+                    memoStateText[m.Mark] = stateText;   // 늦게 온 완료가 이 글을 바꿀 수 있게 (M7 이월 1)
+                    row.Children.Add(stateText);
+                }
             }
             stack.Children.Add(row);
         }
@@ -1139,12 +1214,22 @@ public sealed class RecordsScreen : Screen
     /// </summary>
     private void RerenderKeepingFocus()
     {
+        renderedKey = "";
+        RenderKeepingFocus();
+    }
+
+    /// <summary>그릴 것이 바뀌었으면 다시 그리되 초점을 같은 자동화 ID로 돌려준다.</summary>
+    private void RenderKeepingFocus()
+    {
         string? id = null;
         if (XamlRoot is { } xr && Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(xr) is UIElement f && FocusWithin(content))
             id = AutomationProperties.GetAutomationId(f);
-        Rerender();
+        Render(Context.Host.Snapshot);
         if (!string.IsNullOrEmpty(id)) FocusLater(id, mode);
     }
+
+    /// <summary>메모 저장 완료 뒤 갱신·다시 열기가 진행 중인 수 (그동안의 목록 갱신 다시 그리기는 초점을 지킨다).</summary>
+    private int keepFocus;
 
     private async Task SaveMemoAsync(SymptomMark mark, string text)
     {
@@ -1153,6 +1238,11 @@ public sealed class RecordsScreen : Screen
         if (item is null) return;
         int req = requestGen;   // 이 상세를 떠나거나 다른 기록을 열면 바뀐다 (b4)
         bool Here() => !Context.IsClosing() && req == requestGen && detailKey == key && mode == Mode.Detail;
+        // 같은 상세가 지금 보이는가 (목록에 갔다 같은 상세로 돌아온 경우 포함): 상태 글만 바꿀 때 쓴다. 편집 상태 변경은 Here()만 (M7 이월 1)
+        bool SameDetail() => !Context.IsClosing() && detailKey == key && mode == Mode.Detail;
+        double scrollAtStart = scroll.VerticalOffset;
+        // 완료 때 상태 글로 스크롤: 초점이 그 칸에 있고 사용자가 그 사이 휠로 다른 곳을 보지 않았을 때만 (M7 이월 3)
+        bool Unmoved() => Math.Abs(scroll.VerticalOffset - scrollAtStart) < 1;
         // 화면 스레드에서 부르기 전에 번호를 받고, 완료·다시 열기·큐 작업마다 아직 마지막 요청인지 본다:
         // 저장 쪽 최신 판정과 화면에 반영하는 순간 사이에 다음 저장을 눌러도 앞 완료가 "저장했습니다"를 띄우지 않게 (G4 M7 4라운드 1)
         int seq = ++memoSaveCounter;
@@ -1164,14 +1254,25 @@ public sealed class RecordsScreen : Screen
         if (!result.Latest || !Mine()) return;   // 더 새 요청이 있다: 오래된 완료는 반영하지 않는다
         if (result.State == EventWriteState.Saved)
         {
-            SetMemoState(key, mark.Mark, result.Truncated ? "저장했습니다 (200자에서 잘라 저장)" : "저장했습니다", Here(),
-                reveal: memoEditors.TryGetValue(mark.Mark, out var done) && FocusWithin(done.Row));
+            SetMemoState(key, mark.Mark, result.Truncated ? "저장했습니다 (200자에서 잘라 저장)" : "저장했습니다", SameDetail(),
+                reveal: Here() && Unmoved() && memoEditors.TryGetValue(mark.Mark, out var done) && FocusWithin(done.Row));
             // 저장하는 동안 더 고친 글이 있으면 칸과 초안을 남긴다
             if (Here() && (!memoDrafts.TryGetValue(mark.Mark, out var now) || now == text)) { editing.Remove(mark.Mark); memoDrafts.Remove(mark.Mark); }
-            await Context.Records.RefreshAsync(Context.Host.RunningId);
-            if (!Here() || !Mine()) return;
-            var reopened = await Context.Records.OpenAsync(key);
-            DispatcherQueue.TryEnqueue(() => { if (Here() && Mine() && reopened is not null) { detail = reopened; RerenderKeepingFocus(); } });
+            keepFocus++;
+            try
+            {
+                await Context.Records.RefreshAsync(Context.Host.RunningId);
+                if (!Here() || !Mine()) return;
+                var reopened = await Context.Records.OpenAsync(key);
+                var done2 = new TaskCompletionSource();
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (Here() && Mine() && reopened is not null) { detail = reopened; RerenderKeepingFocus(); }
+                    done2.TrySetResult();
+                });
+                await done2.Task;
+            }
+            finally { keepFocus--; }
         }
         else
         {
@@ -1182,7 +1283,13 @@ public sealed class RecordsScreen : Screen
             if (Here() && editing.Contains(mark.Mark) && memoEditors.TryGetValue(mark.Mark, out var ed))
             {
                 ed.Box.SetError("저장하지 못했습니다. 다시 저장해 보세요.");
-                SetMemoState(key, mark.Mark, "저장하지 못했습니다", true, reveal: FocusWithin(ed.Row));
+                SetMemoState(key, mark.Mark, "저장하지 못했습니다", true, reveal: Unmoved() && FocusWithin(ed.Row));
+            }
+            else if (SameDetail())
+            {
+                // 목록에 갔다 같은 상세로 돌아온 뒤 실패: 그 칸의 "저장하는 중…"을 실패로 바꾼다 (다시 그릴 계기가 없어 남던 것, M7 이월 1)
+                SetMemoState(key, mark.Mark, "저장하지 못했습니다", true);
+                Context.Toasts.Show(ToastKind.Error, "메모를 저장하지 못했습니다", "메모 고치기를 누르면 저장하지 못한 글로 다시 저장할 수 있습니다.");
             }
             else Context.Toasts.Show(ToastKind.Error, "메모를 저장하지 못했습니다", Here() ? "메모 고치기를 누르면 저장하지 못한 글로 다시 저장할 수 있습니다." : "그 기록을 다시 열면 다시 저장할 수 있습니다.");
         }

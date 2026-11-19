@@ -11,6 +11,9 @@ namespace NetPulse.App.Design.Controls;
 
 public enum ToastKind { Info, Success, Warning, Error }
 
+/// <summary>대화상자에서 고른 것 (세 번째 단추가 있는 대화상자, M9 처음 숨김 안내).</summary>
+public enum DialogChoice { Cancel, Confirm, Alternate }
+
 /// <summary>
 /// 알림 (M2 설계 5.6). 창 안 최상위 층의 오른쪽 위에 쌓인다 (Popup을 쓰지 않음, 설계 3절).
 /// 글이 많은 떠 있는 것이라 차폐층 위 보통 유리로 그린다 (기획서 7.2, 대비 계산의 Dialog 단계).
@@ -43,8 +46,32 @@ public sealed class ToastHost : StackPanel
         Children.Clear();
     }
 
+    private bool held;
+    private readonly List<(ToastKind Kind, string Title, string Body, bool AutoClose)> waiting = [];
+
+    /// <summary>
+    /// 창 숨김 (M9 설계 A1): 보이는 알림을 치우고, 숨긴 동안 오는 알림은 요소·모션·타이머를 만들지 않고 쌓아 둔다 (G4 M9 3라운드 b1:
+    /// 숨기기 전에 시작한 메모 저장의 실패가 숨긴 뒤에 알림·페이드·타이머를 만들었다). 다시 열 때 <see cref="Release"/>.
+    /// </summary>
+    public void Hold()
+    {
+        held = true;
+        StopAll();
+    }
+
+    /// <summary>다시 열기: 숨긴 동안 쌓인 알림 중 최근 것 몇 개를 보인다.</summary>
+    public void Release()
+    {
+        if (!held) return;
+        held = false;
+        var list = waiting.TakeLast(3).ToArray();
+        waiting.Clear();
+        foreach (var w in list) Show(w.Kind, w.Title, w.Body, w.AutoClose);
+    }
+
     public void Show(ToastKind kind, string title, string body, bool autoClose = true)
     {
+        if (held) { waiting.Add((kind, title, body, autoClose)); return; }
         var id = "toast." + kind.ToString().ToLowerInvariant() + "." + sequence++;
         var (icon, brush) = kind switch
         {
@@ -123,7 +150,11 @@ public sealed class DialogHost : Grid
 
     public event Action<bool>? Closed;
 
-    public void Open(Control? openedBy, string title, string message, string confirm, string cancel, FocusState focus = FocusState.Programmatic)
+    /// <summary>마지막으로 닫힐 때 고른 것 (<see cref="Closed"/>의 false는 취소와 세 번째 단추 둘 다).</summary>
+    public DialogChoice LastChoice { get; private set; }
+
+    /// <param name="alternate">null이 아니면 취소와 확인 사이에 세 번째 단추 (보조 단추, <c>dialog.alternate</c>).</param>
+    public void Open(Control? openedBy, string title, string message, string confirm, string cancel, FocusState focus = FocusState.Programmatic, string? alternate = null)
     {
         opener = openedBy;
         Children.Clear();
@@ -137,6 +168,12 @@ public sealed class DialogHost : Grid
         ok.Click += (_, _) => Close(true);
         no.Click += (_, _) => Close(false);
         buttons.Children.Add(no);
+        if (alternate is not null)
+        {
+            var alt = new GlassButton(ui, ButtonKind.Secondary, "dialog.alternate", alternate);
+            alt.Click += (_, _) => Close(DialogChoice.Alternate);
+            buttons.Children.Add(alt);
+        }
         buttons.Children.Add(ok);
         stack.Children.Add(buttons);
         panel = new GroupPanel("dialog.panel", title)
@@ -161,9 +198,13 @@ public sealed class DialogHost : Grid
     /// <summary>Esc 키와 같은 경로 (자체 시험도 이것을 부른다).</summary>
     public void CloseFromEscape() => Close(false);
 
-    public void Close(bool confirmed)
+    public void Close(bool confirmed) => Close(confirmed ? DialogChoice.Confirm : DialogChoice.Cancel);
+
+    public void Close(DialogChoice choice)
     {
         if (!IsOpen) return;
+        LastChoice = choice;
+        bool confirmed = choice == DialogChoice.Confirm;
         Visibility = Visibility.Collapsed;
         Children.Clear();
         panel = null;

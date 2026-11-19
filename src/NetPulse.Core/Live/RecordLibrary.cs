@@ -43,6 +43,22 @@ public sealed class RecordLibrary(Func<IReadOnlyList<string>> roots, bool holdAn
 
     public IReadOnlyList<LibraryItem> Items { get { lock (gate) return items; } }
 
+    private RecordWorkGate? workGate;
+
+    /// <summary>
+    /// 기록 작업 출입문 (M9 설계 B3): 목록 읽기와 항목 분석은 표를 받고 한다. 옮기는 동안 문이 닫히면 진행 중인 것만 끝내고 멈추며,
+    /// 문이 다시 열리면 처음부터 다시 읽는다 (위치 목록이 바뀌었다).
+    /// </summary>
+    public RecordWorkGate? WorkGate
+    {
+        get => workGate;
+        init
+        {
+            workGate = value;
+            if (value is not null) value.Reopened += () => { string? r; lock (gate) r = runningId; _ = RefreshAsync(r); };
+        }
+    }
+
     /// <summary>시험: 갱신 루프가 끝내기로 정한 뒤, 작업이 완료되기 전 (그 틈에 온 요청을 재현).</summary>
     internal Action? AfterLastPassForTest { get; set; }
 
@@ -83,7 +99,15 @@ public sealed class RecordLibrary(Func<IReadOnlyList<string>> roots, bool holdAn
             {
                 string? running;
                 lock (gate) { running = runningId; refreshAgain = false; }
-                BuildList(running);
+                using (var ticket = workGate?.TryEnter())
+                {
+                    if (workGate is not null && ticket is null)
+                    {
+                        lock (gate) refreshing = false;   // 옮기는 중: 다시 열릴 때 처음부터 (Reopened)
+                        return;
+                    }
+                    BuildList(running);
+                }
                 bool done;
                 lock (gate) { done = !refreshAgain; if (done) refreshing = false; }
                 if (done) { AfterLastPassForTest?.Invoke(); return; }
@@ -308,6 +332,17 @@ public sealed class RecordLibrary(Func<IReadOnlyList<string>> roots, bool holdAn
             if (item is null) { open?.TrySetResult(null); continue; }
 
             BeforeAnalyzeForTest?.Invoke(item.Key);
+            using var ticket = workGate?.TryEnter();
+            if (workGate is not null && ticket is null)
+            {
+                // 옮기는 중: 열기 요청은 앞에 다시 두고 멈춘다 (다시 열리면 목록을 새로 읽고 작업자를 깨운다)
+                lock (gate)
+                {
+                    if (open is not null) opens.Insert(0, (key, open));
+                    workerRunning = false;
+                }
+                return;
+            }
             var (opened, summary, damage, status) = Analyze(item);
             bool stable = Stamp(item.Entry.Segments) == item.Stamp;
             lock (gate)

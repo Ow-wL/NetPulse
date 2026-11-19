@@ -21,6 +21,9 @@ public sealed record MemoSaveResult(EventWriteState State, bool Latest, bool Tru
 /// </summary>
 public sealed class RecordMemos(NotesWriter writer, Func<DateTimeOffset> now)
 {
+    /// <summary>기록 작업 출입문 (M9 설계 B3).</summary>
+    public RecordWorkGate? WorkGate { get; init; }
+
     private readonly object gate = new();
     /// <summary>앞 요청이 쓰기를 넣으면 끝나는 작업 (부른 순서대로 이어 붙임, 세대 발급과 같은 잠금에서).</summary>
     private Task queued = Task.CompletedTask;
@@ -51,6 +54,9 @@ public sealed class RecordMemos(NotesWriter writer, Func<DateTimeOffset> now)
     public async Task<MemoSaveResult> SaveAsync(string key, IReadOnlyList<string> segments, string measurementId, string mark, long markAtMs, string? memo)
     {
         var (text, truncated) = SymptomMarks.Clean(memo);
+        // 기록을 옮기는 동안은 쓰지 않는다 (M9 설계 B3 출입문). 화면은 그동안 메모 칸을 읽기 전용으로 둔다 — 이것은 안전망
+        using var ticket = WorkGate?.TryEnter();
+        if (WorkGate is not null && ticket is null) return new MemoSaveResult(EventWriteState.Lost, true, truncated, text);
         long generation;
         Task previous;
         var mine = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -143,5 +149,18 @@ public sealed class RecordMemos(NotesWriter writer, Func<DateTimeOffset> now)
     public void ForgetFailed(string key, string mark)
     {
         lock (gate) failed.Remove((key, mark));
+    }
+
+    /// <summary>
+    /// 같은 측정의 출처 열쇠가 바뀜 (기록 옮기기로 조각 경로가 바뀜): 남겨 둔 글과 최신 요청 번호를 새 열쇠로 옮긴다 (G4 M9 1라운드 b3).
+    /// </summary>
+    public void Rekey(string oldKey, string newKey)
+    {
+        if (oldKey == newKey) return;
+        lock (gate)
+        {
+            foreach (var k in failed.Keys.Where(k => k.Key == oldKey).ToArray()) { failed[(newKey, k.Mark)] = failed[k]; failed.Remove(k); }
+            foreach (var k in latest.Keys.Where(k => k.Key == oldKey).ToArray()) { latest[(newKey, k.Mark)] = latest[k]; latest.Remove(k); }
+        }
     }
 }

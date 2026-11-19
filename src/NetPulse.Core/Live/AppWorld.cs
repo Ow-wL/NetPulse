@@ -17,8 +17,22 @@ public interface IAppWorld
     /// <summary>앱 벽시계 (화면의 "지금"). 측정 시계와 다르다 (측정마다 새로 만든다).</summary>
     DateTimeOffset Now { get; }
 
-    /// <summary>기록을 찾을 위치 (기본, 대체).</summary>
+    /// <summary>기록을 찾을 위치 (기본, 옛 위치들, 대체). 앞 위치가 정본 (M9 설계 B3 [1-7]).</summary>
     IReadOnlyList<string> RecordPaths { get; }
+
+    /// <summary>기본 위치 (사용자 폴더의 records).</summary>
+    string DefaultRecordFolder { get; }
+
+    /// <summary>지금 기본 위치 (설정 folder 또는 기본).</summary>
+    string CurrentRecordFolder { get; }
+
+    /// <summary>대체 위치.</summary>
+    string FallbackRecordFolder { get; }
+
+    /// <summary>
+    /// 기본 위치(null이면 기본)와 옛 위치들을 바꾼다 (M9 설계 B3). 측정 중에는 부르지 않는다 (다음 측정부터 새 위치에 쓴다).
+    /// </summary>
+    void SetRecordFolders(string? folder, IReadOnlyList<string> extra);
 
     Task<DetectionResult> DetectAsync(CancellationToken cancellationToken);
 
@@ -33,7 +47,9 @@ public interface IAppWorld
 public sealed class DemoAppWorld : IAppWorld
 {
     private readonly DemoWorld world;
-    private readonly DiskRecordRoot primary;
+    private readonly string defaultFolder;
+    private volatile DiskRecordRoot primary;
+    private volatile IReadOnlyList<string> extra = [];
     private readonly DiskRecordRoot fallback;
     private readonly DemoRunRules rules;
 
@@ -41,8 +57,19 @@ public sealed class DemoAppWorld : IAppWorld
     {
         this.world = world;
         this.rules = rules;
-        primary = new DiskRecordRoot(Path.Combine(userData, "records"), "primary");
+        defaultFolder = Path.Combine(userData, "records");
+        primary = new DiskRecordRoot(defaultFolder, "primary");
         fallback = new DiskRecordRoot(fallbackPath ?? Path.Combine(Path.GetTempPath(), "NetPulse", "demo-records"), "fallback");
+    }
+
+    public string DefaultRecordFolder => defaultFolder;
+    public string CurrentRecordFolder => primary.Path!;
+    public string FallbackRecordFolder => fallback.Path!;
+
+    public void SetRecordFolders(string? folder, IReadOnlyList<string> extraFolders)
+    {
+        primary = new DiskRecordRoot(folder ?? defaultFolder, "primary");
+        extra = [.. extraFolders];
     }
 
     public DemoWorld World => world;
@@ -52,7 +79,7 @@ public sealed class DemoAppWorld : IAppWorld
         DemoDiagnosticProbes.Settings(world.Scenario), new DemoSystemActions(world.Scenario));
     public string Kind => "demo:" + world.Scenario.Name;
     public DateTimeOffset Now => world.TimeBase.Now;
-    public IReadOnlyList<string> RecordPaths => [primary.Path!, fallback.Path!];
+    public IReadOnlyList<string> RecordPaths => [primary.Path!, .. extra, fallback.Path!];
 
     public Task<DetectionResult> DetectAsync(CancellationToken cancellationToken) => world.DetectAsync(cancellationToken);
 

@@ -34,12 +34,12 @@ public sealed class M8FlowTests
 
     private static AppDriver Launch(string userData, params string[] args) => AppDriver.LaunchWith(userData, [.. args, "--freeze-motion"]);
 
-    private static JsonElement WaitReady(AppDriver app, bool? masked = null) =>
+    internal static JsonElement WaitReady(AppDriver app, bool? masked = null) =>
         app.WaitDiag(d => d, d => Has(d, "previewReady") && Sd(d).GetProperty("previewReady").GetBoolean() && Sd(d).GetProperty("state").GetString() == "Ready"
             && Sd(d).GetProperty("exportEnabled").GetBoolean() && Sd(d).GetProperty("published").ValueKind == JsonValueKind.Object
             && (masked is null || Sd(d).GetProperty("published").GetProperty("masked").GetBoolean() == masked), "리포트 미리 보기");
 
-    private static JsonElement WaitExport(AppDriver app) =>
+    internal static JsonElement WaitExport(AppDriver app) =>
         app.WaitDiag(d => d, d => Has(d, "export") && Sd(d).GetProperty("export").ValueKind == JsonValueKind.Object && !Sd(d).GetProperty("exporting").GetBoolean(), "내보내기 끝");
 
     private static (MeasurementRecord Record, AnalysisResult Analysis) Reanalyze(string userData, string id)
@@ -447,6 +447,10 @@ public sealed class M8FlowTests
             var d = app.WaitDiag(x => x, x => Has(x, "published") && Sd(x).GetProperty("published").ValueKind == JsonValueKind.Object
                 && Sd(x).GetProperty("state").GetString() == "Ready" && !Sd(x).GetProperty("diagnoses").GetBoolean() && Sd(x).GetProperty("details").GetInt32() == 0
                 && Sd(x).GetProperty("published").GetProperty("masked").GetBoolean() && !Sd(x).GetProperty("memos").GetBoolean(), "옵션 반영 (가리면 메모 넣기도 꺼짐)");
+            // 다시 가리면 메모 넣기 스위치는 UIA에서도 막히고 꺼져 있다 (M8 이월 3)
+            var memoSwitch = app.Find("report.memos");
+            Assert.False(memoSwitch.Current.IsEnabled, "다시 가린 뒤 메모 넣기가 막혀 있지 않음");
+            Assert.Equal(ToggleState.Off, ((TogglePattern)memoSwitch.GetCurrentPattern(TogglePattern.Pattern)).Current.ToggleState);
             var sections = Sd(d).GetProperty("published").GetProperty("sections").EnumerateArray().Select(s => s.GetString()).ToArray();
             Assert.DoesNotContain("diagnoses", sections);
             Assert.DoesNotContain("details", sections);

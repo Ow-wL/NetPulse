@@ -14,6 +14,9 @@ public sealed record StartupOptions
     public double DemoSpeed { get; init; } = 1;
     /// <summary>사용자 데이터 폴더. 없으면 %LOCALAPPDATA%\NetPulse (테스트는 실행마다 새 폴더를 준다)</summary>
     public string UserData { get; init; } = "";
+
+    /// <summary><c>--user-data</c>로 사용자 폴더를 직접 줬는가 (시험의 격리 폴더). 파괴적인 시험 주입은 이때만 켠다.</summary>
+    public bool UserDataGiven { get; init; }
     /// <summary>0보다 크면 그 시간 뒤 스스로 닫힌다 (자동화용)</summary>
     public int RunSeconds { get; init; }
 
@@ -42,6 +45,16 @@ public sealed record StartupOptions
     public long? DemoMark { get; init; }
     /// <summary>한 번 도는 모션을 이 진행도(0~1)에서 멈춘다 (화면 전환 캡처)</summary>
     public double? MotionHold { get; init; }
+
+    // ---- M9 (설계 A·B) ----
+    /// <summary>같은 사용자 폴더로 떠 있는 실행을 저장 후 종료시키고 끝난다 (트레이 "종료"와 같은 경로). 떠 있는 것이 없으면 종료 코드 2.</summary>
+    public bool Exit { get; init; }
+    /// <summary>이번 실행에만: 측정 중 창을 닫으면 트레이로 숨길지 (저장하지 않음). 기존 UI 시험은 off로 지금 동작을 지킨다.</summary>
+    public bool? CloseToTray { get; init; }
+    /// <summary>시험: 기록 저장 위치 고르기 대화상자 대신 이 폴더 (B3).</summary>
+    public string? PickFolder { get; init; }
+    /// <summary>시험 주입 (B3): copy:&lt;측정 Id&gt;(그 기록 복사 실패), delete:&lt;Id&gt;(원본 삭제 실패), kill-after:&lt;n&gt;(n개 옮긴 뒤 프로세스 강제 종료), cross(다른 볼륨처럼 복사 경로).</summary>
+    public string? MoveFail { get; init; }
 
     /// <summary>부품 전시 화면 (M2)</summary>
     public bool Showcase { get; init; }
@@ -72,8 +85,10 @@ public sealed record StartupOptions
     public bool SimulateAnimationsOff { get; init; }
     public bool SimulateEnergySaver { get; init; }
     public bool SimulateLowPerformance { get; init; }
+    /// <summary>트레이 아이콘을 넣지 못한 것처럼 (M9 G5 "트레이 사용 불가" 장면).</summary>
+    public bool SimulateTrayOff { get; init; }
 
-    public bool AnySimulation => SimulateHighContrast is not null || SimulateTransparencyOff || SimulateAnimationsOff || SimulateEnergySaver || SimulateLowPerformance;
+    public bool AnySimulation => SimulateHighContrast is not null || SimulateTransparencyOff || SimulateAnimationsOff || SimulateEnergySaver || SimulateLowPerformance || SimulateTrayOff;
 
     public static StartupOptions Parse(IReadOnlyList<string> args)
     {
@@ -86,7 +101,7 @@ public sealed record StartupOptions
             {
                 "--demo" => o with { Demo = Next() },
                 "--demo-speed" => o with { DemoSpeed = double.Parse(Next(), CultureInfo.InvariantCulture) },
-                "--user-data" => o with { UserData = Next() },
+                "--user-data" => o with { UserData = Next(), UserDataGiven = true },
                 "--run-seconds" => o with { RunSeconds = int.Parse(Next(), CultureInfo.InvariantCulture) },
                 "--screen" => o with { Screen = Next() is var sc && ScreenIds.Contains(sc) ? sc : throw new ArgumentException($"알 수 없는 화면입니다: {sc}") },
                 "--start" => o with { Start = true },
@@ -101,6 +116,10 @@ public sealed record StartupOptions
                 "--demo-mark" => o with { DemoMark = long.Parse(Next(), CultureInfo.InvariantCulture) },
                 "--motion-hold" => o with { MotionHold = double.Parse(Next(), CultureInfo.InvariantCulture) },
                 "--showcase" => o with { Showcase = true },
+                "--exit" => o with { Exit = true },
+                "--close-to-tray" => o with { CloseToTray = OnOff(Next()) },
+                "--pick-folder" => o with { PickFolder = Next() },
+                "--move-fail" => o with { MoveFail = Next() is var mf && (mf == "cross" || mf == "hold" || mf == "hold-long" || mf.StartsWith("copy:", StringComparison.Ordinal) || mf.StartsWith("delete:", StringComparison.Ordinal) || mf.StartsWith("kill-after:", StringComparison.Ordinal)) ? mf : throw new ArgumentException("copy:<id>, delete:<id>, kill-after:<n>, cross 중 하나") },
                 "--theme" => o with
                 {
                     Theme = Next() switch
@@ -127,6 +146,7 @@ public sealed record StartupOptions
                 "--simulate-animations-off" => o with { SimulateAnimationsOff = true },
                 "--simulate-energy-saver" => o with { SimulateEnergySaver = true },
                 "--simulate-low-performance" => o with { SimulateLowPerformance = true },
+                "--simulate-tray-off" => o with { SimulateTrayOff = true },
                 _ => throw new ArgumentException($"알 수 없는 인수입니다: {args[i]}"),
             };
         }

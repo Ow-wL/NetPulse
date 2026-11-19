@@ -21,9 +21,12 @@ public sealed class Effects
     private readonly StartupOptions options;
     private readonly AppLog log;
     private bool lowPerformance;
+    private readonly Action<AppSettings>? persist;
 
-    public Effects(DispatcherQueue dispatcher, AppSettings settings, StartupOptions options, AppLog log)
+    /// <param name="persist">설정을 저장하는 길 (<c>SettingsStore</c>, M9 설계 B1 [2-7]). null이면 저장하지 않는다.</param>
+    public Effects(DispatcherQueue dispatcher, AppSettings settings, StartupOptions options, AppLog log, Action<AppSettings>? persist = null)
     {
+        this.persist = persist;
         this.dispatcher = dispatcher;
         this.options = options;
         this.log = log;
@@ -84,12 +87,7 @@ public sealed class Effects
     public void UpdateSettings(AppSettings next, bool persist)
     {
         Settings = next;
-        if (persist)
-        {
-            try { next.Save(options.UserData); }
-            catch (IOException ex) { log.Write("settingsSaveFailed", new { type = ex.GetType().Name }); }
-            catch (UnauthorizedAccessException ex) { log.Write("settingsSaveFailed", new { type = ex.GetType().Name }); }
-        }
+        if (persist) this.persist?.Invoke(next);   // 저장 실패 기록은 저장소 쪽이 한다
         Refresh();
     }
 

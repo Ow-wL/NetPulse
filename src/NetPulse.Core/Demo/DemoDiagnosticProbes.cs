@@ -18,6 +18,16 @@ public sealed class DemoDiagnosticProbes : IDiagnosticProbes
 
     private readonly DemoWorld world;
     private readonly ScenarioDiagnosis? d;
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> probed = new();
+
+    /// <summary>검사기가 받은 대상 (최근 12개, "tcp:주소"·"dns:이름"·"https:이름"). 설정이 실제로 전달됐는지 시험이 본다 (M9 설계 B4 [1-14]).</summary>
+    public IReadOnlyList<string> Probed => [.. probed.TakeLast(12)];
+
+    private void Probe(string what)
+    {
+        probed.Enqueue(what);
+        while (probed.Count > 12) probed.TryDequeue(out _);
+    }
     private readonly ScenarioTarget[] externals;
     private readonly ScenarioTarget? local;
 
@@ -98,6 +108,7 @@ public sealed class DemoDiagnosticProbes : IDiagnosticProbes
     public async Task<ProbeOutcomeResult> TcpAsync(IPAddress address, int port, CancellationToken ct)
     {
         long round = Round;
+        Probe("tcp:" + address);
         await Delay("tcp", ct).ConfigureAwait(false);
         int slot = Array.FindIndex(externals, t => IPAddress.Parse(t.Address).Equals(address));
         if (slot >= 0 && d?.Tcp is { } tcp && slot < tcp.Count) return await Forced(tcp[slot], ct).ConfigureAwait(false);
@@ -116,6 +127,7 @@ public sealed class DemoDiagnosticProbes : IDiagnosticProbes
     {
         long round = Round;
         string h = host.Trim().TrimEnd('.').ToLowerInvariant();
+        Probe((isDns ? "dns:" : "https:") + h);
         bool siteCheck = !SlotDomains.Contains(h);
         await Delay(siteCheck ? "site" : isDns ? "dns" : "https", ct).ConfigureAwait(false);
         if (d?.Site?.GetValueOrDefault(h) is { } site && (isDns ? site.Dns : site.Https) is { } v) return await Forced(v, ct).ConfigureAwait(false);

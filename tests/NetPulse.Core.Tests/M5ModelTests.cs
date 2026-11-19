@@ -95,6 +95,14 @@ public sealed class M5ModelTests : IDisposable
             .Replace("\"seed\": 23,", "\"seed\": 23, \"faults\": { \"detect\": \"unknown\" },")), new DemoTimeBase(Start, 1)).Detect();
         Assert.Equal(DetectionStatus.Unknown, fail.Status);
         Assert.DoesNotContain(fail.Proposal!.Targets, t => t.Role == TargetRole.Local);
+        // M9 C1: IPv4 기본 경로 없음 (연결은 있음) → 실측과 같은 안내, 외부 대상만 제안
+        var noIpv4 = new DemoWorld(Scenario.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "scenarios", "outage-long.json"))
+            .Replace("\"seed\": 23,", "\"seed\": 23, \"faults\": { \"detect\": \"no-ipv4\" },")), new DemoTimeBase(Start, 1)).Detect();
+        Assert.Equal(DetectionStatus.NoIpv4Route, noIpv4.Status);
+        Assert.Contains("IPv4 인터넷 경로가 없습니다", noIpv4.Notice);
+        Assert.Equal(["예시 통신사 A", "예시 통신사 B"], noIpv4.Proposal!.Targets.Select(t => t.Name));
+        Assert.Throws<ScenarioException>(() => Scenario.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "scenarios", "outage-long.json"))
+            .Replace("\"seed\": 23,", "\"seed\": 23, \"faults\": { \"detect\": \"bogus\" },")));
     }
 
     [Fact]

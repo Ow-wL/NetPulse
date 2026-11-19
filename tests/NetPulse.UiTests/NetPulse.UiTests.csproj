@@ -21,9 +21,12 @@
   <ItemGroup>
     <None Include="..\..\demo\scenarios\*.json" Link="scenarios\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="scenarios\*.json" Link="scenarios\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <!-- M9: 실행 파일에 넣는(ApplicationIcon) 바로 그 아이콘. 배포본은 단일 파일이라 옆에 .ico가 없다 -->
+    <None Include="..\..\src\NetPulse.App\Assets\NetPulse.ico" Link="NetPulse.ico" CopyToOutputDirectory="PreserveNewest" />
     <None Include="m5-scenes.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="m6-scenes.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="m7-scenes.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="m8-scenes.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="m9-scenes.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

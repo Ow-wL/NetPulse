@@ -268,7 +268,7 @@ public sealed class ReviewR1Tests : IDisposable
         power.Suspend();
         await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(100));   // 계획(60초)을 넘겨 복귀
         power.Resume();
-        var result = await s.Completion.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        var result = await s.Completion.WaitAsync(TestSupport.SessionLimit, TestContext.Current.CancellationToken);
         Assert.Equal(EndReason.Completed, result.EndReason);
         var gap = Assert.Single(Reread().Gaps);
         Assert.Equal(60_000, gap.ToMs);

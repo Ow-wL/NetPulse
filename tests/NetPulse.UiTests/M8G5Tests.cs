@@ -195,6 +195,8 @@ public sealed class M8G5Tests
                 var build = new List<long>();
                 var check = new List<long>();
                 var html = new List<long>();
+                var maskedBuild = new List<long>();
+                var maskedCheck = new List<long>();
                 long bytes = 0;
                 int episodes = 0;
                 for (int i = 0; i < 5; i++)
@@ -215,11 +217,20 @@ public sealed class M8G5Tests
                     var text = ReportHtml.Write(doc);
                     Assert.Empty(ReportHtml.Verify(text));
                     html.Add(w.ElapsedMilliseconds);
+                    // 가린 문서의 안전망 검사 구간 (M8 G4 7라운드 사소 2, M9 설계 C2): 위의 검사는 가리지 않은 문서라 안전망이 할 일이 없다
+                    w.Restart();
+                    var masked = ReportBuilder.Build(new ReportInput("k", "s", record, a, RecordLifecycle.Ended, [], new ReportOptions(Masked: true, IncludeMemos: false, EpisodeDetails: ReportOptions.MaxEpisodeDetails), M5Fixtures.DemoNow, "bench"));
+                    maskedBuild.Add(w.ElapsedMilliseconds);
+                    w.Restart();
+                    var maskedLeaks = masked.Guard!.Check(masked);
+                    maskedCheck.Add(w.ElapsedMilliseconds);
+                    Assert.Empty(maskedLeaks);
                     bytes = System.Text.Encoding.UTF8.GetByteCount(text);
                     peak = Math.Max(peak, PrivateMb());
                 }
-                cases.Add(new { name, episodes, readAnalyzeMs = read, buildMs = build, checkMs = check, htmlMs = html, bytes });
+                cases.Add(new { name, episodes, readAnalyzeMs = read, buildMs = build, checkMs = check, htmlMs = html, maskedBuildMs = maskedBuild, maskedCheckMs = maskedCheck, bytes });
                 if (build.Max() > buildLimit) problems.Add($"{name}: 문서 만들기 최대 {build.Max()} ms > {buildLimit}");
+                if (maskedBuild.Max() + maskedCheck.Max() > buildLimit) problems.Add($"{name}: 가린 문서 만들기+안전망 최대 {maskedBuild.Max() + maskedCheck.Max()} ms > {buildLimit}");
                 if (bytes > sizeLimit) problems.Add($"{name}: HTML {bytes} B > {sizeLimit}");
             }
             Record("bench-report-build", new { cases, peakPrivateMb = peak });

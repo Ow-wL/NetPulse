@@ -51,7 +51,9 @@ public static class LiveSummary
             string rate = s?.LossRate is double lr ? Percent(lr) : "값 없음";
             string sentence = counted == 0 ? "아직 판단할 응답이 없습니다" : $"{counted}번 중 {s!.Lost}번 응답이 없었습니다";
             string avg = s?.AvgRttMs is double a ? PathMapModel.Ms(a) : "값 없음";
-            return new TargetCard(t.Id, t.Name, t.Role == TargetRole.Local ? "로컬" : "외부", latestText, r?.Outcome, rate, sentence, avg,
+            // 측정 방식이 TCP면 역할 옆에 (M9 설계 B5): "외부 · TCP 443"
+            string role = (t.Role == TargetRole.Local ? "로컬" : "외부") + (t.Method.Kind == ProbeMethodKind.Tcp ? " · " + RecordView.MethodText(t.Method) : "");
+            return new TargetCard(t.Id, t.Name, role, latestText, r?.Outcome, rate, sentence, avg,
                 s?.MaxConsecutiveLoss ?? 0, s?.LastSuccess, s?.LastLoss, s?.Error ?? 0);
         }).ToArray();
     }

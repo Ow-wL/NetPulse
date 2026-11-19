@@ -39,7 +39,7 @@ public sealed record DiagnosisSnapshot(long Version, DiagnosisOperation Operatio
 /// </summary>
 public sealed class DiagnosisHost
 {
-    private readonly DiagnosisWorld world;
+    private DiagnosisWorld world;
     private readonly DiagnosisStore store;
     private readonly Func<string?> runningMeasurementId;
     private readonly Func<DateTimeOffset> now;
@@ -57,6 +57,20 @@ public sealed class DiagnosisHost
     private Task current = Task.CompletedTask, siteTask = Task.CompletedTask;
     private long version;
     private DiagnosisSnapshot snapshot;
+
+    /// <summary>
+    /// 진단 기본값을 바꾼다 (M9 설계 B4). 진행 중인 진단은 시작할 때 받은 설정으로 끝까지 돈다 (다음 진단부터).
+    /// </summary>
+    public void SetSettings(DiagnosisSettings settings)
+    {
+        lock (gate) world = world with { Settings = settings };
+    }
+
+    /// <summary>지금 진단 기본값.</summary>
+    public DiagnosisSettings CurrentSettings { get { lock (gate) return world.Settings; } }
+
+    /// <summary>진단 세계 (데모 진단 값이 검사기를 본다).</summary>
+    public IDiagnosticProbes Probes => world.Probes;
 
     public DiagnosisHost(DiagnosisWorld world, DiagnosisStore store, Func<string?> runningMeasurementId, Func<DateTimeOffset> now, string appVersion)
     {
@@ -98,7 +112,8 @@ public sealed class DiagnosisHost
             operation = DiagnosisOperation.Diagnosing;
             partial = [];
             string? measurementId = runningMeasurementId();   // 시작 버튼을 받은 그 순간의 측정 (설계 3.4 [1-7])
-            current = Task.Run(() => DiagnoseAsync(measurementId));
+            var settings = world.Settings;                    // 요청을 받은 그 순간의 설정 (G4 M9 1라운드 a11)
+            current = Task.Run(() => DiagnoseAsync(measurementId, settings));
         }
         Publish();
         return DiagnosisRequest.Started;
@@ -138,7 +153,8 @@ public sealed class DiagnosisHost
             else
             {
                 site = new SiteState(null, true, null, null);
-                siteTask = Task.Run(() => SiteAsync(ascii));
+                var settings = world.Settings;
+                siteTask = Task.Run(() => SiteAsync(ascii, settings));
             }
         }
         Publish();
@@ -147,9 +163,9 @@ public sealed class DiagnosisHost
 
     // ---------------- 작업 ----------------
 
-    private async Task DiagnoseAsync(string? measurementId)
+    private async Task DiagnoseAsync(string? measurementId, DiagnosisSettings settings)
     {
-        var run = await RunOnceAsync(null, measurementId).ConfigureAwait(false);
+        var run = await RunOnceAsync(null, measurementId, settings).ConfigureAwait(false);
         lock (gate)
         {
             if (closed) return;
@@ -178,13 +194,15 @@ public sealed class DiagnosisHost
         catch (OperationCanceledException) { return; }
         catch (Exception ex) { flush = new SystemActionResult(false, ex.GetType().Name); }
         string? measurementId;
+        DiagnosisSettings settings;
         lock (gate)
         {
             if (closed) return;
             flushStage = FlushStage.Rechecking; partial = []; measurementId = runningMeasurementId();   // 다시 진단을 시작하는 순간
+            settings = world.Settings;
         }
         Publish();
-        var run = await RunOnceAsync(flush, measurementId).ConfigureAwait(false);
+        var run = await RunOnceAsync(flush, measurementId, settings).ConfigureAwait(false);
         lock (gate)
         {
             if (closed) return;
@@ -196,12 +214,12 @@ public sealed class DiagnosisHost
     }
 
     /// <summary>진단 한 번: 시작 순간 측정 Id, 진행 알림, 비교, 저장. 종료로 억제되면 null.</summary>
-    private async Task<DiagnosisRun?> RunOnceAsync(SystemActionResult? flush, string? measurementId)
+    private async Task<DiagnosisRun?> RunOnceAsync(SystemActionResult? flush, string? measurementId, DiagnosisSettings settings)
     {
         DiagnosisResult result;
         try
         {
-            result = await QuickDiagnosis.RunAsync(world.Probes, world.Settings, now, stop.Token, new Reporter(this)).ConfigureAwait(false);
+            result = await QuickDiagnosis.RunAsync(world.Probes, settings, now, stop.Token, new Reporter(this)).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { return null; }
         if (closed) return null;   // 종료 뒤 끝난 결과(취소로 생긴 오류 포함)는 버린다
@@ -214,10 +232,10 @@ public sealed class DiagnosisHost
         return new DiagnosisRun(result, measurementId, flush, save, changes, previous);
     }
 
-    private async Task SiteAsync(string domain)
+    private async Task SiteAsync(string domain, DiagnosisSettings settings)
     {
         SiteCheckResult? result = null;
-        try { result = await SiteCheck.RunAsync(world.Probes, domain, world.Settings, stop.Token).ConfigureAwait(false); }
+        try { result = await SiteCheck.RunAsync(world.Probes, domain, settings, stop.Token).ConfigureAwait(false); }
         catch (OperationCanceledException) { }
         lock (gate)
         {

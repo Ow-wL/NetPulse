@@ -47,6 +47,8 @@ public sealed record HostOptions
     public TimeSpan AnalysisInterval { get; init; } = TimeSpan.FromSeconds(5);
     /// <summary>시험·캡처: 측정 시작 직전에 멈춘다 (시작 중 화면)</summary>
     public bool HoldStart { get; init; }
+    /// <summary>기록 작업 출입문 (M9 설계 B3): 옮기는 동안 측정 시작·끝난 측정의 메모 쓰기를 막는다.</summary>
+    public RecordWorkGate? WorkGate { get; init; }
     public string AppVersion { get; init; } = "0.0.0";
 }
 
@@ -81,6 +83,17 @@ public sealed class MeasurementHost : IAsyncDisposable
     private long version;
     private FinishedMeasurement? finished;
     private string? startError;
+    /// <summary>종료가 시작되면 새 시작을 받지 않는다 (M9 설계 A1 종료 합류).</summary>
+    private bool startsBlocked;
+    /// <summary>진행 중인 시작이 끝나면(성공·실패) 풀린다. 시작 중이 아니면 끝난 작업.</summary>
+    private TaskCompletionSource startDone = Completed();
+
+    private static TaskCompletionSource Completed()
+    {
+        var t = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        t.SetResult();
+        return t;
+    }
 
     // 측정 중 모델 (loop 작업만 바꾼다)
     private AppendOnlyList<RoundData> rounds = new();
@@ -119,6 +132,21 @@ public sealed class MeasurementHost : IAsyncDisposable
 
     /// <summary>장면이 바뀜 (백그라운드 스레드).</summary>
     public event Action? Changed;
+
+    /// <summary>
+    /// 장면을 게시할 때마다 그 장면 (M9 설계 A1 [2-5]). 알림처럼 전환을 하나도 놓치면 안 되는 쪽이 쓴다:
+    /// <see cref="Changed"/>는 처리할 때 최신 장면을 읽어 중간 장면이 합쳐질 수 있다. 여러 스레드에서 올 수 있어
+    /// 받는 쪽은 <see cref="HostSnapshot.Version"/>으로 순서를 맞춘다.
+    /// </summary>
+    public event Action<HostSnapshot>? Published;
+
+    /// <summary>새 시작을 막는다 (종료·세션 종료 진입). 이미 막혀 있으면 그대로.</summary>
+    public void BlockStarts() { lock (gate) startsBlocked = true; }
+
+    /// <summary>세션 종료가 취소되면 다시 시작을 받는다.</summary>
+    public void UnblockStarts() { lock (gate) startsBlocked = false; }
+
+    public bool StartsBlocked { get { lock (gate) return startsBlocked; } }
     /// <summary>측정이 끝남 (최근 측정 목록을 다시 읽을 때).</summary>
     public event Action<FinishedMeasurement>? Finished;
 
@@ -165,14 +193,34 @@ public sealed class MeasurementHost : IAsyncDisposable
         Profile profile;
         lock (gate)
         {
-            if (state is not (HostState.Idle)) return false;
+            if (state is not (HostState.Idle) || startsBlocked) return false;
+        }
+        // 작업 문의 표를 받고 시작한다 (G4 M9 1라운드 a1): 옮기기가 독점을 얻으면 이 표가 끝나기(측정 중 상태 게시)를 기다린 뒤
+        // 호스트 상태를 다시 보고 거절한다. 표 없이 시작하면 독점 확인과 세션 생성 사이에 끼어들 수 있었다.
+        var ticket = options.WorkGate?.TryEnter();
+        if (options.WorkGate is not null && ticket is null)
+        {
+            lock (gate)
+            {
+                if (state is not (HostState.Idle) || startsBlocked) return false;
+                startError = "기록을 옮기는 중에는 측정을 시작할 수 없습니다.";
+            }
+            Publish();
+            return false;
+        }
+        using var held = ticket;
+        lock (gate)
+        {
+            if (state is not (HostState.Idle) || startsBlocked) return false;
             profile = Current(profiles) ?? throw new InvalidOperationException("측정 구성이 없습니다.");
             state = HostState.Starting;
             startError = null;
             finished = null;
+            if (!options.HoldStart) startDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         }
         Publish();
         if (options.HoldStart) return true;   // 시험·캡처: 시작 중 화면에 멈춤
+        var done = startDone;
         try
         {
             var s = await Task.Run(() => world.StartSession(profile, options.AppVersion)).ConfigureAwait(false);
@@ -198,6 +246,7 @@ public sealed class MeasurementHost : IAsyncDisposable
             Publish();
             return false;
         }
+        finally { done.TrySetResult(); }
     }
 
     /// <summary>중지 (확인을 묻지 않는다). 메모 초안이 있으면 먼저 넣는다.</summary>
@@ -341,8 +390,11 @@ public sealed class MeasurementHost : IAsyncDisposable
         if (live is not null) result = await live.ConfigureAwait(false);
         else
         {
-            var folder = NotesFolder(sessionId);
-            result = folder is null ? EventWriteState.Lost
+            // 끝난 측정의 노트는 기록 폴더에 쓴다: 옮기는 동안은 쓰지 않고 초안으로 남긴다 (M9 설계 B3 출입문)
+            using var ticket = options.WorkGate?.TryEnter();
+            var folder = options.WorkGate is not null && ticket is null ? null : NotesFolder(sessionId);
+            result = options.WorkGate is not null && ticket is null ? EventWriteState.Pending
+                : folder is null ? EventWriteState.Lost
                 : await notes.WriteAsync(folder, sessionId, mark, atMs, world.Now, memo, () => MemoEpoch(sessionId, mark) == mine).ConfigureAwait(false);
         }
         // 저장한 그 글일 때만 초안을 지운다: 기다리는 동안 새로 쓴 글은 남긴다 (G4 M5 1라운드 A5)
@@ -368,10 +420,15 @@ public sealed class MeasurementHost : IAsyncDisposable
     }
 
     /// <summary>요약이 있는 조각 폴더 (없으면 마지막 조각).</summary>
+    /// <summary>
+    /// 그 측정의 노트 폴더. 먼저 정본 규칙(조각 번호마다 앞 위치)으로 조각을 고른 뒤 기록 화면과 같은 규칙(<see cref="RecordMemos.NotesFolder"/>)을 쓴다.
+    /// 뒤 위치의 같은 조각 사본에 요약이 있어도 그쪽에 쓰지 않는다 (G4 M9 1라운드 a4: 읽기가 버리는 사본에 메모가 저장될 수 있었다).
+    /// </summary>
     private string? NotesFolder(string sessionId)
     {
-        var segments = RecordReader.FindSegments(sessionId, world.RecordPaths);
-        return segments.FirstOrDefault(f => File.Exists(Path.Combine(f, "summary.json"))) ?? segments.LastOrDefault();
+        var found = RecordReader.FindSegments(sessionId, world.RecordPaths);
+        if (found.Count == 0) return null;
+        return RecordMemos.NotesFolder(RecordCatalog.EntryFor(sessionId, found, null).Segments);
     }
 
     private void RefreshFinishedMarks(string sessionId)
@@ -390,11 +447,25 @@ public sealed class MeasurementHost : IAsyncDisposable
 
     // ---------------- 끝 ----------------
 
-    /// <summary>창 닫기: 초안을 넣고, 측정을 멈추고 저장하고, 노트 쓰기를 최대 3초 기다린다.</summary>
+    /// <summary>
+    /// 앱 종료: 새 시작을 막고, 진행 중인 시작·중지에 합류해 측정을 끝까지 멈추고 저장한 뒤, 노트 쓰기를 최대 3초 기다린다
+    /// (M9 설계 A1 종료 합류 [1-3]: <see cref="StopAsync"/>는 시작 중·멈추는 중에 바로 돌아오므로 종료에서는 이 경로만 쓴다).
+    /// UI 문맥을 쓰지 않는다 (세션 종료가 UI 스레드를 막고 기다린다, A6).
+    /// </summary>
     public async Task ShutdownAsync()
     {
+        Task starting;
+        lock (gate)
+        {
+            startsBlocked = true;
+            starting = startDone.Task;
+        }
+        await starting.ConfigureAwait(false);   // 시작 중이면 성공·실패가 정해질 때까지
         await FlushDraftsAsync(options.DraftFlushLimit).ConfigureAwait(false);
-        await StopAsync().ConfigureAwait(false);
+        HostState now;
+        lock (gate) now = state;
+        if (now is HostState.Measuring || (now is HostState.Starting && options.HoldStart)) await StopAsync().ConfigureAwait(false);
+        else if (now is HostState.Stopping) await WaitIdleAsync().ConfigureAwait(false);   // 진행 중인 중지에 합류
         await notes.DrainAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
     }
 
@@ -516,6 +587,7 @@ public sealed class MeasurementHost : IAsyncDisposable
             next = Build();
             Volatile.Write(ref snapshot, next);
         }
+        Published?.Invoke(next);
         Changed?.Invoke();
     }
 

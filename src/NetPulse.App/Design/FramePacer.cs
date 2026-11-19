@@ -69,6 +69,26 @@ public sealed class FramePacer
 
     public void Detach() => CompositionTarget.Rendering -= OnRendering;
 
+    private bool detachedForHide;
+
+    /// <summary>창 숨김 (M9 설계 A1): 렌더링 구독을 끊는다. 다시 열면 첫 간격은 버린다.</summary>
+    public void Pause()
+    {
+        if (detachedForHide) return;
+        detachedForHide = true;
+        CompositionTarget.Rendering -= OnRendering;
+    }
+
+    public void Resume()
+    {
+        if (!detachedForHide) return;
+        detachedForHide = false;
+        last = -1;
+        CompositionTarget.Rendering += OnRendering;
+    }
+
+    public bool Paused => detachedForHide;
+
     /// <summary>창 크기 조절처럼 표본을 넣지 않을 구간 (G4 M2 1라운드 지적 9).</summary>
     public void Suspend(TimeSpan span) => suspendedUntil = Math.Max(suspendedUntil, clock.Elapsed.TotalMilliseconds + span.TotalMilliseconds);
 

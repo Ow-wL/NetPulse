@@ -152,12 +152,50 @@ public sealed class ReportScreen : Screen
 
     private bool entered;
 
+    /// <summary>다시 열기: 숨김으로 멈춘 종이 면 그리기를 이어 간다 (M9 설계 A1).</summary>
+    protected override void OnResume()
+    {
+        if (Visibility == Visibility.Visible && pausedDraw is { } resume)
+        {
+            pausedDraw = null;
+            drawing = resume;
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += resume;
+        }
+    }
+
+    /// <summary>
+    /// 숨김: 프레임 구독을 직접 끊는다 (G4 M9 1라운드 b2). 숨은 창에서는 렌더링 콜백이 오지 않을 수 있어, 콜백 안에서 스스로 끊기를 기다리면
+    /// 구독이 남는다. 그리던 종이 면은 다시 열 때 이어 그리고, 떼던 지난 종이 면은 보이지 않으니 한 번에 뗀다.
+    /// </summary>
+    protected override void OnSuspend()
+    {
+        if (drawing is { } d)
+        {
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= d;
+            pausedDraw = d;
+            drawing = null;
+        }
+        if (clearing is { } c)
+        {
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= c;
+            clearing = null;
+            if (clearingOld is { } old) paperHost.Children.Remove(old);
+            clearingOld = null;
+        }
+    }
+
+    public override int FrameHooks => (drawing is null ? 0 : 1) + (clearing is null ? 0 : 1);
+
+    private EventHandler<object>? drawing, clearing;
+    private Panel? clearingOld;
+
     public override void Entered()
     {
         entered = true;
         if (pausedDraw is { } resume)
         {
             pausedDraw = null;
+            drawing = resume;
             Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += resume;
         }
         _ = Context.Records.RefreshAsync(Context.Host.RunningId);
@@ -168,6 +206,7 @@ public sealed class ReportScreen : Screen
     /// <summary>기록 상세의 "리포트 만들기" (그 측정이 골라진 채로).</summary>
     public void Show(string recordKey)
     {
+        keyId = Context.Records.Items.FirstOrDefault(i => i.Key == recordKey)?.Entry.Id ?? keyId;
         if (key != recordKey || requests.Latest?.Key != recordKey)
         {
             key = recordKey;
@@ -180,7 +219,14 @@ public sealed class ReportScreen : Screen
     /// 들어가기 전에 고를 측정을 정한다 (기록 상세의 "리포트 만들기"): 들어가며 기본 측정(가장 최근)으로 문서를 만들기 시작했다가
     /// 바로 버리는 일이 없게 (M8 bench, GPT 교차 검토).
     /// </summary>
-    public void Preselect(string recordKey) => key = recordKey;
+    public void Preselect(string recordKey)
+    {
+        key = recordKey;
+        keyId = Context.Records.Items.FirstOrDefault(i => i.Key == recordKey)?.Entry.Id ?? keyId;
+    }
+
+    /// <summary>고른 기록의 측정 Id: 옮기기로 출처 열쇠가 바뀌어도 같은 측정을 계속 고른다 (G4 M9 1라운드 b3).</summary>
+    private string? keyId;
 
     // ---------------- 고르기 ----------------
 
@@ -191,6 +237,11 @@ public sealed class ReportScreen : Screen
     {
         if (!Context.Records.Listed) return;
         var list = Candidates();
+        if (key is not null && keyId is not null && list.All(i => i.Key != key) && list.FirstOrDefault(i => !i.External && i.Entry.Id == keyId) is { } moved)
+        {
+            key = moved.Key;   // 같은 측정, 새 위치: 다시 만든다 (경로가 바뀌어 도장도 바뀐다)
+            Request();
+        }
         if (key is null || list.All(i => i.Key != key))
         {
             // 기본: 가장 최근에 끝난 측정
@@ -207,6 +258,7 @@ public sealed class ReportScreen : Screen
             requests.StampChanged(key, stamp);
             Request();
         }
+        keyId = list.FirstOrDefault(i => i.Key == key)?.Entry.Id ?? keyId;
         if (Visibility == Visibility.Visible) Rerender();
     }
 
@@ -217,6 +269,7 @@ public sealed class ReportScreen : Screen
         int j = Math.Clamp(i + by, 0, list.Count - 1);
         if (list.Count == 0 || j == i) return;
         key = list[j].Key;
+        keyId = list[j].Entry.Id;
         Request();
         Rerender();
     }
@@ -465,8 +518,18 @@ public sealed class ReportScreen : Screen
             while (old.Children.Count > 0 && watch.Elapsed < FrameBudget.PieceSlice) RemoveLastPiece(old);
             if (old.Children.Count > 0 && !Context.IsClosing()) return;
             Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFrame;
+            if (ReferenceEquals(clearing, (EventHandler<object>)OnFrame)) { clearing = null; clearingOld = null; }
             paperHost.Children.Remove(old);
         }
+        if (clearing is { } previous)
+        {
+            // 앞의 떼기가 아직이면 그것은 한 번에 끝낸다 (구독은 하나만)
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= previous;
+            if (clearingOld is { } prevOld) paperHost.Children.Remove(prevOld);
+        }
+        clearing = OnFrame;
+        clearingOld = old;
+        if (Suspended) { OnSuspend(); return; }
         Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnFrame;
     }
 
@@ -498,12 +561,14 @@ public sealed class ReportScreen : Screen
             {
                 Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFrame;
                 if (ReferenceEquals(pausedDraw, (EventHandler<object>)OnFrame)) pausedDraw = null;
+                if (ReferenceEquals(drawing, (EventHandler<object>)OnFrame)) drawing = null;
                 return;
             }
-            if (Visibility != Visibility.Visible)
+            if (Visibility != Visibility.Visible || Suspended)
             {
                 // 화면을 떠남: 숨은 종이 면을 계속 만들지 않는다. 들어오면 이어서 (G4 M8 1라운드 b5)
                 Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFrame;
+                if (ReferenceEquals(drawing, (EventHandler<object>)OnFrame)) drawing = null;
                 pausedDraw = OnFrame;
                 return;
             }
@@ -513,6 +578,7 @@ public sealed class ReportScreen : Screen
                 if (!pieces.MoveNext())
                 {
                     Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFrame;
+                    if (ReferenceEquals(drawing, (EventHandler<object>)OnFrame)) drawing = null;
                     drawComplete = true;
                     Context.QueueDiag();
                     return;
@@ -521,6 +587,9 @@ public sealed class ReportScreen : Screen
             }
             while (watch.Elapsed < FrameBudget.PieceSlice);
         }
+        if (drawing is { } previousDraw) Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= previousDraw;   // 옛 세대 (다음 프레임에 스스로 끊기 전에)
+        if (Suspended || Visibility != Visibility.Visible) { drawing = null; pausedDraw = OnFrame; return; }
+        drawing = OnFrame;
         Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnFrame;
     }
 
@@ -563,6 +632,15 @@ public sealed class ReportScreen : Screen
         if (!doc.Options.Masked && !await ConfirmUnmaskedAsync()) { lastAction = "unmasked-cancel"; Context.QueueDiag(); return; }
         string? path = Context.Options.ReportOut is { } outFolder ? System.IO.Path.Combine(outFolder, doc.FileName) : await PickAsync(doc.FileName);
         if (path is null || Context.IsClosing()) { lastAction = "cancel"; Context.QueueDiag(); return; }   // 취소: 아무 일도 하지 않는다
+        // 기록을 옮기는 동안은 내보내지 않는다 (M9 설계 B3 출입문). 표는 내보내기 작업이 끝날 때 놓는다
+        var ticket = Context.Resident.WorkGate.TryEnter();
+        if (ticket is null)
+        {
+            lastAction = "moving";
+            Context.Toasts.Show(ToastKind.Warning, "기록을 옮기는 중입니다", "옮기기가 끝난 뒤 내보내세요.");
+            Context.QueueDiag();
+            return;
+        }
         exporting = true;
         SetExport();
         Context.QueueDiag();
@@ -596,6 +674,7 @@ public sealed class ReportScreen : Screen
             return (r, ReportFile.Write(path, r.Html!, overwrite: true, fault is ReportFault.Write or ReportFault.Move ? fault : ReportFault.None, token, hold));
         }, token);
         exportTask = work;
+        _ = work.ContinueWith(_ => ticket.Dispose(), TaskScheduler.Default);
         ReportExport.Rendered rendered;
         ReportWriteResult? written;
         try { (rendered, written) = await work; }
@@ -639,10 +718,14 @@ public sealed class ReportScreen : Screen
     /// 앱을 닫을 때: 취소를 보내고(동기, 첫 await 전) 쓰기·임시 파일 정리가 끝날 때까지. 쓰기는 조각마다 취소를 확인하므로 곧 끝난다.
     /// 옮기기를 이미 마쳤으면 완성된 결과 파일이 남는다. 예외는 삼킨다.
     /// </summary>
+    /// <summary>
+    /// 내보내기에 취소를 보내고 작업자(임시 파일 정리 포함)가 끝나기를 기다린다. UI 문맥으로 돌아오지 않는다:
+    /// 세션 종료는 UI 스레드를 막고 이 작업을 기다린다 (G4 M9 1라운드 b1).
+    /// </summary>
     public async Task StopExportAsync()
     {
         exportCts?.Cancel();
-        try { await exportTask; }
+        try { await exportTask.ConfigureAwait(false); }
         catch (Exception ex) when (ex is OperationCanceledException or IOException or UnauthorizedAccessException or InvalidOperationException) { }
     }
 

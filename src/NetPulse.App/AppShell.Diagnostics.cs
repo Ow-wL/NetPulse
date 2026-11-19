@@ -42,6 +42,7 @@ public sealed partial class AppShell
             session = s.SessionId,
             rounds = s.Rounds.Count,
             elapsedMs = s.ElapsedMs,
+            gaps = s.Gaps.Count,
             marks = s.Marks.Select(m => new { m.Mark, m.AtMs, m.Memo, state = m.State.ToString() }),
             map = new { candidate = s.Map.Candidate.ToString(), note = s.Map.CandidateNote, text = s.Map.AccessibleText },
             analysis = s.AnalysisAt is { } a ? new { a.Seq, a.ElapsedMs, a.Rounds, a.Events, a.DurationMs, grade = s.Analysis?.Grade.Grade.ToString() } : null,
@@ -75,6 +76,7 @@ public sealed partial class AppShell
             fallbacks = ui.Theme.Fallbacks,
             snapshotLayers = ui.Theme.SnapshotLayersInTree,
             lowPerformance = ui.Pacer.Low,
+            resident = ResidentDiag(),
         };
         diag.Text = JsonSerializer.Serialize(state);
     }
@@ -100,9 +102,28 @@ public sealed partial class AppShell
     {
         // 실행 중 최고 전용 메모리 (강제 수집 뒤 값만으로는 최고치를 모른다, G4 1라운드 b 마무리 말)
         long peakMb = 0;
+        // 시간축 (M8 이월 5, 관찰 도구·판정 기준은 그대로): 0.5초마다 구간·그 사이 최대 프레임 간격·GC 횟수와 멈춤 누계·스레드 풀 상태·전용 메모리.
+        // 튐이 있으면 같은 시각의 GC·스레드 풀과 맞춰 본다.
+        var timeline = new List<object>();
+        var benchClock = System.Diagnostics.Stopwatch.StartNew();
+        string? current = null;
+        int lastAt = 0;
         var sampler = DispatcherQueue.CreateTimer();
         sampler.Interval = BenchTokens.MemorySample;
-        sampler.Tick += (_, _) => peakMb = Math.Max(peakMb, PrivateMb());
+        sampler.Tick += (_, _) =>
+        {
+            long mb = PrivateMb();
+            peakMb = Math.Max(peakMb, mb);
+            int at = ui.Pacer.SegmentSamples;
+            if (at < lastAt) lastAt = 0;   // 새 구간
+            timeline.Add(new
+            {
+                t = benchClock.ElapsedMilliseconds, segment = current, frames = at - lastAt, frameMaxMs = Math.Round(ui.Pacer.SegmentMaxFrom(lastAt), 1),
+                gen0 = GC.CollectionCount(0), gen1 = GC.CollectionCount(1), gen2 = GC.CollectionCount(2), gcPauseMs = Math.Round(GC.GetTotalPauseDuration().TotalMilliseconds, 1),
+                poolThreads = ThreadPool.ThreadCount, poolQueued = ThreadPool.PendingWorkItemCount, privateMb = mb,
+            });
+            lastAt = at;
+        };
         sampler.Start();
         try
         {
@@ -123,7 +144,10 @@ public sealed partial class AppShell
                 int[] gcBefore = [GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2)];
                 var pauseBefore = GC.GetTotalPauseDuration();
                 ui.Pacer.BeginSegment();
+                current = name;
+                lastAt = 0;
                 await body();
+                current = null;
                 segments.Add(ui.Pacer.EndSegment(name));
                 RenderProfile.On = false;
                 var gc = new
@@ -186,7 +210,7 @@ public sealed partial class AppShell
             {
                 kind = "measure", segments, profile, navSteps, rounds = host.Snapshot.Rounds.Count,
                 analysis = new { samples = durations.Length, p95Ms = P95(durations), maxMs = durations.LastOrDefault() },
-                baselineMs = ui.Pacer.Baseline, privateMb, peakPrivateMb = Math.Max(peakMb, privateMb),
+                baselineMs = ui.Pacer.Baseline, privateMb, peakPrivateMb = Math.Max(peakMb, privateMb), timeline,
             });
         }
         catch (Exception ex) { log.Write("bench", new { kind = "measure", error = ex.GetType().Name, message = ex.Message }); }

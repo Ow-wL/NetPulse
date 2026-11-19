@@ -167,8 +167,11 @@ public sealed class M7LibraryTests : IDisposable
         {
             releaseFirst.Set();
             releaseRest.Set();
+            // 실패·취소·시간 초과로 끝나도 작업자가 멈추기를 기다린 뒤에 이벤트를 폐기하고 임시 폴더를 지운다 (G4 M8 9라운드 사소).
+            // 이미 취소된 시험 토큰은 쓰지 않는다: 정리만은 끝까지 (한도 안에서)
+            try { await lib.AnalyzedAsync(lib.Items.Select(i => i.Key).ToArray()).WaitAsync(Wait, CancellationToken.None); }
+            catch (TimeoutException) { }
         }
-        await Settled(lib);
         Assert.All(lib.Items, i => Assert.False(i.Summary.Analyzing));
     }
 
