@@ -32,7 +32,7 @@ public sealed class RecordsScreen : Screen
     private int shown = Size.RecordsPage;
     private bool picking;
     private readonly List<string> picked = [];
-    private string? detailKey, openedFromRowId;
+    private string? detailKey, openedFromRowId, detailId;
     private OpenedRecord? detail;
     private (OpenedRecord A, OpenedRecord B)? comparison;
     private string? loadError;
@@ -101,7 +101,9 @@ public sealed class RecordsScreen : Screen
         Children.Add(scroll);
         Context.Records.Changed += () => DispatcherQueue.TryEnqueue(() =>
         {
-            if (Context.IsClosing() || Visibility != Visibility.Visible) return;
+            if (!Context.IsClosing()) RelinkDetail();
+            // 숨긴 동안은 그리지 않는다: 다시 열 때 OnResume이 다시 그린다 (G4 M9 1라운드 b2)
+            if (Context.IsClosing() || Visibility != Visibility.Visible || Suspended) return;
             // 메모 저장 완료 뒤 갱신·다시 열기가 끝날 때까지는 일반 다시 그리기도 초점을 지킨다 (M7 이월 2, M9 설계 C2)
             if (keepFocus > 0) RenderKeepingFocus(); else Render(Context.Host.Snapshot);
         });
@@ -211,6 +213,7 @@ public sealed class RecordsScreen : Screen
         mode = Mode.Detail;
         SetTab("measurements");
         detailKey = key;
+        detailId = item?.Entry.Id;
         openedFromRowId = fromRow;
         detail = null;
         loadError = null;
@@ -355,8 +358,33 @@ public sealed class RecordsScreen : Screen
         Render(Context.Host.Snapshot);
     }
 
+    /// <summary>
+    /// 기록 옮기기로 같은 측정의 출처 열쇠(조각 경로)가 바뀌었으면 열린 상세·메모 상태·남겨 둔 글을 새 열쇠로 잇는다 (G4 M9 1라운드 b3, 설계 B3
+    /// "열려 있던 상세를 같은 Id로"). 옮기기는 내용을 바꾸지 않으므로 열린 기록·초안·편집 중인 칸은 그대로 둔다. 잇지 않으면 저장이 항목을 못 찾아 조용히 끝났다.
+    /// </summary>
+    private void RelinkDetail()
+    {
+        if (mode != Mode.Detail || detailKey is not { } old || detailId is not { } id) return;
+        if (Context.Records.Items.Any(i => i.Key == old) || Context.Records.KeyOf(id) is not { } next || next == old) return;
+        detailKey = next;
+        foreach (var k in memoState.Keys.Where(k => k.Key == old).ToArray()) { memoState[(next, k.Mark)] = memoState[k]; memoState.Remove(k); }
+        Context.Memos.Rekey(old, next);
+        Context.Records.SetPinned([next]);
+        Context.Log.Write("recordsRelinked", new { });
+        renderedKey = "";
+    }
+
+    private string? suspendFocusId;
+    private double suspendScroll;
+
+    public override int FrameHooks => frameHooked ? 1 : 0;
+
     protected override void OnSuspend()
     {
+        // 다시 열 때 돌려줄 초점·스크롤 (G4 M9 1라운드 b4)
+        suspendFocusId = XamlRoot is { } xr && Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(xr) is UIElement f && FocusWithin(content)
+            ? AutomationProperties.GetAutomationId(f) : null;
+        suspendScroll = scroll.VerticalOffset;
         renderGen++;                    // 이미 디스패처에 넘어간 조각은 세대가 달라 아무것도 하지 않는다
         perFrame.Clear();
         timelineQueued = false;
@@ -369,7 +397,15 @@ public sealed class RecordsScreen : Screen
 
     protected override void OnResume()
     {
-        if (Visibility == Visibility.Visible) Rerender();   // 반쯤 그린 상세를 완전히 다시 (초안은 편집 상태에 있다)
+        if (Visibility == Visibility.Visible)
+        {
+            Rerender();   // 반쯤 그린 상세를 완전히 다시 (초안은 편집 상태에 있다)
+            // 다시 그리면 칸이 새로 만들어진다: 숨기기 전 초점과 스크롤을 돌려준다 (G4 M9 1라운드 b4)
+            double y = suspendScroll;
+            OnePerFrame(() => scroll.ChangeView(null, y, null, true));
+            if (!string.IsNullOrEmpty(suspendFocusId)) FocusLater(suspendFocusId, mode);
+            suspendFocusId = null;
+        }
         else renderedKey = "";
     }
 

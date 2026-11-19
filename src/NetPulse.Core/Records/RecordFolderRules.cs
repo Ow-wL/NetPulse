@@ -50,7 +50,8 @@ public static partial class RecordFolderRules
         foreach (var (p, name) in others)
         {
             if (p.Length == 0) continue;
-            if (kind == MoveKind.Default && isDefault && Same(p, userData)) continue;   // 기본 위치는 사용자 폴더 안이 정상
+            // 기본 위치는 사용자 폴더 안이 정상: 기본 위치로 되돌리기와, 기본 위치로 되돌리다 끊긴 뒤의 다시 옮기기 (G4 M9 1라운드 a5)
+            if ((kind is MoveKind.Default or MoveKind.Retry) && isDefault && Same(p, userData)) continue;
             if (kind == MoveKind.Retry && isCurrent && Same(p, current)) continue;
             if (Same(real, p)) return $"{name}와(과) 같은 폴더입니다.";
             if (Inside(real, p)) return $"{name} 안의 폴더는 쓸 수 없습니다.";

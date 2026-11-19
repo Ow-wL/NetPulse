@@ -98,6 +98,10 @@ public sealed class ResidentNotifier
             }
         }
 
+        // 구간 닫힘: 관측 없이 SegmentGapMs가 지남. 새 관측보다 먼저 본다 (G4 M9 1라운드 a13): 절전처럼 오래 입력이 없다가
+        // 복귀 첫 장면에서 바로 관측이 시작되면, 지난 구간의 닫힘을 놓치지 않고 닫은 뒤 새 구간을 연다
+        CloseExpired(s, balloon, prefs, notices);
+
         // 관측 종류 (측정 중에만 알림, 끝나면 조용히 None — ObservationWatch.Update와 같음)
         var next = s.Measuring ? s.Observation : ObservationKind.None;
         if (next != current)
@@ -131,14 +135,7 @@ public sealed class ResidentNotifier
             }
         }
 
-        // 구간 닫힘: 관측 없이 SegmentGapMs가 지남
-        if (segmentOpen && !observing && s.Measuring && s.ElapsedMs - lastEndMs >= SegmentGapMs)
-        {
-            segmentOpen = false;
-            if (balloon && prefs.NotifyDropout && prefs.NotifyRecovered)
-                notices.Add(new(NoticeKind.SegmentEnd, false, true, "끊김 관측이 끝났습니다",
-                    $"관측이 이어진 시간 {(lastEndMs - segmentStartMs) / 1000}초. 측정은 계속됩니다.", false));
-        }
+        CloseExpired(s, balloon, prefs, notices);
 
         // 저장 실패 시작 (끌 수 없음)
         if (s.StorageFailing && !storageFailing)
@@ -154,6 +151,15 @@ public sealed class ResidentNotifier
         lastStartError = s.StartError;
 
         return notices;
+    }
+
+    private void CloseExpired(ResidentInput s, bool balloon, NoticePrefs prefs, List<ResidentNotice> notices)
+    {
+        if (!segmentOpen || observing || !s.Measuring || s.ElapsedMs - lastEndMs < SegmentGapMs) return;
+        segmentOpen = false;
+        if (balloon && prefs.NotifyDropout && prefs.NotifyRecovered)
+            notices.Add(new(NoticeKind.SegmentEnd, false, true, "끊김 관측이 끝났습니다",
+                $"관측이 이어진 시간 {(lastEndMs - segmentStartMs) / 1000}초. 측정은 계속됩니다.", false));
     }
 
     private static ResidentNotice StartNotice(ObservationKind kind) => kind == ObservationKind.LinkDown

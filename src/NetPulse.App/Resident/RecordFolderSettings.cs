@@ -11,7 +11,7 @@ public sealed class RecordFolderSettings(SettingsStore store) : IRecordFolderSet
     public RecordFolders Read()
     {
         var r = store.Current.Records;
-        return new RecordFolders(r.Folder, r.ExtraFolders, r.Move is { } m ? new MoveLog(m.Kind, m.From, m.To, m.Ids, m.Hashes, m.Done) : null);
+        return new RecordFolders(r.Folder, r.ExtraFolders, r.Move is { } m ? new MoveLog(m.Kind, m.From, m.To, m.Ids, m.Hashes, m.Done, m.Step) : null);
     }
 
     public bool Save(RecordFolders next)
@@ -41,7 +41,7 @@ public sealed class FaultMoveOps(string spec) : NetPulse.Core.Records.DiskMoveOp
     public override bool SameVolume(string a, string b) => spec is not ("cross" or "hold") && !spec.StartsWith("copy:", StringComparison.Ordinal) && !spec.StartsWith("delete:", StringComparison.Ordinal) && base.SameVolume(a, b);
     public override void CopyFile(string from, string to)
     {
-        if (spec == "hold") Thread.Sleep(NetPulse.Design.Tokens.Waits.ReportSlowTest);   // 옮기는 중 장면: 파일마다 멈춤 (멈추기로 풀린다)
+        if (spec == "hold") Thread.Sleep(NetPulse.Design.Tokens.Waits.MoveHoldTest);   // 옮기는 중 장면: 파일마다 멈춤 (멈추기로 풀린다)
         if (spec.StartsWith("copy:", StringComparison.Ordinal) && from.Contains(Arg, StringComparison.Ordinal)) throw new IOException("시험: 복사 실패");
         base.CopyFile(from, to);
     }

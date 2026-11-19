@@ -34,9 +34,7 @@ public static class RecordLocator
                 if (!Directory.Exists(root)) continue;
                 foreach (var dir in Directory.EnumerateDirectories(root))
                 {
-                    var name = Path.GetFileName(dir);
-                    int tilde = name.IndexOf('~');
-                    if ((tilde > 0 ? name[..tilde] : name) == header.Id) candidates.Add(Path.GetFullPath(dir).TrimEnd(Path.DirectorySeparatorChar));
+                    if (RecordCatalog.IsSegmentOf(Path.GetFileName(dir), header.Id)) candidates.Add(Path.GetFullPath(dir).TrimEnd(Path.DirectorySeparatorChar));
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }

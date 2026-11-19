@@ -27,7 +27,9 @@ public class DiskMoveOps : IMoveOps
 }
 
 /// <summary>옮길 조각 폴더 하나 (<c>id</c> 또는 <c>id~n</c>).</summary>
-public sealed record MoveSegment(string Name, string Source, string Hash, long Bytes, bool AlreadyThere);
+/// <param name="Segment">머리의 조각 번호 (읽지 못하면 null: 폴더 이름으로만 비교)</param>
+/// <param name="Duplicate">더 앞 원본의 같은 조각과 내용이 같은 사본: 옮기지 않고, 앞 원본의 그 측정이 옮겨졌을 때만 지운다</param>
+public sealed record MoveSegment(string Name, string Source, string Hash, long Bytes, bool AlreadyThere, int? Segment = null, bool Duplicate = false);
 
 /// <summary>옮길 측정 하나.</summary>
 public sealed record MoveItem(string Id, IReadOnlyList<MoveSegment> Segments)
@@ -37,8 +39,9 @@ public sealed record MoveItem(string Id, IReadOnlyList<MoveSegment> Segments)
 }
 
 /// <summary>옮기기 계획 (잠근 뒤 다시 만든 것이 유일한 근거, [2-3]).</summary>
+/// <param name="Claims">이 원본이 정본으로 내놓는 조각 (측정 Id, 조각 번호) → 해시. 뒤 원본의 계획에 넘긴다</param>
 public sealed record MovePlan(MoveKind Kind, string From, string To, IReadOnlyList<MoveItem> Items, IReadOnlyList<string> Conflicts,
-    IReadOnlyList<string> ForeignMoving, int LongestRelative)
+    IReadOnlyList<string> ForeignMoving, int LongestRelative, IReadOnlyDictionary<(string Id, int Segment), string>? Claims = null)
 {
     public long Bytes => Items.Sum(i => i.Bytes);
     public int Count => Items.Count;
@@ -66,25 +69,24 @@ public static class RecordMover
 {
     public const string MovingSuffix = ".moving", MovedSuffix = ".moved", Marker = ".netpulse-moving";
 
-    public static MovePlan Plan(MoveKind kind, string from, string to)
+    /// <summary>
+    /// 원본 하나의 계획. 같은 측정은 <b>정본 규칙과 같은 기준</b>(머리의 조각 번호)으로 비교한다 (G4 M9 1라운드 a2·a3):
+    /// <list type="bullet">
+    /// <item>목적지에 같은 조각 번호가 있으면(폴더 이름이 달라도) 내용이 같으면 이미 옮겨짐, 다르면 충돌.</item>
+    /// <item>목적지에 같은 이름의 폴더가 있는데 조각 번호가 다르거나 읽지 못하면 내용이 같을 때만 이미 옮겨짐, 아니면 충돌(그 이름으로 놓을 수 없다).</item>
+    /// <item><paramref name="earlier"/>(더 앞 원본들의 정본 조각)과 같은 조각 번호면: 내용이 같으면 사본(<see cref="MoveSegment.Duplicate"/>), 다르면 충돌.
+    /// 뒤 원본의 다른 내용이 앞 원본을 대신해 정본이 되지 않게 한다.</item>
+    /// </list>
+    /// </summary>
+    public static MovePlan Plan(MoveKind kind, string from, string to, IReadOnlyDictionary<(string Id, int Segment), string>? earlier = null)
     {
         var items = new List<MoveItem>();
         var conflicts = new List<string>();
         var foreign = new List<string>();
+        var claims = new Dictionary<(string, int), string>();
         int longest = 0;
-        var groups = new SortedDictionary<string, List<string>>(StringComparer.Ordinal);
-        if (Directory.Exists(from))
-        {
-            foreach (var dir in Directory.EnumerateDirectories(from))
-            {
-                var name = Path.GetFileName(dir);
-                int tilde = name.IndexOf('~');
-                var id = tilde > 0 ? name[..tilde] : name;
-                if (!RecordCatalog.IsIdLike(id) || (tilde > 0 && !name[(tilde + 1)..].All(char.IsAsciiDigit))) continue;
-                if (!groups.TryGetValue(id, out var list)) groups[id] = list = [];
-                list.Add(dir);
-            }
-        }
+        var groups = Groups(from);
+        var destGroups = Groups(to);
         foreach (var (id, dirs) in groups)
         {
             if (dirs.Any(d => Directory.Exists(Path.Combine(to, Path.GetFileName(d) + MovingSuffix)) && !IsOurs(Path.Combine(to, Path.GetFileName(d) + MovingSuffix))))
@@ -92,32 +94,79 @@ public static class RecordMover
                 foreign.Add(id);
                 continue;
             }
+            // 목적지의 같은 측정: 조각 번호 → 폴더 (앞 것)
+            var destBySegment = new Dictionary<int, string>();
+            foreach (var d in destGroups.GetValueOrDefault(id) ?? [])
+                if (SegmentNumber(d) is int n) destBySegment.TryAdd(n, d);
             var segments = new List<MoveSegment>();
+            var mine = new Dictionary<(string, int), string>();
             bool conflict = false;
             foreach (var dir in dirs.Order(StringComparer.Ordinal))
             {
                 var name = Path.GetFileName(dir);
                 var (hash, bytes, rel) = FolderHash(dir);
                 longest = Math.Max(longest, name.Length + MovingSuffix.Length + 1 + rel);
-                var there = Path.Combine(to, name);
-                bool already = false;
-                if (Directory.Exists(there))
+                int? seg = SegmentNumber(dir);
+                bool already = false, duplicate = false;
+                if (seg is int s0 && earlier is not null && earlier.TryGetValue((id, s0), out var earlierHash))
                 {
-                    if (FolderHash(there).Hash == hash) already = true;
+                    if (earlierHash == hash) duplicate = true;
                     else conflict = true;
                 }
-                segments.Add(new MoveSegment(name, dir, hash, bytes, already));
+                else if (seg is int s1 && destBySegment.TryGetValue(s1, out var sameSegment))
+                {
+                    if (FolderHash(sameSegment).Hash == hash) already = true;
+                    else conflict = true;
+                }
+                else if (Directory.Exists(Path.Combine(to, name)))
+                {
+                    if (FolderHash(Path.Combine(to, name)).Hash == hash) already = true;
+                    else conflict = true;
+                }
+                if (seg is int s2 && !duplicate) mine.TryAdd((id, s2), hash);
+                segments.Add(new MoveSegment(name, dir, hash, bytes, already, seg, duplicate));
             }
-            if (conflict) conflicts.Add(id);
-            else items.Add(new MoveItem(id, segments));
+            if (conflict) { conflicts.Add(id); continue; }
+            items.Add(new MoveItem(id, segments));
+            foreach (var (k, v) in mine) claims.TryAdd(k, v);
         }
-        return new MovePlan(kind, from, to, items, conflicts, foreign, longest);
+        return new MovePlan(kind, from, to, items, conflicts, foreign, longest, claims);
+    }
+
+    /// <summary>조각 폴더들을 측정 Id로 묶는다 (<see cref="RecordCatalog.SegmentId"/> 규칙).</summary>
+    private static SortedDictionary<string, List<string>> Groups(string folder)
+    {
+        var groups = new SortedDictionary<string, List<string>>(StringComparer.Ordinal);
+        if (!Directory.Exists(folder)) return groups;
+        foreach (var dir in Directory.EnumerateDirectories(folder))
+        {
+            if (RecordCatalog.SegmentId(Path.GetFileName(dir)) is not { } id) continue;
+            if (!groups.TryGetValue(id, out var list)) groups[id] = list = [];
+            list.Add(dir);
+        }
+        return groups;
+    }
+
+    /// <summary>조각 폴더 머리의 조각 번호 (읽지 못하면 null).</summary>
+    public static int? SegmentNumber(string dir)
+    {
+        try
+        {
+            var path = Path.Combine(dir, "measurement.json");
+            if (!File.Exists(path)) return null;
+            var (h, unsupported) = RecordSchema.ParseHeader(RecordReader.ReadShared(path));
+            return unsupported || h is null ? null : h.Segment;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException
+            or System.Text.Json.JsonException or FormatException or InvalidOperationException or ArgumentException or KeyNotFoundException
+            or NullReferenceException or OverflowException) { return null; }
     }
 
     /// <summary>
     /// 계획대로 옮긴다. 기록 하나가 끝날 때마다 <paramref name="recordDone"/>(일지 저장). 기록 사이·파일 사이에 <paramref name="stop"/>을 본다.
     /// </summary>
-    public static MoveOutcome Execute(MovePlan plan, IMoveOps ops, Action<string> recordDone, CancellationToken stop)
+    /// <param name="earlierMoved">앞 원본의 그 측정이 옮겨졌는가 (사본 조각을 지워도 되는지). 없으면 사본이 있는 측정은 남긴다</param>
+    public static MoveOutcome Execute(MovePlan plan, IMoveOps ops, Action<string> recordDone, CancellationToken stop, Func<string, bool>? earlierMoved = null)
     {
         var moved = new List<string>();
         var failed = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -128,12 +177,14 @@ public static class RecordMover
             if (stop.IsCancellationRequested) return new(moved, failed, leftovers, true);
             bool left = false;
             string? reason = null;
+            // 앞 원본의 정본이 옮겨지지 않았으면 사본이 있는 측정은 그대로 둔다 (뒤 사본이 정본을 대신하지 않게)
+            if (item.Segments.Any(s => s.Duplicate) && earlierMoved?.Invoke(item.Id) != true) { failed[item.Id] = "shadowed"; continue; }
             foreach (var seg in item.Segments)
             {
                 var target = Path.Combine(plan.To, seg.Name);
                 try
                 {
-                    if (seg.AlreadyThere) { left |= !DeleteSource(ops, seg.Source); continue; }
+                    if (seg.AlreadyThere || seg.Duplicate) { left |= !DeleteSource(ops, seg.Source); continue; }
                     if (same)
                     {
                         ops.MoveDirectory(seg.Source, target);
@@ -150,8 +201,11 @@ public static class RecordMover
                         return new(moved, failed, leftovers, true);
                     }
                     if (FolderHash(temp).Hash != seg.Hash) { TryDelete(ops, temp); reason = "verify"; break; }
-                    File.Delete(Path.Combine(temp, Marker));
+                    // 최종 이름으로 확정한 뒤 표시를 지운다 (G4 M9 1라운드 a6): 그 사이에 끊겨도 남의 .moving처럼 남지 않는다.
+                    // 표시가 최종 폴더에 남으면 다음 실행 정리가 지운다 (내용 해시·읽기는 표시를 보지 않는다)
                     ops.RenameDirectory(temp, target);
+                    try { File.Delete(Path.Combine(target, Marker)); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
                     left |= !DeleteSource(ops, seg.Source);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -199,7 +253,10 @@ public static class RecordMover
 
     private static bool IsOurs(string movingFolder) => File.Exists(Path.Combine(movingFolder, Marker));
 
-    /// <summary>목적지의 우리 <c>.moving</c> 폴더를 지운다 (다음 실행 복구, B3 흐름 9). 남의 것은 건드리지 않는다.</summary>
+    /// <summary>
+    /// 목적지의 우리 <c>.moving</c> 폴더를 지운다 (다음 실행 복구, B3 흐름 9). 남의 것은 건드리지 않는다.
+    /// 최종 이름으로 바꾼 뒤 표시를 지우기 전에 끊긴 조각 폴더의 표시 파일도 지운다.
+    /// </summary>
     public static int CleanupOwnMoving(string to)
     {
         int n = 0;
@@ -210,6 +267,12 @@ public static class RecordMover
             {
                 if (!IsOurs(d)) continue;
                 try { Directory.Delete(d, recursive: true); n++; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            }
+            foreach (var d in Directory.EnumerateDirectories(to))
+            {
+                if (RecordCatalog.SegmentId(Path.GetFileName(d)) is null || !IsOurs(d)) continue;
+                try { File.Delete(Path.Combine(d, Marker)); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
             }
         }

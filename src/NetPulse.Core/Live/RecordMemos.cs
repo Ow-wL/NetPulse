@@ -150,4 +150,17 @@ public sealed class RecordMemos(NotesWriter writer, Func<DateTimeOffset> now)
     {
         lock (gate) failed.Remove((key, mark));
     }
+
+    /// <summary>
+    /// 같은 측정의 출처 열쇠가 바뀜 (기록 옮기기로 조각 경로가 바뀜): 남겨 둔 글과 최신 요청 번호를 새 열쇠로 옮긴다 (G4 M9 1라운드 b3).
+    /// </summary>
+    public void Rekey(string oldKey, string newKey)
+    {
+        if (oldKey == newKey) return;
+        lock (gate)
+        {
+            foreach (var k in failed.Keys.Where(k => k.Key == oldKey).ToArray()) { failed[(newKey, k.Mark)] = failed[k]; failed.Remove(k); }
+            foreach (var k in latest.Keys.Where(k => k.Key == oldKey).ToArray()) { latest[(newKey, k.Mark)] = latest[k]; latest.Remove(k); }
+        }
+    }
 }

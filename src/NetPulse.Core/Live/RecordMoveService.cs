@@ -3,7 +3,9 @@ using NetPulse.Core.Records;
 namespace NetPulse.Core.Live;
 
 /// <summary>옮기기 일지 (설정 파일 records.move와 같은 내용, Core 쪽 표현).</summary>
-public sealed record MoveLog(string Kind, string From, string To, IReadOnlyList<string> Ids, IReadOnlyDictionary<string, string> Hashes, IReadOnlyList<string> Done);
+/// <param name="Step">설정 파일에서 읽은 단계 그대로 (복구가 검증한다, G4 M9 1라운드 a7)</param>
+public sealed record MoveLog(string Kind, string From, string To, IReadOnlyList<string> Ids, IReadOnlyDictionary<string, string> Hashes, IReadOnlyList<string> Done,
+    string Step = "moving");
 
 /// <summary>기록 위치 설정 (설정 파일 records 묶음).</summary>
 public sealed record RecordFolders(string? Folder, IReadOnlyList<string> Extra, MoveLog? Move);
@@ -52,7 +54,8 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
         {
             MoveKind.New => ([world.CurrentRecordFolder], picked ?? throw new ArgumentNullException(nameof(picked))),
             MoveKind.Default => ([world.CurrentRecordFolder], world.DefaultRecordFolder),
-            _ => (f.Move is { } m ? [m.From, .. f.Extra.Where(e => !RecordFolderRules.Same(e, m.From))] : f.Extra, world.CurrentRecordFolder),
+            // 다시 옮기기: 옛 위치들을 읽기 순서(설정의 extraFolders 순서) 그대로. 앞 원본의 정본을 뒤 사본이 대신하지 않게 (G4 M9 1라운드 a3)
+            _ => (f.Move is { } m && !f.Extra.Any(e => RecordFolderRules.Same(e, m.From)) ? [m.From, .. f.Extra] : f.Extra, world.CurrentRecordFolder),
         };
     }
 
@@ -64,9 +67,8 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
         int count = 0, longest = 0;
         long bytes = 0;
         var conflicts = new List<string>();
-        foreach (var s in sources)
+        foreach (var plan in Plans(kind, sources, dest))
         {
-            var plan = RecordMover.Plan(kind, s, dest);
             count += plan.Count; bytes += plan.Bytes; longest = Math.Max(longest, plan.LongestRelative);
             conflicts.AddRange(plan.Conflicts);
         }
@@ -76,8 +78,24 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
         return (count, bytes, reason, conflicts);
     }
 
+    private Task running = Task.CompletedTask;
+
+    /// <summary>
+    /// 진행 중인 옮기기가 끝나는(되돌림·정리·독점 놓기까지) 작업. 없으면 끝난 작업. UI 문맥을 쓰지 않아 종료 절차가 어느 스레드에서든 기다릴 수 있다
+    /// (G4 M9 1라운드 b1: 종료가 이동 정리 완료에 합류하지 않았다).
+    /// </summary>
+    public Task Running => Volatile.Read(ref running);
+
     /// <summary>옮긴다 (백그라운드에서 부른다). 진행: (옮긴 수, 전체).</summary>
     public async Task<MoveReport> RunAsync(MoveKind kind, string? picked, IProgress<(int Done, int Total)>? progress, CancellationToken stop)
+    {
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Volatile.Write(ref running, done.Task);
+        try { return await RunCoreAsync(kind, picked, progress, stop).ConfigureAwait(false); }
+        finally { done.TrySetResult(); }
+    }
+
+    private async Task<MoveReport> RunCoreAsync(MoveKind kind, string? picked, IProgress<(int Done, int Total)>? progress, CancellationToken stop)
     {
         if (!settings.Writable) return Report(MoveState.NotPersisted, "설정 파일을 저장할 수 없는 실행이라 옮길 수 없습니다.");
         if (host.Snapshot.State is not (HostState.Idle or HostState.NoProfile)) return Report(MoveState.Busy, "측정 중에는 바꿀 수 없습니다.");
@@ -88,14 +106,15 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
             var (sources, dest) = Route(kind, picked);
             if (kind == MoveKind.Default) Directory.CreateDirectory(dest);
             // 잠근 뒤 다시 판정 [2-3]: 이 결과가 유일한 근거
-            var plans = sources.Select(s => RecordMover.Plan(kind, s, dest)).ToArray();
+            var plans = Plans(kind, sources, dest);
             int longest = plans.Length == 0 ? 0 : plans.Max(p => p.LongestRelative);
             var reason = RecordFolderRules.Check(dest, kind, Known(), resolve, longest);
             if (reason is not null) return Report(MoveState.Invalid, reason);
             var conflicts = plans.SelectMany(p => p.Conflicts).ToArray();
             if (conflicts.Length > 0) return new(MoveState.Conflict, 0, 0, new Dictionary<string, string>(), [], conflicts, "새 위치에 같은 이름의 다른 기록이 있습니다.");
 
-            int total = plans.Sum(p => p.Count), moved = 0;
+            int total = plans.Sum(p => p.Items.Count(i => !i.Segments.Any(s => s.Duplicate))), moved = 0;
+            var movedIds = new HashSet<string>(StringComparer.Ordinal);
             var failed = new Dictionary<string, string>(StringComparer.Ordinal);
             var leftovers = new List<string>();
             bool stopped = false;
@@ -113,18 +132,19 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
                 var f = settings.Read();
                 var log = new MoveLog(kind switch { MoveKind.New => "new", MoveKind.Retry => "retry", _ => "default" }, plan.From, dest,
                     plan.Items.Select(i => i.Id).ToArray(), plan.Items.ToDictionary(i => i.Id, i => i.Hash), []);
-                // 위치·일지를 먼저 [1-6]
-                var extra = Clean([plan.From, .. f.Extra], dest);
+                // 위치·일지를 먼저 [1-6]. 이미 옛 위치면 그 자리(읽기 순서)를 지킨다, 새 원본(지금 위치였던 곳)은 맨 앞
+                var extra = Clean(f.Extra.Any(e => RecordFolderRules.Same(e, plan.From)) ? f.Extra : [plan.From, .. f.Extra], dest);
                 if (!Persist(new RecordFolders(Keep(dest), extra, log))) return Report(MoveState.NotPersisted, "설정을 저장하지 못해 아무것도 옮기지 않았습니다.");
                 var done = new List<string>();
                 var outcome = RecordMover.Execute(plan, Ops, id =>
                 {
                     done.Add(id);
-                    moved++;
+                    bool counted = movedIds.Add(id);
+                    if (counted) moved++;
                     settings.Save(settings.Read() with { Move = log with { Done = [.. done] } });
                     progress?.Report((moved, total));
                     AfterRecordForTest?.Invoke(moved);
-                }, stop);
+                }, stop, movedIds.Contains);
                 foreach (var (id, why) in outcome.Failed) failed[id] = why;
                 leftovers.AddRange(outcome.Leftovers);
                 stopped = outcome.Stopped;
@@ -143,10 +163,24 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
     public static (bool Interrupted, string? Problem) Recover(RecordFolders f, string currentFolder)
     {
         if (f.Move is not { } m) return (false, null);
-        var problem = RecordMover.ValidateJournal(m.Kind, "moving", m.From, m.To, m.Ids, m.Done, currentFolder, f.Extra);
+        var problem = RecordMover.ValidateJournal(m.Kind, m.Step, m.From, m.To, m.Ids, m.Done, currentFolder, f.Extra);
         if (problem is not null) return (true, problem);
         RecordMover.CleanupOwnMoving(m.To);
         return (true, null);
+    }
+
+    /// <summary>원본들의 계획을 읽기 순서대로: 앞 원본의 정본 조각을 뒤 원본 계획에 넘긴다 (G4 M9 1라운드 a3).</summary>
+    private static MovePlan[] Plans(MoveKind kind, IReadOnlyList<string> sources, string dest)
+    {
+        var claims = new Dictionary<(string Id, int Segment), string>();
+        var plans = new List<MovePlan>();
+        foreach (var s in sources)
+        {
+            var plan = RecordMover.Plan(kind, s, dest, claims);
+            plans.Add(plan);
+            foreach (var (k, v) in plan.Claims ?? new Dictionary<(string, int), string>()) claims.TryAdd(k, v);
+        }
+        return [.. plans];
     }
 
     private bool Persist(RecordFolders next)
@@ -166,12 +200,7 @@ public sealed class RecordMoveService(IAppWorld world, RecordWorkGate gate, Meas
     {
         try
         {
-            return Directory.Exists(folder) && Directory.EnumerateDirectories(folder).Any(d =>
-            {
-                var n = Path.GetFileName(d);
-                int t = n.IndexOf('~');
-                return RecordCatalog.IsIdLike(t > 0 ? n[..t] : n);
-            });
+            return Directory.Exists(folder) && Directory.EnumerateDirectories(folder).Any(d => RecordCatalog.SegmentId(Path.GetFileName(d)) is not null);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return true; }
     }

@@ -76,6 +76,8 @@ public static class Waits
     public static readonly TimeSpan SessionEnd = TimeSpan.FromSeconds(4);
     /// <summary>트레이 도움말의 경과 시간 갱신 간격 (M9 설계 A3)</summary>
     public static readonly TimeSpan TrayTooltip = TimeSpan.FromSeconds(1);
+    /// <summary>시험 주입 <c>--move-fail hold</c>: 옮기기가 파일마다 이만큼 멈춘다 ("옮기는 중" 장면, 옮기는 중 세션 종료 시험). 세션 종료 한도보다 짧게</summary>
+    public static readonly TimeSpan MoveHoldTest = TimeSpan.FromMilliseconds(700);
     /// <summary>시험 주입 <c>--report-fail slow</c>: 내보내기를 이만큼 늦춘다 (M8 "내보내는 중" 장면)</summary>
     public static readonly TimeSpan ReportSlowTest = TimeSpan.FromSeconds(4);
 

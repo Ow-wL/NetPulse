@@ -19,10 +19,14 @@ public static class DiagnosisDefaults
             e["tcp.1"] = "두 주소가 같습니다. 서로 다른 사업자의 주소를 적어 주세요.";
         for (int i = 0; i < domains.Count; i++)
             if (!IsHostName(domains[i])) e[$"domain.{i}"] = "도메인 이름을 적어 주세요 (예: www.example.com).";
-        if (domains.Count == 2 && !e.ContainsKey("domain.0") && !e.ContainsKey("domain.1") && string.Equals(domains[0].Trim(), domains[1].Trim(), StringComparison.OrdinalIgnoreCase))
+        // 저장(From)과 같은 정규화로 비교한다: 끝의 점만 다른 두 이름은 같은 도메인 (G4 M9 1라운드 a12)
+        if (domains.Count == 2 && !e.ContainsKey("domain.0") && !e.ContainsKey("domain.1") && string.Equals(Normal(domains[0]), Normal(domains[1]), StringComparison.OrdinalIgnoreCase))
             e["domain.1"] = "두 도메인이 같습니다.";
         return e;
     }
+
+    /// <summary>저장하는 도메인 꼴: 앞뒤 공백과 끝의 점을 뺀다.</summary>
+    public static string Normal(string domain) => domain.Trim().TrimEnd('.');
 
     /// <summary>점 넷의 IPv4 (선행 0·축약 형태 없음).</summary>
     public static bool IsIpv4(string text)
@@ -57,7 +61,7 @@ public static class DiagnosisDefaults
         }
         if (domains is { Count: 2 })
         {
-            if (Validate([], domains).Count == 0) s = s with { Domains = domains.Select(d => d.Trim().TrimEnd('.')).ToArray() };
+            if (Validate([], domains).Count == 0) s = s with { Domains = domains.Select(Normal).ToArray() };
             else rejected.Add("domains");
         }
         return (s, rejected);

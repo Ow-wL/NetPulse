@@ -233,12 +233,27 @@ public sealed class Theme
     {
         suspended = true;
         transition?.Cancel();
+        // 경계 검사용 렌더링 구독도 끊는다 (G4 M9 1라운드 b2: 숨긴 동안 프레임 구독 0)
+        if (renderingSubscribed && !closing)
+        {
+            CompositionTarget.Rendering -= OnRendering;
+            renderingSubscribed = false;
+            resubscribe = true;
+        }
     }
+
+    private bool resubscribe;
 
     /// <summary>다시 열기: 숨긴 동안 바뀐 모드를 전환 없이 적용한다.</summary>
     public void Resume()
     {
         suspended = false;
+        if (resubscribe && !closing)
+        {
+            resubscribe = false;
+            CompositionTarget.Rendering += OnRendering;
+            renderingSubscribed = true;
+        }
         if (suspendedMode is { } m)
         {
             suspendedMode = null;

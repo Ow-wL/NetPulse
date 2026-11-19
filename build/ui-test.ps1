@@ -109,7 +109,7 @@ if (Test-Path $g5Dir) {
     # M9 (설계 7.2·7.4): 설정·처음 숨김 안내·프로필 TCP 장면 × 테마 × 배율, 상주·설정 흐름, 고대비·효과·움직임 줄이기, 트레이 메뉴 창, 아이콘 대비
     $m9Ids = @(Get-Content (Join-Path $root 'tests\NetPulse.UiTests\m9-scenes.txt') -Encoding UTF8 | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | ForEach-Object { ($_ -split '\|')[0] })
     foreach ($id in $m9Ids) { foreach ($t in 'dark', 'light') { foreach ($s in '100', '150') { $required += "matrix-m9-$id-$t-$s" } } }
-    $required += @('flow-resident-hide', 'flow-resident-balloons', 'flow-settings-diagnosis', 'm9-tray-menu', 'm9-icon')
+    $required += @('flow-resident-hide', 'flow-resident-balloons', 'flow-settings-diagnosis', 'm9-tray-menu', 'm9-icon', 'flow-resident-sleepgap', 'flow-resident-roundtrip', 'flow-resident-roundtrip-noipv4')
     $required += @('matrix-m9-settings-normal-hc-aquatic', 'matrix-m9-settings-normal-hc-desert', 'matrix-m9-settings-moving-hc-aquatic', 'matrix-m9-hint-dialog-hc-desert')
     $required += @('matrix-m9-settings-normal-dark-reduced', 'matrix-m9-settings-moving-light-reduced', 'matrix-m9-hint-dialog-dark-reducedmotion', 'matrix-m9-settings-moving-light-reducedmotion')
     $missing = @($required | Where-Object { -not (Test-Path (Join-Path $g5Dir "$_.json")) })

@@ -201,7 +201,8 @@ public sealed class SettingsScreen : Screen
 
     private GlassTextBox DiagField(string id, string label, string value)
     {
-        var f = new GlassTextBox(Ui, id, label, value, null, Size.FieldM);
+        // 폭이 정해진 칸은 왼쪽에 (기본 늘이기 정렬이면 카드 가운데에 떠 보였다)
+        var f = new GlassTextBox(Ui, id, label, value, null, Size.FieldM) { HorizontalAlignment = HorizontalAlignment.Left };
         diagSeen[f] = value;
         f.Box.TextChanged += (_, _) =>
         {
@@ -235,12 +236,15 @@ public sealed class SettingsScreen : Screen
 
     private bool MeasuringNow => Context.Host.Snapshot.State is HostState.Starting or HostState.Measuring or HostState.Stopping;
 
+    public const string DemoDefaultFolder = @"%LOCALAPPDATA%\NetPulse\records", DemoCustomFolder = @"%USERPROFILE%\Documents\NetPulse 기록 (데모)";
+
     private string FolderDisplay()
     {
         var world = Context.Host.World;
         bool isDefault = RecordFolderRules.Same(world.CurrentRecordFolder, world.DefaultRecordFolder);
-        // 데모 화면에는 실제 경로 대신 고정 합성 경로 (공개 캡처에 사용자 이름이 찍히지 않게, B2 [1-13])
-        if (world is DemoAppWorld && isDefault) return @"%LOCALAPPDATA%\NetPulse\records";
+        // 데모 화면에는 실제 경로 대신 고정 합성 경로 (공개 캡처에 사용자 이름·드라이브·공유 이름이 찍히지 않게, B2 [1-13]).
+        // 사용자 지정 위치도 합성한다 (G4 M9 1라운드 b5: 데모에서 다른 위치로 바꾸면 실제 경로가 보였다)
+        if (world is DemoAppWorld) return isDefault ? DemoDefaultFolder : DemoCustomFolder;
         return RecordFolderRules.Display(world.CurrentRecordFolder);
     }
 
@@ -388,10 +392,11 @@ public sealed class SettingsScreen : Screen
         {
             "saved" => "저장했습니다. 다음 진단부터 이 값으로 확인합니다.",
             "failed" => "설정을 저장하지 못했습니다. 이번 실행에는 적용됩니다.",
+            "notPersisted" => "이번 실행에만 적용합니다. 설정 파일이 이 앱보다 새 판이라 저장하지 않았습니다.",
             "errors" => "고칠 칸이 있습니다.",
             _ => "진행 중인 진단은 시작할 때의 값으로 끝까지 돕니다.",
         };
-        diagStatus.Foreground = diagState is "errors" or "failed" ? Ui.Brushes.Bad : Ui.Brushes.Muted;
+        diagStatus.Foreground = diagState is "errors" or "failed" ? Ui.Brushes.Bad : diagState == "notPersisted" ? Ui.Brushes.Warn : Ui.Brushes.Muted;
         Context.QueueDiag();
     }
 
@@ -404,9 +409,17 @@ public sealed class SettingsScreen : Screen
         var result = Store.Update(f => f with { Diagnosis = new DiagnosisPrefs(tcp, domains) });
         App.ApplyDiagnosisDefaults(Context.Diagnosis, Context.Host.World.Diagnostics.Settings, Store, Context.Log);
         diagDirty = false;
-        diagState = result == SettingsSaveResult.Failed ? "failed" : "saved";
+        diagState = DiagSaved(result);
         RenderDiagnosis();
     }
+
+    /// <summary>저장 결과 → 카드 상태. 저장할 수 없는 실행(새 판)은 "저장됨"이 아니다 (설계 4절 진단 카드 "설정 저장 불가").</summary>
+    private static string DiagSaved(SettingsSaveResult result) => result switch
+    {
+        SettingsSaveResult.Failed => "failed",
+        SettingsSaveResult.NotPersisted => "notPersisted",
+        _ => "saved",
+    };
 
     private void MarkDiagSeen()
     {
@@ -425,7 +438,7 @@ public sealed class SettingsScreen : Screen
         MarkDiagSeen();
         diagErrors = new Dictionary<string, string>();
         diagDirty = false;
-        diagState = result == SettingsSaveResult.Failed ? "failed" : "saved";
+        diagState = DiagSaved(result);
         RenderDiagnosis();
     }
 

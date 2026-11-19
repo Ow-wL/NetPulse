@@ -105,7 +105,10 @@ public sealed class SingleInstance : IDisposable
                     var reply = Encoding.UTF8.GetBytes((accepted ? "ok" : "closing") + "\n");
                     await pipe.WriteAsync(reply, cut.Token).ConfigureAwait(false);
                     await pipe.FlushAsync(cut.Token).ConfigureAwait(false);
-                    pipe.WaitForPipeDrain();
+                    // 받는 쪽이 답을 읽고 연결을 닫을 때까지 (같은 시도 기한 안에서만). WaitForPipeDrain은 취소되지 않아
+                    // 읽지 않는 상대가 서버 고리를 멈출 수 있었다 (G4 M9 1라운드 a10)
+                    var rest = new byte[16];
+                    while (await pipe.ReadAsync(rest, cut.Token).ConfigureAwait(false) > 0) { }
                 }
                 catch (OperationCanceledException) when (stop.IsCancellationRequested) { return; }
                 catch (Exception ex) when (ex is IOException or OperationCanceledException or TimeoutException or ObjectDisposedException) { }   // 한 요청의 실패는 다음 요청에 영향 없음
@@ -146,14 +149,18 @@ public sealed class SingleInstance : IDisposable
         CancellationToken cancellationToken = default)
     {
         var deadline = DateTime.UtcNow + total;
+        // 전체 기한을 시도·대기에도 건다 (G4 M9 1라운드 a9): 남은 시간이 짧으면 시도도 그만큼만
+        using var whole = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        whole.CancelAfter(total);
         bool sawOther = false, delivered = false;
         while (true)
         {
             if (TryAcquire(key) is { } owner) return (owner, delivered, sawOther);
             sawOther = true;
+            if (whole.IsCancellationRequested) return (null, delivered, sawOther);
             if (!delivered)
             {
-                var reply = await SendAsync(key, command, cancellationToken).ConfigureAwait(false);
+                var reply = await SendAsync(key, command, whole.Token).ConfigureAwait(false);
                 if (reply == InstanceReply.Ok)
                 {
                     delivered = true;
@@ -161,10 +168,14 @@ public sealed class SingleInstance : IDisposable
                 }
                 else if (reply == InstanceReply.Closing && command == "exit") delivered = true;   // 이미 종료 중
             }
-            if (DateTime.UtcNow >= deadline) return (null, delivered, sawOther);
-            await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+            var left = deadline - DateTime.UtcNow;
+            if (left <= TimeSpan.Zero) return (null, delivered, sawOther);
+            try { await Task.Delay(left < RetryGap ? left : RetryGap, whole.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }   // 전체 기한: 마지막으로 한 번 더 얻어 본다
         }
     }
+
+    private static readonly TimeSpan RetryGap = TimeSpan.FromMilliseconds(500);
 
     public void Dispose()
     {

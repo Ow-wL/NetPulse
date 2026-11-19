@@ -313,7 +313,7 @@ public static class RecordReader
             {
                 if (!Directory.Exists(location)) continue;
                 found.AddRange(Directory.EnumerateDirectories(location, measurementId + "*")
-                    .Where(d => Path.GetFileName(d) == measurementId || Path.GetFileName(d).StartsWith(measurementId + "~", StringComparison.Ordinal)));
+                    .Where(d => RecordCatalog.IsSegmentOf(Path.GetFileName(d), measurementId)));
             }
             catch (Exception ex) when (IsAccessFailure(ex)) { }
         }

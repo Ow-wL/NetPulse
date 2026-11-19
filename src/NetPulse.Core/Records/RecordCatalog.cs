@@ -43,10 +43,7 @@ public static class RecordCatalog
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { continue; }
             foreach (var dir in dirs)
             {
-                var name = Path.GetFileName(dir);
-                int tilde = name.IndexOf('~');
-                var id = tilde > 0 ? name[..tilde] : name;
-                if (!LooksLikeId(id)) continue;   // 기록 폴더가 아닌 것은 건너뛴다
+                if (SegmentId(Path.GetFileName(dir)) is not { } id) continue;   // 기록 폴더가 아닌 것은 건너뛴다
                 if (!groups.TryGetValue(id, out var list)) groups[id] = list = [];
                 list.Add(dir);
             }
@@ -67,6 +64,27 @@ public static class RecordCatalog
     /// <summary>폴더 이름이 측정 ID 꼴인지 (<c>id</c> 또는 <c>id~n</c>의 앞부분).</summary>
     public static bool IsIdLike(string id) => LooksLikeId(id);
 
+    /// <summary>
+    /// 조각 폴더 이름이면 측정 Id: 정확히 <c>id</c> 또는 <c>id~숫자</c>. <c>id~2.moving</c>·<c>id.moved</c> 같은 옮기기 임시·잔여 폴더는 아니다
+    /// (G4 M9 1라운드 a8: 불완전한 임시 폴더가 정본으로 뽑힐 수 있었다). 목록·조각 찾기·옮기기가 모두 이 규칙을 쓴다.
+    /// </summary>
+    /// <summary>그 측정 Id의 조각 폴더 이름인가: 정확히 <c>id</c> 또는 <c>id~숫자</c> (Id 꼴 검사 없이, 이미 아는 Id로 찾을 때).</summary>
+    public static bool IsSegmentOf(string folderName, string measurementId)
+    {
+        if (folderName == measurementId) return true;
+        return folderName.Length > measurementId.Length + 1 && folderName.StartsWith(measurementId + "~", StringComparison.Ordinal)
+            && folderName[(measurementId.Length + 1)..].All(char.IsAsciiDigit);
+    }
+
+    public static string? SegmentId(string folderName)
+    {
+        int tilde = folderName.IndexOf('~');
+        var id = tilde > 0 ? folderName[..tilde] : folderName;
+        if (!LooksLikeId(id)) return null;
+        if (tilde > 0 && (tilde == folderName.Length - 1 || !folderName[(tilde + 1)..].All(char.IsAsciiDigit))) return null;
+        return id;
+    }
+
     private static RecordEntry Entry(string id, List<string> folders, string? runningId)
     {
         RecordHeader? first = null;
@@ -81,7 +99,7 @@ public static class RecordCatalog
             try
             {
                 var path = Path.Combine(folder, "measurement.json");
-                if (!File.Exists(path)) { unreadableHeader = true; continue; }
+                if (!File.Exists(path)) { unreadableHeader = true; kept.Add(folder); continue; }
                 var (h, unsupported) = RecordSchema.ParseHeader(RecordReader.ReadShared(path));
                 if (unsupported || h is null || h.Id != id) { unreadableHeader = true; kept.Add(folder); continue; }
                 if (segments.Contains(h.Segment)) continue;   // 뒤 위치의 같은 조각

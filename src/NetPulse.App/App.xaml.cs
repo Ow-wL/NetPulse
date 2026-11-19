@@ -114,7 +114,12 @@ public partial class App : Application
         var diagnosis = new DiagnosisHost(world.Diagnostics, new DiagnosisStore(Path.Combine(options.UserData, "diagnoses")), () => mh.RunningId, () => world.Now, version);
         ApplyDiagnosisDefaults(diagnosis, world.Diagnostics.Settings, settings, log);
         var moves = new RecordMoveService(world, workGate, host, folders, path => SingleInstance.FinalPath(path));
-        if (options.MoveFail is { } moveFail) FaultMoveOps.Configure(moves, moveFail);
+        // 옮기기 고장 주입(프로세스 강제 종료 포함)은 데모 + 직접 준 격리 사용자 폴더에서만 (G4 M9 1라운드 b7: 실측 기본 폴더의 실제 기록에서 켜지지 않게)
+        if (options.MoveFail is { } moveFail)
+        {
+            if (options.Demo is not null && options.UserDataGiven) FaultMoveOps.Configure(moves, moveFail);
+            else log.Write("moveFailRefused", new { });
+        }
         var shell = new AppShell(options, log, settings, host, recent, memos, diagnosis, ShutdownAsync,
             new ResidentServices(moves, workGate, recordStartup));
         window = shell;

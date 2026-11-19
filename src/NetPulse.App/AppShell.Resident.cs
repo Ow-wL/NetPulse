@@ -138,7 +138,8 @@ public sealed partial class AppShell
         ui.Motion.SetReduced(true);
         toasts.StopAll();
         AppWindow.Hide();
-        log.Write("resident", new { what = "hidden", host = host.Snapshot.State.ToString() });
+        // 숨긴 뒤 남은 프레임 구독 수 (화면·테마·프레임 측정기, 0이어야 한다: 설계 A1, G4 M9 1라운드 b2)
+        log.Write("resident", new { what = "hidden", host = host.Snapshot.State.ToString(), frameHooks = FrameHooks() });
     }
 
     /// <summary>다시 열기. 화면은 그대로(강제 이동 없음), 풍선 클릭만 측정 화면으로.</summary>
@@ -304,18 +305,26 @@ public sealed partial class AppShell
         instance?.MarkClosing();
         if (screens.Prepared("settings") is SettingsScreen settingsScreen) settingsScreen.StopMove();   // 옮기기 작업자가 되돌리고 스스로 독점을 놓는다
         _ = diagnosis.ShutdownAsync();
-        if (screens.Prepared("report") is ReportScreen report) _ = report.StopExportAsync();
-        // UI 스레드는 데이터 작업이 끝나기를 막고 기다리기만 한다 (A6): 호스트·메모는 UI 문맥을 쓰지 않는다
+        var reportStop = screens.Prepared("report") is ReportScreen report ? report.StopExportAsync() : Task.CompletedTask;
+        // UI 스레드는 데이터 작업이 끝나기를 막고 기다리기만 한다 (A6). 하나의 기한 안에서 순서대로 합류한다 (G4 M9 1라운드 b1):
+        // 옮기기 정리(독점을 놓아야 초안 메모가 저장된다) → 내보내기 정리(임시 파일) → 측정 봉인 → 메모. 모두 UI 문맥을 쓰지 않는다
         var watch = System.Diagnostics.Stopwatch.StartNew();
+        var moving = Resident.Moves.Running;
         var flush = Task.Run(async () =>
         {
+            await moving.ConfigureAwait(false);
+            await reportStop.ConfigureAwait(false);
             await host.ShutdownAsync().ConfigureAwait(false);
             await memos.DrainAsync(Waits.CloseWrites).ConfigureAwait(false);
         });
         bool done = flush.Wait(Waits.SessionEnd);
-        log.Write("sessionEnd", new { step = "flushed", done, ms = watch.ElapsedMilliseconds, state = host.Snapshot.State.ToString() });
+        log.Write("sessionEnd", new { step = "flushed", done, moveDone = moving.IsCompleted, exportDone = reportStop.IsCompleted,
+            ms = watch.ElapsedMilliseconds, state = host.Snapshot.State.ToString() });
         tray?.Remove();
     }
+
+    /// <summary>지금 걸린 프레임(CompositionTarget.Rendering) 구독 수: 화면 + 테마 경계 검사 + 프레임 측정기.</summary>
+    private int FrameHooks() => screens.FrameHooks + (ui.Theme.RenderingSubscribed ? 1 : 0) + (ui.Pacer.Paused ? 0 : 1);
 
     private object ResidentDiag() => new
     {
@@ -323,6 +332,7 @@ public sealed partial class AppShell
         hidden,
         suspended = screens.SuspendedCount,
         pacerPaused = ui.Pacer.Paused,
+        frameHooks = FrameHooks(),
         hintShown = Settings.Current.Resident.TrayHintShown,
         closeToTray = CloseToTray,
         tooltip = tray?.Tooltip,

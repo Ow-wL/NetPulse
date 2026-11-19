@@ -14,6 +14,9 @@ public sealed record StartupOptions
     public double DemoSpeed { get; init; } = 1;
     /// <summary>사용자 데이터 폴더. 없으면 %LOCALAPPDATA%\NetPulse (테스트는 실행마다 새 폴더를 준다)</summary>
     public string UserData { get; init; } = "";
+
+    /// <summary><c>--user-data</c>로 사용자 폴더를 직접 줬는가 (시험의 격리 폴더). 파괴적인 시험 주입은 이때만 켠다.</summary>
+    public bool UserDataGiven { get; init; }
     /// <summary>0보다 크면 그 시간 뒤 스스로 닫힌다 (자동화용)</summary>
     public int RunSeconds { get; init; }
 
@@ -98,7 +101,7 @@ public sealed record StartupOptions
             {
                 "--demo" => o with { Demo = Next() },
                 "--demo-speed" => o with { DemoSpeed = double.Parse(Next(), CultureInfo.InvariantCulture) },
-                "--user-data" => o with { UserData = Next() },
+                "--user-data" => o with { UserData = Next(), UserDataGiven = true },
                 "--run-seconds" => o with { RunSeconds = int.Parse(Next(), CultureInfo.InvariantCulture) },
                 "--screen" => o with { Screen = Next() is var sc && ScreenIds.Contains(sc) ? sc : throw new ArgumentException($"알 수 없는 화면입니다: {sc}") },
                 "--start" => o with { Start = true },

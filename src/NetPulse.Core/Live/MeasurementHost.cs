@@ -191,17 +191,24 @@ public sealed class MeasurementHost : IAsyncDisposable
     public async Task<bool> StartAsync()
     {
         Profile profile;
-        bool moving = false;
         lock (gate)
         {
             if (state is not (HostState.Idle) || startsBlocked) return false;
-            if (options.WorkGate?.Closed == true)
-            {
-                startError = "기록을 옮기는 중에는 측정을 시작할 수 없습니다.";
-                moving = true;
-            }
         }
-        if (moving) { Publish(); return false; }
+        // 작업 문의 표를 받고 시작한다 (G4 M9 1라운드 a1): 옮기기가 독점을 얻으면 이 표가 끝나기(측정 중 상태 게시)를 기다린 뒤
+        // 호스트 상태를 다시 보고 거절한다. 표 없이 시작하면 독점 확인과 세션 생성 사이에 끼어들 수 있었다.
+        var ticket = options.WorkGate?.TryEnter();
+        if (options.WorkGate is not null && ticket is null)
+        {
+            lock (gate)
+            {
+                if (state is not (HostState.Idle) || startsBlocked) return false;
+                startError = "기록을 옮기는 중에는 측정을 시작할 수 없습니다.";
+            }
+            Publish();
+            return false;
+        }
+        using var held = ticket;
         lock (gate)
         {
             if (state is not (HostState.Idle) || startsBlocked) return false;
@@ -413,10 +420,15 @@ public sealed class MeasurementHost : IAsyncDisposable
     }
 
     /// <summary>요약이 있는 조각 폴더 (없으면 마지막 조각).</summary>
+    /// <summary>
+    /// 그 측정의 노트 폴더. 먼저 정본 규칙(조각 번호마다 앞 위치)으로 조각을 고른 뒤 기록 화면과 같은 규칙(<see cref="RecordMemos.NotesFolder"/>)을 쓴다.
+    /// 뒤 위치의 같은 조각 사본에 요약이 있어도 그쪽에 쓰지 않는다 (G4 M9 1라운드 a4: 읽기가 버리는 사본에 메모가 저장될 수 있었다).
+    /// </summary>
     private string? NotesFolder(string sessionId)
     {
-        var segments = RecordReader.FindSegments(sessionId, world.RecordPaths);
-        return segments.FirstOrDefault(f => File.Exists(Path.Combine(f, "summary.json"))) ?? segments.LastOrDefault();
+        var found = RecordReader.FindSegments(sessionId, world.RecordPaths);
+        if (found.Count == 0) return null;
+        return RecordMemos.NotesFolder(RecordCatalog.EntryFor(sessionId, found, null).Segments);
     }
 
     private void RefreshFinishedMarks(string sessionId)

@@ -90,6 +90,9 @@ public abstract class Screen : Grid
     /// <summary>숨김 [2-6]: 프레임 구독·쌓인 프레임 작업을 끊고 예약 표시를 지운다 (세대를 올려 이미 넘긴 작업도 무효).</summary>
     protected virtual void OnSuspend() { }
 
+    /// <summary>이 화면이 지금 걸어 둔 프레임(CompositionTarget.Rendering) 구독 수 (숨김 계약 확인용 진단).</summary>
+    public virtual int FrameHooks => 0;
+
     /// <summary>다시 열기 [2-6]: 렌더 캐시를 무효화해 한 번 다시 그린다. 입력 초안·초점·스크롤은 그대로.</summary>
     protected virtual void OnResume() { }
 }
@@ -182,4 +185,7 @@ public sealed class ScreenHost : Grid
 
     /// <summary>진단: 숨김 상태인 화면 수.</summary>
     public int SuspendedCount => screens.Values.Count(s => s.Suspended);
+
+    /// <summary>모든 화면의 프레임 구독 수.</summary>
+    public int FrameHooks => screens.Values.Sum(s => s.FrameHooks);
 }
