@@ -140,6 +140,7 @@ public sealed partial class AppShell : Window
         ui.Motion.ActiveChanged += QueueDiag;
         ui.Theme.TransitionChanged += QueueDiag;
         dialog.Closed += _ => QueueDiag();
+        if (options.MoveFail is not null) NetPulse.App.Resident.FaultMoveOps.HoldEnteredChanged += () => DispatcherQueue.TryEnqueue(QueueDiag);
         root.GotFocus += (_, _) => QueueDiag();
         AddAccelerators();
 

@@ -187,23 +187,33 @@ public sealed class M3IntegrationTests : IDisposable
     [Fact]
     public void FlushToDiskCostPerRoundIsMeasured()
     {
-        // 회차마다 디스크 flush 비용 (M3 설계 6.5, 11절): 300회차 쓰기 시간의 95백분위. 기준 50 ms 이하
+        // 회차마다 디스크 flush 비용 (M3 설계 6.5, 11절). 기준: p95 50 ms 이하.
+        // 관측 구간 (M10 설계 D2 [1-7][2-9]): 앞 20번은 데우기로 버리고, 미리 정한 900번의 p95로 한 번 판정한다 (재시도 없음).
+        // M3의 "첫 쓰기를 포함한 300번"에서 바뀌었다: 300개 p95는 느린 표본 15개로 넘어, 짧은 디스크 지연 묶음에 판정이 흔들렸다
+        // (M9 PR CI p95 86 ms, 같은 커밋 push CI 통과 — 실행기 원인은 추정). 100개 구간마다의 p95·최대를 함께 남긴다 (누적 아님).
+        const int warmup = 20, samples = 900, window = 100;
         var folder = new DiskRecordFolder(Path.Combine(root, "flush"), "primary");
         var line = RecordSchema.RoundLine("flush-test", new RoundData(0, 0, 0, DateTimeOffset.UnixEpoch, 0, false,
             [new TargetResult("a", ProbeOutcome.Success, 1.234, null), new TargetResult("b", ProbeOutcome.Lost, null, null), new TargetResult("c", ProbeOutcome.Success, 20.5, null)]));
         var times = new List<double>();
         using (var w = new LineAppender(folder, "rounds"))
-            for (int i = 0; i < 300; i++)
+            for (int i = 0; i < warmup + samples; i++)
             {
                 var watch = Stopwatch.StartNew();
                 Assert.True(w.TryAppend(line, out var failure), failure is null ? null : LineAppender.Reason(failure));
-                times.Add(watch.Elapsed.TotalMilliseconds);
+                if (i >= warmup) times.Add(watch.Elapsed.TotalMilliseconds);
             }
-        times.Sort();
-        double p95 = times[(int)Math.Ceiling(0.95 * times.Count) - 1];
-        TestContext.Current.TestOutputHelper?.WriteLine($"flush p95 {p95:F2} ms, 최대 {times[^1]:F2} ms");
+        static double P95(List<double> xs) { var s = xs.Order().ToList(); return s[(int)Math.Ceiling(0.95 * s.Count) - 1]; }
+        var windows = new JsonArray();
+        for (int start = 0; start < times.Count; start += window)
+        {
+            var part = times.Skip(start).Take(window).ToList();
+            windows.Add(new JsonObject { ["from"] = start, ["p95Ms"] = Math.Round(P95(part), 3), ["maxMs"] = Math.Round(part.Max(), 3) });
+        }
+        double p95 = P95(times), max = times.Max();
+        TestContext.Current.TestOutputHelper?.WriteLine($"flush p95 {p95:F2} ms, 최대 {max:F2} ms (데우기 {warmup}, 표본 {samples})");
         File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "flush-cost.json"),
-            new JsonObject { ["p95Ms"] = Math.Round(p95, 3), ["maxMs"] = Math.Round(times[^1], 3), ["count"] = times.Count }.ToJsonString());
+            new JsonObject { ["p95Ms"] = Math.Round(p95, 3), ["maxMs"] = Math.Round(max, 3), ["count"] = times.Count, ["warmup"] = warmup, ["windows"] = windows }.ToJsonString());
         Assert.True(p95 <= 50, $"flush p95 {p95:F2} ms > 50 ms");
     }
 }

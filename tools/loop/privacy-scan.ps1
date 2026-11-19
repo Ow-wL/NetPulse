@@ -43,6 +43,10 @@ function Get-LocalIdentifiers {
             if ($line -match '^\s*SSID\s*:\s*(.+)$') { $values.Add($Matches[1].Trim()) }
         }
     } catch { }
+    # 이 PC의 git 사용자 이메일 (M10: 제3자 고지 파일에서 일반 이메일 규칙을 건너뛰므로, 사용자 자신의 주소는 따로 모든 파일에서 찾는다)
+    foreach ($scope in '--global', '--local') {
+        try { $mail = (git config $scope user.email 2>$null); if ($mail) { $values.Add($mail.Trim()) } } catch { }
+    }
     # 너무 짧거나 흔한 값은 오탐이 많아 뺀다.
     $common = @('Ethernet', 'Wi-Fi', 'WiFi', 'Loopback', '0.0.0.0', '1.1.1.1', '8.8.8.8', '8.8.4.4')
     return $values | Where-Object { $_.Length -ge 4 -and $common -notcontains $_ } | Sort-Object -Unique
@@ -58,9 +62,21 @@ $patterns = @(
 )
 $locals = Get-LocalIdentifiers
 
-function Test-Lines([string[]] $lines, [string] $where) {
-    foreach ($line in $lines) {
+# 제3자 라이선스 원문 (M10 설계 "고지 수집"): 오픈 소스 기여자의 저작권 고지에 이메일이 들어 있고 라이선스가 지우지 말라고 한다.
+# 이 파일들에서만 '이메일 주소' 규칙을 건너뛴다. 다른 규칙(사설 IP, MAC, 사용자 폴더, 이 PC 식별 값, git 사용자 이메일)은 그대로 적용한다.
+$emailExempt = @('src/NetPulse.App/Legal/THIRD-PARTY-NOTICES.txt', 'build/notices/')
+function Test-EmailExempt([string] $path) {
+    if (-not $path) { return $false }
+    foreach ($e in $emailExempt) { if ($path -eq $e -or ($e.EndsWith('/') -and $path.StartsWith($e))) { return $true } }
+    return $false
+}
+
+function Test-Lines([string[]] $lines, [string] $where, [string[]] $paths = @()) {
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        $exempt = $paths.Count -gt $i -and (Test-EmailExempt $paths[$i])
         foreach ($p in $patterns) {
+            if ($exempt -and $p.Name -eq '이메일 주소') { continue }
             if ($line -match $p.Regex) { Write-Output ("[{0}] {1}: {2}" -f $where, $p.Name, $Matches[0]) }
         }
         foreach ($v in $locals) {
@@ -76,17 +92,27 @@ function Get-AddedLines([string[]] $diff) {
     $diff | Where-Object { $_ } | Where-Object { $_.StartsWith('+') -and -not $_.StartsWith('+++') } | ForEach-Object { $_.Substring(1) }
 }
 
+# 추가된 줄마다 그 줄이 속한 파일 경로 (Get-AddedLines와 같은 순서)
+function Get-AddedPaths([string[]] $diff) {
+    if (-not $diff) { return @() }
+    $current = ''
+    foreach ($l in ($diff | Where-Object { $_ })) {
+        if ($l.StartsWith('+++ ')) { $current = if ($l.StartsWith('+++ b/')) { $l.Substring(6) } else { '' }; continue }
+        if ($l.StartsWith('+')) { $current }
+    }
+}
+
 $total = 0
 if ($Staged) {
     $diff = git -c core.quotepath=off diff --cached --unified=0 --no-color
-    $hits = @(Test-Lines (Get-AddedLines $diff) 'staged')
+    $hits = @(Test-Lines @(Get-AddedLines $diff) 'staged' @(Get-AddedPaths $diff))
     $hits | Out-Host
     $total += $hits.Count
 }
 if ($Range) {
     foreach ($sha in (git rev-list --reverse $Range)) {
         $diff = git -c core.quotepath=off show --unified=0 --no-color --format= $sha
-        $hits = @(Test-Lines (Get-AddedLines $diff) $sha.Substring(0, 8))
+        $hits = @(Test-Lines @(Get-AddedLines $diff) $sha.Substring(0, 8) @(Get-AddedPaths $diff))
         $hits | Out-Host
         $total += $hits.Count
     }

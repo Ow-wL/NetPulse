@@ -35,7 +35,7 @@ public sealed class ReportScreen : Screen
     private readonly ScrollViewer scroll;
     private readonly ReportRequests requests = new();
     private readonly DocumentBrushes documentBrushes;
-    private readonly string version = typeof(App).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+    private readonly string version = AppInfo.Current.Version;
     private string? key;
     private ReportOptions options = new();
     private bool exporting, syncing;

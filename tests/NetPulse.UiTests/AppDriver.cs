@@ -65,10 +65,32 @@ public sealed class AppDriver : IDisposable
     /// <summary>인수를 넣지 않고 띄운다: 설정 파일의 기본값(측정 중 닫기 = 트레이)을 그대로 검증한다 (M9 설계 A7 [1-16]).</summary>
     public static AppDriver LaunchRaw(string? userData, params string[] args) => LaunchCore(userData, inject: false, args);
 
-    private static AppDriver LaunchCore(string? userData, bool inject, string[] args)
+    /// <summary>
+    /// 사용 조건 동의 기록을 미리 쓰지 않고 띄운다 (M10 동의 흐름 시험). 첫 창은 사용 조건 화면이다.
+    /// <c>--close-to-tray off</c>는 넣는다 (동의 뒤 셸이 기존 시험과 같게).
+    /// </summary>
+    public static AppDriver LaunchUnconsented(string? userData, params string[] args) => LaunchCore(userData, inject: !args.Contains("--close-to-tray"), args, consent: false);
+
+    /// <summary>
+    /// 격리한 사용자 폴더에 지금 판의 사용 조건 동의를 미리 쓴다 (M10 설계 A2 [2-2]: 데모도 동의를 거치므로 기존 시험·캡처는 동의한 상태에서 시작).
+    /// 폴더를 쓸 수 없게 만든 시험(ACL)에서는 쓰지 못해도 넘어간다.
+    /// </summary>
+    public static void SeedConsent(string userData)
+    {
+        try
+        {
+            Directory.CreateDirectory(userData);
+            var path = Path.Combine(userData, NetPulse.Design.Settings.TermsConsent.FileName);
+            if (!File.Exists(path)) NetPulse.Design.Settings.TermsConsent.TryAccept(userData, DateTimeOffset.Now);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    private static AppDriver LaunchCore(string? userData, bool inject, string[] args, bool consent = true)
     {
         bool owns = userData is null;
         userData ??= NewUserData();
+        if (consent) SeedConsent(userData);
         var info = new ProcessStartInfo(Executable) { UseShellExecute = false };
         foreach (var a in args) info.ArgumentList.Add(a);
         if (inject && !args.Contains("--showcase")) { info.ArgumentList.Add("--close-to-tray"); info.ArgumentList.Add("off"); }

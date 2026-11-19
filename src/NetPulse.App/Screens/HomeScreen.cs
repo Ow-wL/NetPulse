@@ -35,6 +35,7 @@ public sealed class HomeScreen : Screen
     private readonly GlassButton start, stop, firstRun, quick;
     private readonly StackPanel heroTexts;
     private readonly ContentControl heroBanner = new();
+    private Banner? termsBanner;   // 동의 기록을 못 쓴 실행 (M10 A2): 이번 실행 내내 보인다
     private readonly PathMapPanel map;
     private readonly TimelinePanel timeline;
     private readonly CardBody chartBody, recentBody;
@@ -259,7 +260,9 @@ public sealed class HomeScreen : Screen
         stop.Visibility = measuring ? Visibility.Visible : Visibility.Collapsed;
         stop.IsEnabled = s.State == HostState.Measuring;
         firstRun.Visibility = s.State == HostState.NoProfile ? Visibility.Visible : Visibility.Collapsed;
-        heroBanner.Content = s.StartError is { } err ? new Banner(Ui, "home.starterror", BannerKind.Error, "측정을 시작하지 못했습니다: " + err) : null;
+        heroBanner.Content = s.StartError is { } err ? new Banner(Ui, "home.starterror", BannerKind.Error, "측정을 시작하지 못했습니다: " + err)
+            : Context.Resident.TermsNotSaved ? termsBanner ??= new Banner(Ui, "home.termsnotsaved", BannerKind.Warn, "사용 조건 동의를 저장하지 못했습니다. 이번 실행에만 적용하고, 다음 실행에 다시 묻습니다.")
+            : null;
 
         if (s.State == HostState.NoProfile)
         {

@@ -76,21 +76,20 @@ public sealed partial class AppShell
     }
 
     /// <summary>App이 단일 실행 개체를 넘긴다: 두 번째 실행의 열기·종료 요청을 받는다.</summary>
-    public void AttachInstance(SingleInstance owner)
+    public void AttachInstance(SingleInstance owner) => instance = owner;
+
+    /// <summary>두 번째 실행의 요청 (앱의 단일 실행 서버가 동의 뒤 이리로 넘긴다, M10 A2).</summary>
+    public Task<bool> OnInstanceCommand(string command)
     {
-        instance = owner;
-        owner.Serve(command =>
+        var accepted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!DispatcherQueue.TryEnqueue(() =>
         {
-            var accepted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (!DispatcherQueue.TryEnqueue(() =>
-            {
-                if (closing || sessionEnding) { accepted.TrySetResult(false); return; }   // 종료 중: closing으로 답한다
-                if (command == "exit") BeginClose();
-                else Reopen(toMeasure: false, "secondInstance");
-                accepted.TrySetResult(true);
-            })) accepted.TrySetResult(false);
-            return accepted.Task;
-        });
+            if (closing || sessionEnding) { accepted.TrySetResult(false); return; }   // 종료 중: closing으로 답한다
+            if (command == "exit") BeginClose();
+            else Reopen(toMeasure: false, "secondInstance");
+            accepted.TrySetResult(true);
+        })) accepted.TrySetResult(false);
+        return accepted.Task;
     }
 
     // ---------------- 닫기 = 숨김 또는 종료 ----------------

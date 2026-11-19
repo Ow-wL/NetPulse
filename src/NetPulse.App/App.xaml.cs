@@ -50,17 +50,72 @@ public partial class App : Application
         }
     }
 
+    /// <summary>두 번째 실행이 보낸 요청을 받는 곳. 동의 화면 → 셸 순서로 바뀐다 (단일 실행 서버는 한 번만 연다).</summary>
+    private Func<string, Task<bool>> instanceHandler = _ => Task.FromResult(false);
+
+    /// <summary>
+    /// 시작 (M10 설계 A2 [2-1]): 동의 전에는 인수 읽기, 앱 기록, 단일 실행 소유권, 사용 조건 화면만 한다.
+    /// 설정·세계·기록 복구·도서관·측정 호스트·진단·트레이·셸은 동의 뒤(<see cref="LaunchAfterConsent"/>)에 만든다.
+    /// 명령줄 기능 요청(<c>--start</c>, <c>--screen</c>, 기록 열기)은 그 뒤에서 한 번 처리된다.
+    /// </summary>
     private void Launch()
     {
         var options = StartupOptions.Parse(Environment.GetCommandLineArgs().Skip(1).ToArray());
         Directory.CreateDirectory(options.UserData);
         log = new AppLog(options.UserData);
+        if (options.TestInjectionAllowed)
+        {
+            if (options.FakeVersion is { } fake) AppInfo.Override(fake);
+            NetPulse.App.Legal.LegalTexts.FailForTest = options.NoticesFail;
+        }
         SingleInstance? owner = null;
         if (!options.Showcase)
         {
             owner = ClaimInstance(options, log);
             if (owner is null) return;   // 요청을 넘기고 끝남 (Environment.Exit)
+            owner.Serve(command => instanceHandler(command));
         }
+        if (TermsConsent.IsAccepted(options.UserData))
+        {
+            LaunchAfterConsent(options, log, owner, termsSaved: true);
+            return;
+        }
+        var terms = new TermsWindow(options, log);
+        window = terms;
+        instanceHandler = command => OnUi(terms, () =>
+        {
+            if (command == "exit") { terms.CloseNow(); Quit(owner); }
+            else terms.BringToFront();
+        });
+        terms.Declined += () => { terms.CloseNow(); Quit(owner); };
+        terms.Accepted += saved =>
+        {
+            var current = log;
+            LaunchAfterConsent(options, current!, owner, saved);
+            terms.CloseNow();
+        };
+        terms.Activate();
+    }
+
+    /// <summary>창의 UI 스레드에서 한다. 큐에 넣지 못하면 false (두 번째 실행에 closing으로 답한다).</summary>
+    private static Task<bool> OnUi(Window w, Action action)
+    {
+        var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!w.DispatcherQueue.TryEnqueue(() => { action(); done.TrySetResult(true); })) done.TrySetResult(false);
+        return done.Task;
+    }
+
+    /// <summary>동의하지 않음·동의 화면 중 종료 요청: 기록·설정을 만들지 않고 끝낸다 (종료 코드 0).</summary>
+    private void Quit(SingleInstance? owner)
+    {
+        log?.Write("shutdown", new { stopCompleted = true, rounds = 0, skipped = 0, terms = "declined" });
+        owner?.MarkClosing();
+        owner?.Dispose();
+        Exit();
+    }
+
+    private void LaunchAfterConsent(StartupOptions options, AppLog log, SingleInstance? owner, bool termsSaved)
+    {
         var load = SettingsFormat.Load(options.UserData);
         log.Write("settings", new { status = load.Status.ToString().ToLowerInvariant(), detail = load.Detail, repaired = load.Repaired });   // 칸 이름만, 값 없음
         var settings = new SettingsStore(options.UserData, load);
@@ -75,7 +130,7 @@ public partial class App : Application
             return;
         }
 
-        string version = typeof(App).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+        string version = AppInfo.Current.Version;
         IAppWorld world;
         if (options.Demo is { } demo)
         {
@@ -121,9 +176,10 @@ public partial class App : Application
             else log.Write("moveFailRefused", new { });
         }
         var shell = new AppShell(options, log, settings, host, recent, memos, diagnosis, ShutdownAsync,
-            new ResidentServices(moves, workGate, recordStartup));
+            new ResidentServices(moves, workGate, recordStartup, TermsNotSaved: !termsSaved));
         window = shell;
         shell.AttachInstance(owner!);
+        instanceHandler = shell.OnInstanceCommand;
         window.Activate();
     }
 
@@ -135,7 +191,7 @@ public partial class App : Application
     /// <summary>부품 전시 화면 (M2). 측정 없이 뜬다. 이번 실행의 테마·오로라 인수는 저장하지 않는다.</summary>
     private void LaunchShowcase(StartupOptions options, AppLog appLog, SettingsStore settings)
     {
-        appLog.Write("startup", new { mode = "showcase", version = typeof(App).Assembly.GetName().Version?.ToString() });
+        appLog.Write("startup", new { mode = "showcase", version = AppInfo.Current.Version });
         window = new ShowcaseWindow(options, appLog, settings, () =>
         {
             appLog.Write("shutdown", new { stopCompleted = true, rounds = 0, skipped = 0 });

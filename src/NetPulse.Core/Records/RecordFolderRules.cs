@@ -124,10 +124,12 @@ public static partial class RecordFolderRules
     /// </summary>
     public static string Display(string path)
     {
+        // 비교와 자르기를 같은 정규화 문자열로 한다 (G4 M9 4라운드 2: `.`·`..`·`/`가 낀 표기에서 원래 문자열을 앞부분 길이로 잘라 표시가 어긋났다)
+        var full = Trim(SafeFull(path));
         foreach (var (name, get) in Prefixes.OrderByDescending(p => p.Path().Length))   // 긴 앞부분부터 (임시 폴더는 로컬 앱 데이터 안)
         {
-            var prefix = Trim(get());
-            if (prefix.Length > 3 && (Same(path, prefix) || Inside(path, prefix))) return name + path[prefix.Length..];
+            var prefix = Trim(SafeFull(get()));
+            if (prefix.Length > 3 && (Same(full, prefix) || Inside(full, prefix))) return name + full[prefix.Length..];
         }
         return path;
     }

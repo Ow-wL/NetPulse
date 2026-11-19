@@ -21,7 +21,7 @@ public sealed class SettingsScreen : Screen
     private enum RecordsState { Normal, Invalid, Busy, Moving, Done, Leftover, Partial, Stopped, Failed, Conflict, Interrupted, JournalProblem }
 
     private readonly PageHeader header;
-    private readonly GroupPanel appearance, resident, records, diagnosis, measurement;
+    private readonly GroupPanel appearance, resident, records, diagnosis, measurement, about;
     private readonly StackPanel stack = new() { Spacing = Space.S5 };
     private readonly SettingToggle closeToTray, notifyDropout, notifyRecovered, notifyFinished;
     private readonly TextBlock residentNote;
@@ -131,7 +131,25 @@ public sealed class SettingsScreen : Screen
         (measurement, var measurementBody) = ScreenParts.Card(Ui, "settings.measurement", "측정", null);
         measurementBody.Set(Stack(Fonts.Wrapped("측정 대상, 측정 방식(Ping·TCP), 측정 시간, 예상 연결을 바꿉니다.", Typography.Body, Ui.Brushes.Muted), open));
 
-        foreach (var card in new UIElement[] { appearance, resident, records, diagnosis, measurement }) stack.Children.Add(card);
+        // ---- 정보 (M10 A1·A3) ----
+        var info = AppInfo.Current;
+        // 데모는 빌드 줄을 고정한다 (캡처가 커밋마다 바뀌지 않게). 시험 전용 --fake-version이면 그 값대로 (빌드 모름 장면)
+        string build = Context.Options.FakeVersion is null && Context.Options.Demo is not null ? "데모 실행" : info.Commit ?? "알 수 없음";
+        var chips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
+        chips.Children.Add(ScreenParts.InfoChip(Ui, "settings.about.version", "버전", info.Version));
+        chips.Children.Add(ScreenParts.InfoChip(Ui, "settings.about.build", "빌드", build));
+        chips.Children.Add(ScreenParts.InfoChip(Ui, "settings.about.license", "라이선스", "MIT"));
+        var legalButton = new GlassButton(Ui, ButtonKind.Secondary, "settings.about.legal", "라이선스와 고지", Icons.Info);
+        legalButton.Click += (_, _) =>
+        {
+            var view = new NetPulse.App.Legal.LegalView(Ui, "legal", 360);
+            Context.Dialog.OpenContent(legalButton, "라이선스와 고지", view, "닫기", Size.GuideWidth, 520);
+            Context.Log.Write("legal", new { step = "opened", items = view.Items?.Count });
+        };
+        (about, var aboutBody) = ScreenParts.Card(Ui, "settings.about", "정보", null);
+        aboutBody.Set(Stack(chips, Fonts.Wrapped("Copyright (c) 2026 Ow-wL. 함께 들어 있는 구성요소의 조건은 라이선스와 고지에서 볼 수 있습니다.", Typography.Caption, Ui.Brushes.Muted), legalButton));
+
+        foreach (var card in new UIElement[] { appearance, resident, records, diagnosis, measurement, about }) stack.Children.Add(card);
         var scroll = new ScrollViewer { Content = stack, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, Space.S3, Space.S5) };
         AutomationProperties.SetAutomationId(scroll, "settings.scroll");
         Grid.SetRow(scroll, 1);
@@ -142,7 +160,7 @@ public sealed class SettingsScreen : Screen
         RenderRecords();
     }
 
-    public override IReadOnlyList<UIElement> Parts => [header, appearance, resident, records, diagnosis, measurement];
+    public override IReadOnlyList<UIElement> Parts => [header, appearance, resident, records, diagnosis, measurement, about];
 
     public override void Render(HostSnapshot snapshot) => RenderRecords();
 
@@ -452,6 +470,7 @@ public sealed class SettingsScreen : Screen
             extra = Store.Current.Records.ExtraFolders.Count,
             moved = moved.Done, total = moved.Total, reason, usable = folderUsable,
             changeEnabled = change.IsEnabled, retryVisible = retry.Visibility == Visibility.Visible,
+            holdEntered = Context.Options.MoveFail is null ? (int?)null : NetPulse.App.Resident.FaultMoveOps.HoldEntered,
         },
         diagnosis = new { state = diagState, errors = diagErrors.Keys, probed = (Context.Diagnosis.Probes as NetPulse.Core.Demo.DemoDiagnosticProbes)?.Probed },
         resident = new

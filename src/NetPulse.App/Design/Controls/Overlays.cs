@@ -195,6 +195,44 @@ public sealed class DialogHost : Grid
         no.Loaded += (_, _) => no.Focus(focus);
     }
 
+    /// <summary>
+    /// 내용을 담는 대화상자 (M10 A3 라이선스와 고지): 닫기 단추 하나. 내용은 높이 제한 안에서 스크롤한다.
+    /// 닫으면 연 단추로 초점이 돌아간다 (<see cref="Close(DialogChoice)"/>).
+    /// </summary>
+    public void OpenContent(Control? openedBy, string title, UIElement content, string close, double width, double maxContentHeight)
+    {
+        opener = openedBy;
+        Children.Clear();
+        Children.Add(new Border { Background = ui.Brushes.Scrim });
+        var stack = new StackPanel { Spacing = Space.S4 };
+        stack.Children.Add(Fonts.Text(title, Typography.Headline, ui.Brushes.Ink));
+        var scroller = new ScrollViewer { Content = content, MaxHeight = maxContentHeight, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, Space.S3, 0) };
+        AutomationProperties.SetAutomationId(scroller, "dialog.scroll");
+        stack.Children.Add(scroller);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3, HorizontalAlignment = HorizontalAlignment.Right };
+        var no = new GlassButton(ui, ButtonKind.Secondary, "dialog.cancel", close);
+        no.Click += (_, _) => Close(false);
+        buttons.Children.Add(no);
+        stack.Children.Add(buttons);
+        panel = new GroupPanel("dialog.panel", title)
+        {
+            Width = width,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            TabFocusNavigation = KeyboardNavigationMode.Cycle,
+        };
+        panel.Children.Add(ui.Glass.Surface(GlassLevel.Dialog, stack, Radius.Outer, new Thickness(Space.S6)));
+        var esc = new KeyboardAccelerator { Key = VirtualKey.Escape };
+        esc.Invoked += (_, e) => { e.Handled = true; CloseFromEscape(); };
+        panel.KeyboardAccelerators.Add(esc);
+        Children.Add(panel);
+        Visibility = Visibility.Visible;
+        behind.IsHitTestVisible = false;
+        AutomationProperties.SetAccessibilityView(behind, AccessibilityView.Raw);
+        ui.Motion.Enter(panel);
+        no.Loaded += (_, _) => no.Focus(FocusState.Programmatic);
+    }
+
     /// <summary>Esc 키와 같은 경로 (자체 시험도 이것을 부른다).</summary>
     public void CloseFromEscape() => Close(false);
 
