@@ -1,154 +1,195 @@
 # M10 설계 — 릴리스 준비
 
-1판 · 2026-11-20 · 브랜치 `loop/m10-release` (`main` `3ed5671` = M9 병합 위)
+2판 · 2026-11-20 · 브랜치 `loop/m10-release` (`main` `3ed5671` = M9 병합 위)
+1판 `bd63244` → 설계 검토 1라운드 REVISE 12건(높음 3·중간 8·낮음 1) 반영 (`.loop/reviews/m10-design-r1-answer.md`, 반영 표는 DECISIONS "M10 설계 1라운드"). 바뀐 곳은 [1-n]으로 표시. 1라운드 지적 1에 따라 사용자가 "첫 실행 동의"를 정했다(A2).
 
-기획서 8절 M10 행: "버전 표시, 배포 빌드 절차, README와 화면 캡처, `legacy/` 삭제". 끝났다는 증거: 깨끗한 클론에서 배포 파일 생성. 기준은 `docs/loop-plan.md` 1절 완성 정의 4("깨끗한 클론에서 문서화된 한 가지 절차로 배포 파일이 만들어진다"), 5절 "설치 없이"의 뜻(설치 프로그램 없음, Windows 11 기본 런타임만, 파일 하나든 폴더든 됨), 6절 R4(버전 표시, 배포 빌드 절차, README), 4.5(새 런타임 의존성·관리자 권한 없음, Release 게시는 사용자), 4.7(공개 기록 규칙), 이번 범위 밖(설치 프로그램, 자동 업데이트, 코드 서명).
+기획서 8절 M10 행: "버전 표시, 배포 빌드 절차, README와 화면 캡처, `legacy/` 삭제". 끝났다는 증거: 깨끗한 클론에서 배포 파일 생성. 기준은 `docs/loop-plan.md` 1절 완성 정의 3("처음 실행한 사용자가 설정 없이 측정을 시작") 4("깨끗한 클론에서 문서화된 한 가지 절차로 배포 파일"), 5절 "설치 없이"의 뜻, 6절 R4, 4.5, 4.7, 이번 범위 밖(설치 프로그램, 자동 업데이트, 코드 서명).
 
-**사용자 결정 (2026-11-20, DECISIONS "M10 범위")**
+**사용자 결정 (DECISIONS "M10 범위", "M10 설계 1라운드")**
 
 | 쟁점 | 결정 |
 | --- | --- |
 | 버전 번호 | **1.0.0** |
 | 저장소 라이선스 | **MIT**, 저작권자 `Ow-wL` |
-| 배포 파일 | **zip 하나를 만들고, Release 화면에는 exe만 따로도 올린다** (게시는 M11 인수 뒤 사용자 승인) |
-| 배포 크기 | 쓰지 않는 Windows App SDK 구성요소(AI·ML·검색·위젯)를 빼서 **줄인다** (같은 2.6.5에서 빼기만, 새 의존성 없음) |
-| M9 이월 | **모두 넣는다**: G4 사소 2건, CI 디스크 시험 흔들림, 시험 공백 채우기, 실측·풍선 눈 확인 |
+| 배포 파일 | **zip 하나**, Release 화면에는 **exe만 따로도** (게시는 M11 인수 뒤 사용자 승인) |
+| 배포 크기 | 쓰지 않는 Windows App SDK 구성요소를 빼서 **줄인다** (같은 2.6.5, 새 의존성 없음) |
+| M9 이월 | **모두**: G4 사소 2건, CI 디스크 시험, 시험 공백, 실측·풍선 눈 확인 |
+| 사용 조건 (Windows App SDK 라이선스 3(b)(ii)) | **첫 실행 때 앱 안에서 동의**를 받는다. 3(b)(iii) Microsoft 면책 의무는 배포자(사용자)에게 남는다는 것을 보고에 적는다. 법률 판단은 사용자 몫이다 |
 
 ## 1. 목표와 끝났다는 증거
 
 | 목표 | 증거 |
 | --- | --- |
-| **A** 버전 1.0.0을 한 곳에서 정하고 앱 안에 보인다 (설정 "정보" 카드, 기록 머리, 리포트) | G2 버전 문자열 시험, G3·G5 정보 카드·고지 대화상자 |
-| **B1** 한 가지 절차 `./build/build.ps1`이 배포 파일(zip, exe, 해시 파일)을 만든다 | G1 산출물 `release/`, `release.json` |
-| **B2** 배포 exe 하나만으로 모든 화면이 돈다 | G3 전체 UI 시험을 exe 하나만 있는 폴더에서 돌린다 |
-| **B3** 배포 크기를 줄인다 | 지금 234 MB에서 얼마나 줄었는지 `release.json`에 기록. 시험 전부 통과 |
-| **B4** 배포 파일에 이 PC의 경로·이름이 들어가지 않는다 | 빌드 단계의 이진 검사 (3절 B4) |
-| **B5** 깨끗한 클론에서 같은 절차로 만들어진다 | CI(깨끗한 실행기)가 같은 스크립트로 배포 파일을 만들어 워크플로 산출물로 남김 + 로컬 깨끗한 클론 확인 기록 |
-| **C** LICENSE, 제3자 고지, README(데모 캡처), `legacy/` 삭제 | 파일, 고지 일치 시험(G2), README 링크·이미지 검사 |
-| **D** M9 이월 4건 | 3절 D의 시험들 |
+| **A1** 버전 1.0.0을 한 곳에서 정하고 앱 안에 보인다 | G2 `AppInfo` 시험, 옛·새 기록 혼합 읽기·리포트·비교 시험. G3·G5 정보 카드 |
+| **A2** 첫 실행에 사용 조건 동의 [1-1] | G3 동의 흐름 시험, G5 장면 |
+| **A3** 라이선스와 고지를 앱 안에서 볼 수 있다 | G3 고지 화면 시험, bench |
+| **B1** `./build/build.ps1` 하나가 배포 파일(zip, exe, 해시)을 만든다 | G1 `release/`, 빌드와 마감이 같은 검사 함수로 확인 [1-4] |
+| **B2** 배포 exe 하나만으로 모든 화면이 돈다 | `app/`가 정확히 exe 하나인지 강제한 뒤 그 폴더에서 전체 UI 시험, 빈 추출 위치 [1-5] |
+| **B3** 배포 크기를 줄인다 | 빼기 전후 묶음 파일 목록 비교, 전체 시험 통과, 크기 기록 |
+| **B4** 배포 파일에 이 PC의 경로·이름이 없다 | 내장 PDB 없음·묶음 압축 없음을 검사로 확인 + 묶음에 들어가는 파일 전부와 exe·zip의 이진 검사 + 검사기 자체 시험 [1-3] |
+| **B5** 깨끗한 클론에서 같은 절차로 만들어진다 | CI(깨끗한 실행기)의 산출물 업로드와 실행 기록, 로컬 깨끗한 클론 확인 [1-6] |
+| **C** LICENSE, 사용 조건, 제3자 고지, README(데모 캡처), `legacy/` 삭제 | 고지 수집 검사(묶음 파일마다 출처), README 링크·이미지 검사 |
+| **D** M9 이월 4건 | 3절 D의 시험 |
 
 ## 2. 구조
 
 | 곳 | 바뀌는 것 |
 | --- | --- |
-| `Directory.Build.props` | `Version` 1.0.0, `Copyright`, Release 구성에서 경로 정규화(`ContinuousIntegrationBuild`) 항상 |
-| `Directory.Packages.props`, `src/NetPulse.App/NetPulse.App.csproj` | `Microsoft.WindowsAppSDK` 메타패키지 → 필요한 구성요소 패키지만. 배포 폴더로 `App.xbf`·`.pri`를 복사하던 대상은 exe 하나 시험이 통과하면 뺀다 |
-| `src/NetPulse.App/AppInfo.cs` (새) | 버전·커밋을 읽는 한 곳 |
-| `src/NetPulse.App/Screens/SettingsScreen.cs` | "정보" 카드, 고지 대화상자 |
-| `src/NetPulse.App/Legal/` (새, 내장 리소스) | `LICENSE.txt` 사본, `THIRD-PARTY-NOTICES.txt` |
-| `build/build.ps1`, `build/common.ps1` | 묶기 단계(`release/`), 이진 검사, 고지 일치 검사 |
-| `build/notices.ps1` (새) | 고지 파일 만들기·검사 |
-| `.github/workflows/ci.yml` | `release/` 파일을 워크플로 산출물로 올림 |
+| `Directory.Build.props` | `Version` 1.0.0, `Copyright`, Release 구성: 경로 정규화(`ContinuousIntegrationBuild`)·`DebugType=none` [1-3] |
+| `Directory.Packages.props`, `src/NetPulse.App/NetPulse.App.csproj` | 메타패키지 → 구성요소 패키지(한 버전 변수). `App.xbf`·`.pri` 복사 대상 제거(B2 통과 시). 묶음 입력 목록을 파일로 남기는 대상 [1-2] |
+| `src/NetPulse.App/AppInfo.cs` (새) | 버전·커밋 |
+| `src/NetPulse.App/Screens/TermsScreen.cs` (새) | 사용 조건 동의 화면 [1-1] |
+| `src/NetPulse.App/Screens/SettingsScreen.cs`, `LegalView`(새) | "정보" 카드, 라이선스와 고지 화면 |
+| `src/NetPulse.Design/Settings/AppSettings.cs` | 동의한 조건 판(`termsAccepted`) [1-1] |
+| `src/NetPulse.App/Legal/` (내장) | `TERMS.txt`(사용 조건), 루트 `LICENSE` 링크, `THIRD-PARTY-NOTICES.txt` |
+| `build/build.ps1`, `build/common.ps1` | 묶기, 배포 검사 함수(`Test-Release`), 이진 검사, 고지 검사 |
+| `build/close-milestone.ps1` | `Test-Release`로 다시 계산 [1-4] |
+| `build/notices.ps1`, `build/notices/` (새) | 고지 만들기·검사, 원문이 패키지에 없는 구성요소의 검토된 원문 [1-2] |
+| `build/ui-test.ps1` | exe 하나 강제, 빈 추출 위치, `Kind=Docs` 제외, M10 필수 결과 [1-5][1-10][1-11] |
+| `build/readme-shots.ps1` (새) | README 캡처 따로 찍기(비추적 출력) [1-10] |
+| `.github/workflows/ci.yml` | 허용 파일만 검사 뒤 업로드 [1-6] |
 | `tools/loop/clean-clone.ps1` (새) | 로컬 깨끗한 클론 확인 |
 | `LICENSE`, `README.md`, `docs/images/` | 새로 쓰기 |
 | `legacy/` | 삭제 |
-| 시험 | 3절 D, 6절 |
 
 ## 3. 설계
 
-### A. 버전과 정보
+### A. 버전·사용 조건·정보
 
-- **한 곳**: `Directory.Build.props`의 `Version`이 1.0.0. 파일 버전 1.0.0.0, 제품 버전 `1.0.0+<커밋 전체 SHA>`(SDK가 SourceLink로 붙인다, 지금 배포본에서 확인함: `0.5.0+762addc…`). `Copyright`는 `Copyright (c) 2026 Ow-wL`.
-- **`AppInfo`**: `AssemblyInformationalVersionAttribute`를 읽어 `Version`(+ 앞), `Commit`(+ 뒤 앞 7자, 16진수가 아니면 없음)을 낸다. 지금 `typeof(App).Assembly.GetName().Version`을 쓰는 세 곳(측정 호스트의 기록 머리, 쇼케이스 로그, 리포트 화면)을 `AppInfo.Version`으로 바꾼다. 기록 머리의 앱 버전이 `0.5.0.0` 같은 네 마디에서 `1.0.0` 세 마디가 된다. 리포트의 `SafeVersion`은 1~4마디를 받으므로 옛 기록도 그대로 읽힌다(G2 시험으로 확인).
-- **"정보" 카드**: 설정 화면 마지막 카드. 줄: 버전 `1.0.0`, 빌드 `abc1234`(없으면 "알 수 없음"), 라이선스 "MIT", 단추 [라이선스와 고지 보기]. 데모 실행에서는 빌드 줄이 "데모 실행"이다(캡처가 커밋마다 바뀌지 않게).
-- **고지 대화상자**: 앱에 내장한 `LICENSE.txt`와 `THIRD-PARTY-NOTICES.txt`를 읽기 전용 글 상자 하나에 보인다(스크롤, 키보드 선택·복사 가능, 닫기). 외부 브라우저·파일을 열지 않는다. 큰 글(약 150 KB 예상)을 한 번에 넣어 대화상자 열기가 느리면 고지를 구성요소별로 접는 목록으로 바꾼다 (bench로 판단, 5절).
-- 창 제목·트레이 도움말에는 버전을 넣지 않는다 (지금 그대로).
+**A1 버전**
+- `Directory.Build.props`의 `Version` 1.0.0이 유일한 출처. 파일 버전 1.0.0.0, 제품 버전 `1.0.0+<커밋 전체 SHA>`(SDK SourceLink, 지금 생성 AssemblyInfo에서 확인). `Copyright (c) 2026 Ow-wL`.
+- `AppInfo`: 앱 어셈블리의 `AssemblyInformationalVersionAttribute`에서 `Version`(+ 앞), `Commit`(+ 뒤가 40자 16진수일 때 앞 7자, 아니면 없음). 지금 `GetName().Version`을 쓰는 세 곳(기록 머리, 쇼케이스 로그, 리포트 화면)을 바꾼다. 기록 머리 앱 버전은 `0.5.0.0` → `1.0.0`. 기록 스키마는 비어 있지 않은 문자열을 받고 `SafeVersion`은 1~4마디를 받는다(1라운드 확인). 옛(4마디)·새(3마디) 기록을 섞은 읽기·리포트·비교 G2 시험을 둔다.
+- 시험 전용: `--fake-version <글>`(데모 + 명시한 사용자 폴더에서만)이 `AppInfo` 입력을 바꿔 "빌드 모름" 장면을 만든다 [1-11].
+
+**A2 사용 조건 동의** [1-1]
+- 사용 조건 `TERMS.txt`(한국어, 판 번호 `terms-1`): ① NetPulse 자체는 MIT(전문은 라이선스 화면), ② 포함된 Microsoft 구성요소(Windows App SDK, .NET 런타임 등)는 각자의 사용 조건이 적용되며 사용자는 그 조건(원문은 고지 화면)에 동의해야 이 앱을 쓸 수 있음, ③ 보증 없음·책임 제한, ④ 포함 구성요소의 리버스 엔지니어링 금지·수출 규정 준수. Microsoft 조건을 원문 그대로 포함시켜 "적어도 같은 만큼 보호"를 만족시키는 방식이다. 문구는 Codex가 원문과 대조 검토하고, 최종 판단은 사용자 몫이라고 보고한다.
+- 흐름: 앱을 시작할 때 동의한 판이 지금 판과 다르면 셸 대신 **사용 조건 화면**을 먼저 보인다. 요약 몇 줄 + [전문 보기](같은 화면 안 펼침) + [동의하고 시작] + [동의하지 않음(종료)]. 동의 전에는 측정·진단·트레이·단일 실행 열기 요청 처리 외에 아무것도 하지 않는다(`--start` 같은 명령줄 동작은 동의 뒤로 미룬다). 동의하지 않으면 종료 코드 0으로 끝난다(기록 없음).
+- 저장: 설정 2판에 `termsAccepted: "terms-1"`을 더한다(없는 항목은 "동의 안 함"으로 읽음, 판 번호는 그대로 2 — 새 항목만 더하고 옛 앱이 모르는 항목을 무시하는지 확인한 뒤 적는다. 무시하지 않으면 3판으로 올리고 옮기기를 둔다). 설정을 쓸 수 없으면(새 판·쓰기 실패) 이번 실행에만 동의를 기억하고 다음 실행에 다시 묻는다고 화면에 알린다.
+- 데모: `--demo`는 동의를 건너뛴다(기존 시험·캡처 유지). 동의 흐름 시험은 `--demo --terms-prompt`로 화면을 강제한다. 실사용 경로(데모 없음)는 항상 동의를 확인한다(G2: 데모 아닌 시작 경로가 동의 확인을 거치는지).
+- 완성 정의 3과의 관계: 동의는 설정이 아니라 한 번 누르는 확인이다. 첫 실행 안내 앞에 한 단계가 는다(과업 단계 수 기록에 반영).
+
+**A3 정보 카드와 라이선스 화면**
+- 설정 마지막 카드 "정보": 버전 `1.0.0`, 빌드 `abc1234`(없으면 "알 수 없음", 데모는 "데모 실행"), 라이선스 "MIT", [라이선스와 고지].
+- **라이선스와 고지**는 큰 글이다(Base의 NOTICE 하나가 34만 자, 1라운드 확인) [1-11]. 그래서 대화상자에 전문을 한 번에 넣지 않고, 구성요소 목록(이름·버전·라이선스 이름)을 먼저 보이고 하나를 펼칠 때만 그 원문을 읽기 전용 글 상자에 넣는다(키보드로 펼치기·스크롤·선택·복사, 닫으면 [라이선스와 고지] 단추로 초점 복귀). 사용 조건 전문도 같은 목록의 첫 항목.
+- 외부 브라우저·파일을 열지 않는다.
+- 시험 전용 `--notices-fail`(데모 + 명시 사용자 폴더)로 "읽기 실패" 상태를 만든다.
 
 ### B. 배포 빌드
 
-**B1 절차 하나**: `./build/build.ps1`(게이트는 `-Gate`)이 지금 단계(복원 → 빌드 → 시험 → 배포 → manifest) 뒤에 묶기를 한다. 결과는 `artifacts/<sha10>/release/`:
+**B1 절차 하나와 확인**: `./build/build.ps1`(게이트는 `-Gate`)이 지금 단계 뒤에 묶기를 한다. 결과 `artifacts/<sha10>/release/`:
 
 | 파일 | 내용 |
 | --- | --- |
-| `NetPulse-1.0.0-win-x64.zip` | `NetPulse.exe`, `LICENSE.txt`, `THIRD-PARTY-NOTICES.txt`, `읽어보기.txt` |
-| `NetPulse-1.0.0-win-x64.exe` | zip 안과 같은 바이트의 exe (Release 화면에 따로 올릴 것) |
-| `SHA256SUMS.txt` | 위 두 파일의 SHA-256 |
-| `release.json` | 버전, 원본 커밋, manifest 해시, 각 파일 크기·해시, exe 크기 비교(이전 234 MB) |
+| `NetPulse-1.0.0-win-x64.zip` | `NetPulse.exe`, `LICENSE.txt`, `TERMS.txt`, `THIRD-PARTY-NOTICES.txt`, `읽어보기.txt` |
+| `NetPulse-1.0.0-win-x64.exe` | zip 안 exe와 같은 바이트 |
+| `SHA256SUMS.txt` | 위 둘의 SHA-256 |
+| `release.json` | 버전, 원본 커밋, manifest 해시, 파일마다 크기·해시, zip 항목 목록·해시, 이진 검사 결과 요약(건수만), 이전 크기(234 MB)와 비교 |
 
-- 파일 이름의 버전은 `Directory.Build.props`에서 읽는다(MSBuild `-getProperty:Version`). 이름이 두 곳에서 따로 정해지지 않게 한다.
-- zip은 .NET `System.IO.Compression`으로 만들고 항목 시각을 커밋 시각으로 고정한다 (같은 입력이면 같은 zip).
-- `읽어보기.txt`: Windows 11 x64, 설치 없음, 코드 서명이 없어 SmartScreen 경고가 날 수 있음, 기록·설정 위치, 지우는 법, 관리자 권한 불필요.
-- manifest는 지금처럼 `app/`의 파일 목록과 해시를 담고, `release.json`은 manifest 해시를 담아 둘을 잇는다. `close-milestone.ps1`은 `release.json`이 있고 X의 것인지 확인한다.
+- 버전은 MSBuild `-getProperty:Version`으로 읽는다.
+- **결정적 zip** [1-12]: 항목 순서 고정(위 표 순서), 시각은 커밋 시각(UTC를 ZIP 2초 정밀도로 내림), 압축 `Optimal` 고정, 외부 속성 0, 주석 없음. 빌드 안에서 같은 입력으로 두 번 만들어 해시가 같은지 본다.
+- **`Test-Release`** (`common.ps1`, 빌드와 마감이 함께 씀) [1-4]: manifest의 `app/` 해시 재계산, `release.json`의 커밋·버전 = X·`Version`, release 파일 목록이 정확히 위 4개, 크기·해시 재계산, `SHA256SUMS.txt` 일치, zip 항목 목록·각 항목 해시, zip 안 exe = 따로 낸 exe = `app/NetPulse.exe`.
+- `읽어보기.txt`: Windows 11 x64, 설치 없음, 처음 실행에 사용 조건 동의, 코드 서명이 없어 SmartScreen 경고, 기록·설정 위치, 지우는 법, 관리자 권한 불필요.
 
-**B2 exe 하나**: 패키지 없는 단일 파일 배포에서 M0 때는 `App.xbf`와 앱 `.pri`가 배포 폴더에 복사되지 않아 직접 복사하는 대상을 두었다. 2026-11-20 조사: M9 배포본의 exe만 빈 폴더에 두고 데모로 실행하니 첫 실행 화면이 정상으로 그려졌다(창만 캡처로 확인). Windows App SDK가 `IncludeAllContentForSelfExtract`를 강제해 내용 파일이 exe 안에 들어가는 것으로 본다(추정). 그래서:
-1. 복사 대상을 빼고 배포 폴더가 exe 하나(+ 같은 단일 파일이 풀지 못한 것이 있으면 그 목록)인지 본다.
-2. 게이트 UI 시험은 그 폴더(`app/`)에서 돈다. 즉 **배포하는 exe 그대로 전체 UI 시험(768개 + M10)을 돌린다.**
-3. 실패하면 복사 대상을 되돌리고 zip에 `.pri`·`.xbf`를 넣으며, "exe만 따로"는 사용자에게 다시 묻는다 (임의로 정하지 않는다).
+**B2 exe 하나** [1-5]
+- 2026-11-20 조사: exe만 빈 폴더에서 첫 화면은 정상(다른 화면 미확인). 내용 파일이 exe 안에 들어간다는 것은 추정.
+- `App.xbf`·`.pri` 복사 대상을 뺀다. `ui-test.ps1`은 시작 전에 `app/`가 **정확히 `NetPulse.exe` 하나**인지 확인하고 아니면 실패한다.
+- 전체 UI 시험을 그 폴더에서 돌린다. 시험 실행 동안 `DOTNET_BUNDLE_EXTRACT_BASE_DIR`를 새로 만든 빈 폴더로 둔다(추출 캐시가 누락을 가리지 않게).
+- 배포 이름 exe(`NetPulse-1.0.0-win-x64.exe`)는 다른 빈 폴더에서 데모로 시작 → 홈 → 설정 → 종료하는 짧은 시험(`M10ReleaseExeTests`)으로 확인한다.
+- 한계: 추가 런타임(VC++ 등)이 없는 깨끗한 Windows에서는 확인하지 못한다. 이 PC·CI 모두 개발 환경이다. 보고와 M11 인수 체크리스트에 적는다.
+- 실패하면 복사 대상을 되돌리고 zip에 `.pri`·`.xbf`를 넣는다. "exe만 따로"는 그때 사용자에게 다시 묻는다.
 
-**B3 크기 줄이기**: `Microsoft.WindowsAppSDK`(메타) 대신 `Microsoft.WindowsAppSDK.Base`, `.Foundation`, `.WinUI`, `.InteractiveExperiences`, `.DWrite`, `.Runtime` 중 빌드·실행에 필요한 것만 같은 2.6.5로 참조한다. `AI`, `ML`, `Search`, `Widgets`는 뺀다. 앱 코드는 이 넷의 API를 쓰지 않는다(검색으로 확인한 뒤 적는다). 빼고 나서 G1·G2·G3 전체를 돌린다. 하나라도 깨지면 원인을 기록하고 그 구성요소만 되살린다. 결과 크기는 `release.json`과 DECISIONS에 남긴다. (`PublishTrimmed`는 WinUI·리플렉션 위험이 커서 하지 않는다.)
+**B3 크기 줄이기** [1-5]
+- 메타패키지 대신 구성요소 패키지를 `Directory.Packages.props`의 한 변수(`WindowsAppSdkVersion`)로 참조한다. 시작점은 Base·Foundation·WinUI·InteractiveExperiences·DWrite·Runtime, 빼는 것은 AI·ML·Search·Widgets.
+- 판단: ① 앱 코드가 빼는 네 구성요소의 이름공간을 쓰지 않는지 검색, ② 빼기 전후 **묶음 입력 파일 목록**(아래 B4)을 비교해 빠진 파일을 `release.json`과 DECISIONS에 남김, ③ 빠진 파일을 지연 로딩하는 기능이 있는지 — 앱 기능(트레이·알림·글꼴·창)은 전체 UI 시험과 D4 실측이 덮는다.
+- 깨지면 원인을 적고 그 구성요소만 되살린다.
 
-**B4 경로·이름이 배포 파일에 들어가지 않게**:
-- Release 구성에서는 로컬에서도 `ContinuousIntegrationBuild=true`로 소스 경로를 `/_/`로 바꾼다. 지금은 CI에서만 켠다.
-- 빌드의 마지막 단계에서 `release/`의 exe와 zip 안 파일을 이진으로 검사한다: 이 PC의 사용자 이름, 컴퓨터 이름, 사용자 폴더 경로, 저장소 절대 경로, NuGet 캐시 경로를 UTF-8과 UTF-16LE로 찾는다. 걸리면 빌드 실패. 찾을 값은 실행 중 환경에서 읽고 산출물·로그에는 "n건, 종류"만 적는다(값을 적지 않는다). CI에서는 CI 실행기의 값을 찾는다.
+**B4 경로·이름이 배포 파일에 없게** [1-3]
+- Release 구성(로컬·CI 같음): `ContinuousIntegrationBuild=true`(소스 경로 `/_/`), `DebugType=none`(내장·외부 PDB 없음). 단일 파일 압축(`EnableCompressionInSingleFile`)은 지금처럼 끈 채로 두고 명시한다. Debug 구성은 그대로다. 영향: 로컬 Release 빌드의 예외 스택에 파일·줄이 없고 소스 디버깅이 안 된다(시험은 Debug·Release 모두 돌지만 줄 번호를 읽는 시험은 없다 — 검색으로 확인해 적는다).
+- 이진 검사 대상: ① 묶음 입력 파일 전부(앱 csproj의 대상이 publish 때 `ResolvedFileToPublish`·묶음 목록을 `obj/.../bundle-inputs.json`으로 남긴다 — 압축 전 원본), ② 최종 exe, ③ zip 안 항목 전부, ④ 업로드할 `release.json`·`SHA256SUMS.txt` 글.
+- 찾는 값: 실행 중 환경의 사용자 이름, 컴퓨터 이름, 사용자 폴더 경로, 저장소 절대 경로, NuGet 캐시 경로, 임시 폴더 경로. UTF-8·UTF-16LE, 경로 구분자 두 가지, 대소문자 무시. 결과에는 "n건, 종류"만 남긴다.
+- **검사기 자체 시험**: 빌드 때 표식 값을 UTF-8·UTF-16LE·zip 항목 안에 넣은 합성 파일을 만들어 검사기가 모두 찾는지 먼저 확인한다(못 찾으면 빌드 실패).
+- 어셈블리에 디버그 정보가 없는지 확인: 묶음 입력의 관리 어셈블리마다 `PEReader`로 디버그 디렉터리에 내장 PDB·CodeView 경로가 없는지 본다(경로 정규화된 `/_/`는 허용).
 
-**B5 깨끗한 클론**:
-- CI: `build.ps1` 뒤에 `release/`의 zip·exe·해시·`release.json`을 `actions/upload-artifact`(다른 액션과 같이 메이저 버전 고정)로 올린다. 보관 14일. 비밀 값 없음. Release 게시는 하지 않는다.
-- 로컬: `tools/loop/clean-clone.ps1 -Commit <sha>`가 저장소를 임시 폴더로 `git clone --no-local` 한 뒤 그 커밋에서 `build.ps1 -Gate`를 돌리고, 결과의 버전·파일 목록·zip 항목을 확인해 `.loop/clean-clone-<sha10>.json`에 남긴다(공개 안 함, 결과 요약만 DECISIONS). 저장소 산출물과 exe 해시가 같은지도 적는다. 같지 않아도 실패는 아니고 원인을 적는다(단일 파일 묶음의 결정성은 확인하지 않은 사실).
+**B5 깨끗한 클론** [1-6]
+- CI: `build.ps1` 뒤 `Test-Release`와 이진 검사가 통과한 경우에만 **허용 목록 4개**(zip, exe, `SHA256SUMS.txt`, `release.json`)를 `actions/upload-artifact`로 올린다(보관 14일). TRX·로그·manifest 원본은 올리지 않는다. 공개 저장소의 워크플로 산출물은 저장소를 읽을 수 있는 사람이 받을 수 있으므로 "공개"로 다룬다(4.7). CI 실행기에는 이 PC 정보가 없지만 같은 검사를 거친다.
+- 증거 기록: DECISIONS에 CI 실행 URL, 실제 checkout SHA, `release.json`의 해시 요약을 남긴다(산출물이 만료돼도 찾을 수 있게).
+- 로컬 `tools/loop/clean-clone.ps1 -Commit <sha>`: 임시 폴더에 `git clone --no-local` → 그 커밋에서 `build.ps1 -Gate` → `Test-Release`. 결과는 `.loop/clean-clone-<sha10>.json`(공개 안 함), 요약만 DECISIONS. 저장소 산출물과 exe 해시가 같은지도 적는다(같지 않아도 실패 아님, 완성 정의 4는 바이트 재현을 요구하지 않음).
 
-**고지 파일**:
-- `build/notices.ps1 -Write`가 앱의 `obj/project.assets.json`에서 실제로 배포에 들어가는 패키지(런타임 대상)와 .NET 런타임 팩을 모아, 각 패키지 캐시의 `license.txt`·`LICENSE*`·`NOTICE*`·`THIRD-PARTY-NOTICES*` 글을 이어 `src/NetPulse.App/Legal/THIRD-PARTY-NOTICES.txt`를 만든다. 머리에 구성요소 이름·버전·라이선스 표시 목록, 이어서 원문. Pretendard OFL도 넣는다.
-- 이 파일은 커밋한다(검토 가능). `build.ps1`은 `-Check`로 다시 만들어 커밋된 것과 같은지 본다. 다르면 실패(의존성이 바뀌었는데 고지를 안 고친 것).
-- 고지 글에 경로를 넣지 않는다(패키지 이름·버전만).
+**고지 수집** [1-2]
+- 출발점은 **묶음 입력 파일 목록**(B4 ①)이다. 파일마다 출처를 정한다: NuGet 패키지 자산(`project.assets.json`의 runtime·native 항목과 MSBuild가 복사하는 `build` 자산 — DWrite props의 `WindowsAppSdkComponentPackages` 포함), 런타임 팩(`Microsoft.NETCore.App.Runtime.win-x64` 등 실제 포함된 팩), Windows SDK 투영(`Microsoft.Windows.SDK.NET.Ref`), 앱 자체(NetPulse 어셈블리, 글꼴 → Pretendard OFL).
+- 출처마다 원문을 패키지·팩의 `license*`·`LICENSE*`·`NOTICE*`·`THIRD-PARTY-NOTICES*`에서 가져온다. 원문이 패키지에 없으면(예: `Microsoft.Windows.SDK.NET.Ref`는 `licenseUrl`만) `build/notices/<패키지 id>.txt`에 사람이 확인한 원문과 출처 주소를 커밋해 둔다. **출처를 못 정한 파일이나 원문이 없는 출처가 하나라도 있으면 실패**한다(조용히 건너뛰지 않음).
+- `THIRD-PARTY-NOTICES.txt`(커밋): 머리 목록(구성요소·버전·라이선스 이름) + 원문. 경로는 넣지 않는다. `build.ps1`은 만들어 본 결과와 커밋된 파일이 같은지 본다(의존성 변경 감지). 누락 검사는 위 "출처를 못 정한 파일" 규칙이 맡는다.
 
 ### C. 문서와 정리
 
-- **LICENSE**: MIT 원문, `Copyright (c) 2026 Ow-wL`. 앱 안 사본(`Legal/LICENSE.txt`)은 빌드 때 루트 파일을 링크해 내장한다(사본을 따로 두지 않음).
-- **README** (한국어로 새로 씀): 무엇을 하는 앱인가, 주요 기능(측정·끊김 판정·진단·기록·리포트·상주), 화면 캡처, 받기와 실행(zip 또는 exe, 요구 사항, SmartScreen), 개인정보(기록은 내 PC에만, 관리자 권한·네트워크 설정 변경 없음, 리포트 가리기), 직접 빌드(`git clone` → `./build/build.ps1`, 필요한 SDK는 `global.json`), 개발(시험 명령, 루프 문서 링크), 라이선스(MIT, 제3자 고지, Pretendard OFL). 기존 앱 설명과 `legacy` 안내는 지운다.
-- **화면 캡처**: `docs/images/`에 6장 안팎(홈·측정 중 타임라인·진단 결과·기록 상세·리포트 미리 보기·설정)을 다크로, 대표 1장은 라이트로도. 데모 모드, 100%, 같은 창 크기, 창만 캡처(PrintWindow). UI 시험 `ReadmeShotsTests`(`Kind=Docs`, 게이트 밖)가 찍고, 사람이 고른 것을 커밋한다. 장당 400 KB 이하(PNG 최적화는 .NET 기본 인코더 범위에서). 커밋 전에 Claude가 눈으로 보고, G4에 이미지로 첨부한다.
-- **`legacy/` 삭제**: 12개 파일. 기획서의 `legacy` 언급은 기록이라 그대로 둔다. 저장소 다른 곳에서 참조가 없는지 `git grep`으로 확인한다(README만 있음, 위에서 고침).
+- **LICENSE**: MIT 원문, `Copyright (c) 2026 Ow-wL`. 범위: 이 저장소의 NetPulse 코드·문서. 포함된 제3자 구성요소와 글꼴은 각자의 조건(고지)이 적용된다고 README·`TERMS.txt`에 적는다 [1-1].
+- **README** (한국어 새로 씀): 무엇을 하는 앱인가, 주요 기능, 화면 캡처, 받기와 실행(zip/exe, 요구 사항, 첫 실행 동의, SmartScreen), 개인정보(기록은 내 PC에만, 관리자 권한·네트워크 설정 변경 없음, 리포트 가리기), 직접 빌드(`git clone` → `./build/build.ps1` → `artifacts/<sha>/release/`), 개발(시험 명령, 루프 문서), 라이선스(MIT 범위, 사용 조건, 제3자 고지, Pretendard OFL). 기존 앱 설명·`legacy` 안내는 지운다.
+- **화면 캡처** [1-10]: `build/readme-shots.ps1`이 UI 시험 `ReadmeShotsTests`(`Kind=Docs`)만 돌려 `artifacts/readme-shots/<sha10>/`(git 제외)에 찍는다. `ui-test.ps1`은 `Kind=Live`와 `Kind=Docs`를 모두 제외한다. 사람이(Claude가 보고) 고른 것만 `docs/images/`로 옮겨 커밋한다. 데모 모드, 100%, 같은 창 크기, 창만 캡처(PrintWindow), 캡처 때 UIA 글에 공개 전 검사 패턴. 홈·측정 중·진단 결과·기록 상세·리포트 미리 보기·설정을 다크로, 대표 1장은 라이트로도. 장당 400 KB 이하. G4에 이미지로 첨부.
+- **`legacy/` 삭제**: 12개 파일. 참조는 README 세 곳뿐(1라운드 확인). 기획서의 언급은 기록이라 둔다. `assets/fonts/`는 앱이 쓰므로 둔다.
 
 ### D. M9 이월
 
 **D1 G4 4라운드 사소 2건**
-1. 느린 닫기 시험: 시험 전용 `FaultMoveOps`가 `hold-long` 지연에 들어가는 순간 진단 값 `moveHoldEntered`를 1로 올린다(앱 진단 표에 시험 값으로 노출, `--move-fail`이 있을 때만). 시험은 `.moving` 폴더 대신 이 값을 기다린 뒤 닫는다.
-2. `RecordFolderRules.Display`: 앞부분 비교와 자르기를 모두 `SafeFull`로 정규화한 문자열로 한다. 시험: `.`·`..`·`/`가 낀 표기에서 표시가 올바른지.
+1. 느린 닫기 시험: 시험 전용 `FaultMoveOps`가 `hold-long` 지연에 **들어간 뒤** 진단 값 `moveHoldEntered`를 올린다(`--move-fail`이 있을 때만 노출). 시험은 그 값을 기다린 뒤 닫는다.
+2. `RecordFolderRules.Display`: 비교와 자르기를 모두 `SafeFull` 정규화 문자열로. 시험: `.`·`..`·`/`가 낀 표기.
 
-**D2 CI 디스크 시험 흔들림** (`M3IntegrationTests.FlushToDiskCostPerRoundIsMeasured`, PR CI에서 p95 86 ms로 한 번 실패, 같은 커밋의 push CI는 통과): 300번 쓰기를 최대 3번 재고, 한 번이라도 p95 ≤ 50 ms면 통과한다. 모든 시도의 p95·최대를 `flush-cost.json`에 남긴다. 근거: 이 시험은 "회차마다 flush 비용이 예산 안에 들 수 있는가"를 본다. 공유 실행기 디스크의 일시적 지연은 앱 비용이 아니다. 로컬도 같은 규칙(한 경로). 대안(CI에서 기준 완화)은 기준이 둘이 되어 쓰지 않는다.
+**D2 디스크 flush 시험** [1-7]: 판정 의미(회차 하나의 flush 비용 p95 ≤ 50 ms)는 그대로 두고 **표본을 미리 정한 크기로 늘린다**: 앞 20번은 데우기로 버리고, 이어서 900번을 재어 그 900개의 p95 ≤ 50 ms. 재시도는 없다(한 번 재고 한 번 판정). 근거: 300개 p95는 15개의 느린 표본만으로 넘는다. 짧은 순간의 디스크 지연 묶음에 판정이 흔들렸다(PR CI p95 86 ms, 같은 커밋 push CI 통과). 표본을 키우면 같은 기준에서 대표성이 커진다. 지연 원인이 실행기라는 것은 확인한 사실이 아니라 추정이라고 적는다. 재는 동안의 시간축(100개마다 p95)을 `flush-cost.json`에 남겨 다음 실패 때 원인을 볼 수 있게 한다. M3 설계의 기준 문장(300회)을 바꾼다는 것을 DECISIONS에 기록한다.
 
-**D3 시험 공백 채우기** (M9에서 코드로만 고친 것):
-- 주입 수단 두 개를 더한다. 둘 다 `--demo`와 명시한 `--user-data`가 있을 때만 받는다(`FaultMoveOps`와 같은 규칙).
-  - `--memo-hold <n>`: 메모 저장이 n번째 쓰기에서 멈추고, 시험이 진단 명령 `memo.release`로 풀 때까지 기다린다. 성공·실패를 고를 수 있다(`--memo-hold 1:fail`).
-  - `--records-read-hold`: 기록 상세 열기가 읽기 직전에 멈추고 `records.release`로 풀린다.
+**D3 시험 공백 채우기** [1-8]
+- 주입 수단은 모두 `--demo` **와** 명시한 `--user-data`가 둘 다 있을 때만 받는다. 둘 중 하나라도 없으면 시작을 거절한다(G2: 네 조합).
+- 멈춤 지점과 신호(요청 번호마다 진단 값 `holds`에 진입·풀림 기록):
+  - `--memo-hold <n>[:fail]`: n번째 메모 쓰기가 **쓰기를 마친 뒤 결과를 UI에 알리기 직전**에 멈춘다(성공·실패 고름). 시험이 진단 명령 `hold.release`로 푼다.
+  - `--records-apply-hold`: 기록 상세 열기가 **읽기를 마치고 작업 표를 놓은 뒤, UI가 결과를 반영하기 직전**에 멈춘다. 옮기기 독점이 이 열기를 기다리지 않으므로 옮기기가 먼저 끝날 수 있다(1라운드 지적: 작업 표를 쥔 채 멈추면 옮기기가 끝날 수 없음).
+  - 캐시: 시험은 새로 시작한 앱에서 처음 여는 측정을 쓴다(`OpenAsync` 캐시 우회 조건). 진단 값 `detailOpen`(요청 번호, 캐시 사용 여부)로 캐시를 안 탔음을 확인한다.
+- 그리기 증거: `frameHooks`에 더해 화면별 그리기 횟수 `renders`(진단 값)를 둔다. "그리지 않음"은 숨긴 동안 `renders`가 늘지 않음으로 판정.
 - 시험 (`M9GapTests`, G3):
-  1. M7 이월 2: 메모 저장 성공 완료 전에 다른 칸을 고치고 있으면, 저장 완료와 목록 갱신 뒤에도 초점이 그 칸에 남는다.
-  2. M7 이월 3: 저장 시작 뒤 휠로 다른 곳을 보고 있으면 저장 완료가 스크롤을 끌어오지 않는다.
-  3. 숨기기 직전에 시작한 상세 읽기가 숨긴 뒤 끝나면 그리지 않고(`frameHooks` 0), 다시 열 때 그 상세가 보인다.
-  4. 상세를 읽는 도중 기록 옮기기가 끝나면 "여는 중"에 머물지 않고 새 위치에서 열린다.
-  5. 숨겼다 다시 열면 메모 칸의 선택 범위가 돌아온다.
-- 시험 전용 진단 명령은 데모·명시 사용자 폴더 조건에서만 받는다(실사용 경로에 영향 없음, G2로 확인).
+  1. M7 이월 2: 메모 A 저장이 멈춘 동안 칸 B를 고친다 → 풀고 저장 완료·목록 갱신 → 초점이 B, B의 글 유지.
+  2. M7 이월 3: 저장이 멈춘 동안 휠로 스크롤 → 풀면 스크롤 위치가 그대로.
+  3. 상세 열기가 반영 직전에 멈춘 동안 숨김 → 풀림(옛 완료 도착 기록 확인) → 숨긴 동안 `renders` 그대로 → 다시 열면 그 상세가 보임.
+  4. 상세 열기가 반영 직전에 멈춘 동안 기록 옮기기를 끝냄 → 풀면 "여는 중"에 머물지 않고 새 위치의 같은 측정 Id가 열림(경로는 새 위치).
+  5. 메모 칸에서 일부를 선택 → 숨김 → 다시 열기 → 같은 선택 범위.
+- 멈춘 채 앱을 닫거나 시험이 실패하면: 닫기 단계가 모든 멈춤을 풀고(취소) 작업자가 끝나기를 기다린 뒤 끝난다(G2: 멈춘 상태에서 종료 경로).
 
-**D4 실측과 풍선 눈 확인**: M9 설계 7.3의 `M9LiveRunTests`(`Kind=Live`, 공개 안 함)는 아직 없다. 만든다: 데모 옵션 없이 측정 시작 → 창 닫기(안내) → 숨김 1분 → 작업 표시줄 알림 영역에서 실제 아이콘을 UIA로 찾아 열기·메뉴 → 종료. 찾지 못하면 기록하고 사용자 눈 확인으로. 풍선은 사용자가 보는 앞에서 띄운다(`--live-balloon-test`: 실측 실행에서 시험 풍선 한 번, Live 시험에서만). 결과는 사용자 답과 함께 DECISIONS에 남긴다. 실제 IP가 찍히므로 캡처·로그는 `.loop/`에만 둔다.
+**D4 실측과 풍선** [1-9]: `M9LiveRunTests`(`Kind=Live`, 공개 안 함, M9 설계 7.3에 있었지만 만들지 않음)를 만든다.
+- 순서와 기대값: 데모 없이 격리한 사용자 폴더(시험이 만든 임시 폴더)로 측정 시작 → 회차가 늘어남 → 창 닫기(첫 안내 → 숨김) → 숨김 1분 동안 회차가 계속 늘어남(진단 값) → 작업 표시줄 알림 영역의 실제 아이콘을 UIA로 찾아 열기 → 같은 측정 세션 Id → 메뉴 "종료" → 종료 코드 0 → 다시 읽은 기록이 봉인되고 회차 수가 숨김 전보다 많음.
+- 풍선: `--live-balloon-test`는 데모가 아니고 `NETPULSE_LIVE=1` 환경에서만 받는다. 실행마다 시험 풍선을 정확히 한 번 보낸다. 기록은 "API 호출 성공"(반환값)과 "사용자가 실제로 봄"(사용자 답)을 따로 적는다.
+- 아이콘을 UIA로 못 찾으면 기록하고 사용자 눈 확인으로. 원본(실제 IP가 찍힘)은 `.loop/`에만, DECISIONS에는 식별 정보 없는 관찰 요약만.
 
 ## 4. 상태표
 
-**정보 카드**: 보통(버전·빌드·라이선스·단추) / 빌드 모름("알 수 없음") / 데모("데모 실행").
-**고지 대화상자**: 보통(긴 글, 스크롤) / 읽기 실패(내장 리소스를 못 읽음: "고지를 읽지 못했습니다. 배포 zip의 THIRD-PARTY-NOTICES.txt를 보세요.").
+**사용 조건 화면**: 보통(요약 + 단추) / 전문 펼침 / 동의 저장 불가(이번 실행만 기억, 다음에 다시 물음).
+**정보 카드**: 보통 / 빌드 모름 / 데모.
+**라이선스와 고지**: 목록 / 항목 펼침(긴 글 스크롤) / 읽기 실패("고지를 읽지 못했습니다. 배포 zip의 THIRD-PARTY-NOTICES.txt를 보세요.").
 
 ## 5. 성능
 
-- 설정 화면 들어가기는 기존 nav bench 기준 유지(정보 카드 추가 뒤).
-- 고지 대화상자 열기: 첫 프레임 50 ms 이하·33 ms 초과 2회 이하를 bench로 잰다. 넘으면 3절 A의 접는 목록으로.
-- 시작 시간: exe 하나로 바꾸고 구성요소를 줄인 뒤 첫 창까지의 시간을 이전 배포본과 같은 방법으로 비교해 기록(기준 없음, 회귀면 보고).
+- 설정 들어가기: 기존 nav bench 기준 유지.
+- 라이선스와 고지: 열기(목록) 첫 프레임과 가장 긴 항목(Base NOTICE) 펼치기를 **실제 생성된 고지 파일로** bench(50 ms, 33 ms 초과 2회 이하). 넘으면 원문을 나눠 넣는다(문단 단위 가상화 목록).
+- 사용 조건 화면: 첫 프레임은 기존 첫 실행 안내 기준.
+- 시작 시간: exe 하나·구성요소 줄이기 전후 첫 창까지 시간을 같은 방법으로 비교해 기록(기준 없음, 회귀면 보고).
 
 ## 6. 시험 계획
 
-- **G2**: `AppInfo` 파싱(+ 있음·없음·16진수 아님), 기록 머리 버전 3마디·옛 4마디 리포트 읽기, `Display` 정규화, flush 시험 규칙, 시험 전용 주입 옵션이 데모 밖에서 거절되는지, 고지 일치(`notices.ps1 -Check`를 빌드 단계로).
-- **G3**: 전체 UI 시험을 exe 하나 폴더에서. 새 시험 `M10AboutTests`(정보 카드 값, 대화상자 열기·키보드·닫기·초점 복귀), `M9GapTests` 5개, 느린 닫기 시험 수정.
-- **G5**: 장면 `settings-about`, `settings-about-dialog`(다크·라이트 × 100·150%, 고대비 2종). 매트릭스에 더한다.
-- **배포 검사**: `release/` 파일 존재, 이름의 버전 = `Version`, `SHA256SUMS.txt` 일치, zip 항목 4개, zip 안 exe = 따로 낸 exe, 이진 검사 0건.
+- **G2**: `AppInfo` 파싱(+ 있음·없음·16진수 아님·`--fake-version`), 옛·새 버전 기록 혼합 읽기·리포트·비교, 설정의 `termsAccepted` 읽기·쓰기·없음·저장 불가, 데모 아닌 시작 경로의 동의 확인, `Display` 정규화, flush 시험 규칙, 주입 옵션 네 조합 거절, 멈춘 상태에서 종료, `Test-Release`·이진 검사기 자체 시험·고지 출처 검사(빌드 단계).
+- **G3** (exe 하나 폴더, 빈 추출 위치): 전체 기존 시험 + `M10TermsTests`(동의·거절 종료·저장·저장 불가·`--start` 미룸·키보드), `M10AboutTests`(정보 카드 값, 고지 목록·펼치기·끝까지 스크롤·복사·닫기 뒤 초점 복귀·읽기 실패), `M10ReleaseExeTests`, `M9GapTests` 5개, 느린 닫기 시험 수정. 필수 결과 ID를 `ui-test.ps1`에 더한다 [1-11].
+- **G5** 장면 [1-11]: `terms`, `terms-full`, `terms-not-persisted`, `settings-about`, `settings-about-unknown`, `about-legal`, `about-legal-expanded`, `about-legal-failed` — 다크·라이트 × 100·150%, 고대비 2종, 효과 줄이기·움직임 줄이기(`terms`, `about-legal-expanded`). `m10-scenes.txt`와 수집기(`ui-test.ps1`의 G5 묶음)에 연결.
+- **배포 검사**: `Test-Release`(B1), 이진 검사(B4), 결정적 zip(B1).
 - **실측**: D4 (게이트 밖, 사용자 함께).
 
 ## 7. 위험
 
 | 위험 | 대응 |
 | --- | --- |
-| exe 하나에서 일부 컨트롤 스타일·리소스가 빠짐 | 전체 UI 시험을 그 폴더에서. 실패하면 3절 B2-3 |
-| 구성요소를 빼면 빌드는 되지만 실행 중 특정 기능(알림 영역·DWrite 등)이 깨짐 | 전체 시험 + 실측 D4. 깨지는 구성요소만 되살림 |
-| 고지 원문 누락·잘못된 라이선스 표시 | 고지는 패키지 캐시 원문을 그대로 쓰고 일치 검사. Codex 검토 |
-| 배포 exe에 로컬 경로 | 경로 정규화 + 이진 검사 |
-| README 캡처에 실제 정보 | 데모 모드만, 공개 전 검사 패턴(B2)을 캡처 UIA 글에도 |
-| 메타패키지를 버리면 2.6.5 다음 갱신 때 구성요소 버전이 어긋남 | `Directory.Packages.props`에서 한 변수로 같은 버전을 쓴다 |
+| exe 하나에서 일부 리소스 누락 | exe 하나 강제 + 빈 추출 위치 + 전체 UI 시험. 실패 시 B2 대체 |
+| 구성요소를 빼서 실행 중에만 깨짐 | 묶음 목록 비교, 전체 시험, D4 실측. 깨진 구성요소만 되살림 |
+| 깨끗한 Windows에만 있는 문제 | 확인 못 함을 기록, M11 인수 체크리스트 |
+| 고지 누락 | 묶음 파일마다 출처, 없으면 실패 |
+| 사용 조건 문구가 라이선스 요구를 못 채움 | Microsoft 조건 원문을 그대로 포함, Codex 대조 검토, 최종 판단은 사용자 |
+| 배포 exe에 로컬 경로 | 경로 정규화·PDB 없음·압축 없음 + 압축 전 입력·exe·zip 검사 + 검사기 자체 시험 + 디버그 디렉터리 확인 |
+| CI 산출물이 공개됨 | 허용 4개만, 검사 뒤 업로드 |
+| 동의 단계가 기존 시험을 깸 | 데모는 건너뜀, 실사용 경로는 G2로 확인 |
+| 메타패키지 해제 뒤 버전 어긋남 | 한 버전 변수 |
 
 ## 8. 이 마일스톤에서 하지 않는 것
 
-GitHub Release 게시(M11 인수 뒤 사용자 승인), 코드 서명, 설치 프로그램, 자동 업데이트, 잘라 내기(`PublishTrimmed`), 다국어 README.
+GitHub Release 게시(M11 인수 뒤 사용자 승인), 코드 서명, 설치 프로그램, 자동 업데이트, 잘라 내기(`PublishTrimmed`), 다국어 README, 깨끗한 Windows 가상 머신 시험.
