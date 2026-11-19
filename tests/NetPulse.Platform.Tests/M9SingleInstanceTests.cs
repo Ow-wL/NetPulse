@@ -179,4 +179,37 @@ public sealed class M9SingleInstanceTests : IDisposable
         Assert.False(delivered);
         Assert.True(saw);
     }
+
+    /// <summary>G4 M9 1라운드 a9: 전체 기한이 시도에도 걸린다. 답하지 않는 상대에게 전체 1초면 시도 하나(3초)를 다 쓰지 않는다.</summary>
+    [Fact]
+    public async Task TheWholeLimitAlsoBoundsEachAttempt()
+    {
+        var key = NewKey();
+        var owner = Own(key);
+        owner.Serve(_ => new TaskCompletionSource<bool>().Task);
+        var watch = Stopwatch.StartNew();
+        var (me, delivered, _) = await SingleInstance.ClaimOrSendAsync(key, "open", TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+        Assert.Null(me);
+        Assert.False(delivered);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2.5), $"전체 1초에 {watch.Elapsed.TotalSeconds:0.0}초");
+    }
+
+    /// <summary>G4 M9 1라운드 a10: 답을 읽지 않고 연결만 붙잡는 상대가 있어도 서버는 시도 기한 뒤 다음 요청에 답한다.</summary>
+    [Fact]
+    public async Task AClientThatNeverReadsTheReplyDoesNotStallTheServer()
+    {
+        var key = NewKey();
+        var owner = Own(key);
+        owner.Serve(_ => Task.FromResult(true));
+        await using (var silent = new System.IO.Pipes.NamedPipeClientStream(".", "NetPulse-" + key, System.IO.Pipes.PipeDirection.InOut,
+            System.IO.Pipes.PipeOptions.Asynchronous | System.IO.Pipes.PipeOptions.CurrentUserOnly))
+        {
+            await silent.ConnectAsync(TestContext.Current.CancellationToken);
+            await silent.WriteAsync(System.Text.Encoding.UTF8.GetBytes("open" + (char)10), TestContext.Current.CancellationToken);
+            await silent.FlushAsync(TestContext.Current.CancellationToken);
+            // 답을 읽지 않고 붙잡고 있는 동안 다른 요청
+            var reply = await SingleInstance.ClaimOrSendAsync(key, "open", SingleInstance.AttemptLimit * 3, TestContext.Current.CancellationToken);
+            Assert.True(reply.Delivered);
+        }
+    }
 }

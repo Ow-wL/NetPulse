@@ -26,7 +26,7 @@ public sealed class M9RecordMoveTests : IDisposable
     private static string Id(int hour, string tail) => $"20261113T{hour:00}0000Z_{tail}";
 
     /// <summary>머리·요약·회차(<paramref name="rounds"/>개)·증상 표시 하나를 쓴 기록 조각 폴더 (M7 시험과 같은 꼴).</summary>
-    private static string Make(string root, string id, int hour, int segment = 0, int rounds = 30)
+    internal static string Make(string root, string id, int hour, int segment = 0, int rounds = 30)
     {
         var folder = Path.Combine(root, segment == 0 ? id : $"{id}~{segment + 1}");
         Directory.CreateDirectory(folder);

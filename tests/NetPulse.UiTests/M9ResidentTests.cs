@@ -38,6 +38,8 @@ public sealed class M9ResidentTests
     {
         AppDriver.WaitFor(() => !app.WindowVisible && app.Alive, b => b, "창 숨김, 프로세스 살아 있음");
         AppDriver.WaitFor(() => ResidentLog(app, "hidden").Count(), n => n >= 1, "숨김 기록");
+        // 숨긴 뒤 프레임 구독 0 (화면·테마·프레임 측정기, 설계 A1, G4 M9 1라운드 b2)
+        Assert.Equal(0, ResidentLog(app, "hidden").Last().GetProperty("data").GetProperty("frameHooks").GetInt32());
     }
 
     private static string Session(AppDriver app) => M5Fixtures.Str(app.Diag(), "session");
@@ -258,6 +260,40 @@ public sealed class M9ResidentTests
         finally { AppDriver.DeleteUserData(userData); }
     }
 
+    /// <summary>
+    /// G4 M9 1라운드 b4: 기록 상세에서 메모를 고치던 중 숨기고 다시 열면 초점·초안이 그대로 (다시 그려도 같은 칸으로 초점을 돌려준다).
+    /// </summary>
+    [Fact]
+    public void ReopeningKeepsTheMemoBeingEditedAndItsFocus()
+    {
+        var userData = AppDriver.NewUserData();
+        M5Fixtures.Prepare(userData, "rec-memo");
+        M5Fixtures.SaveProfile(userData, "steady");
+        HintAlreadyShown(userData);
+        try
+        {
+            using var app = AppDriver.LaunchWith(userData, "--demo", "steady", "--demo-speed", "20", "--start", "--screen", "records", "--close-to-tray", "on");
+            var list = app.WaitDiag(x => x, x => x.GetProperty("screenDiag") is { ValueKind: JsonValueKind.Object } sd && sd.TryGetProperty("rows", out var rows)
+                && rows.EnumerateArray().Any(r => r.GetProperty("life").GetString() != "Running" && !r.GetProperty("analyzing").GetBoolean()), "끝난 기록 줄");
+            var row = list.GetProperty("screenDiag").GetProperty("rows").EnumerateArray().First(r => r.GetProperty("life").GetString() != "Running").GetProperty("n").GetInt32();
+            app.Invoke($"records.row.{row}");
+            app.WaitDiag(x => x.GetProperty("screenDiag").TryGetProperty("detailComplete", out var c) && c.GetBoolean(), b => b, "상세");
+            app.Invoke("records.mark.0.edit");
+            app.SetText("records.mark.0.text", "숨기기 전 초안");
+            app.Find("records.mark.0.text").SetFocus();
+            app.WaitDiag(x => x.GetProperty("focused").ToString(), f => f == "records.mark.0.text", "메모 칸 초점");
+            app.RequestClose();
+            WaitHidden(app);
+            app.PostTray(AppDriver.NinSelect);
+            AppDriver.WaitFor(() => app.WindowVisible, b => b, "다시 보임");
+            app.WaitDiag(x => !HiddenNow(x) && x.GetProperty("focused").ToString() == "records.mark.0.text", b => b, "다시 연 뒤 같은 칸 초점");
+            Assert.Equal("숨기기 전 초안", ((System.Windows.Automation.ValuePattern)app.Find("records.mark.0.text")
+                .GetCurrentPattern(System.Windows.Automation.ValuePattern.Pattern)).Current.Value);
+            Assert.Equal((0, 0), app.Exit());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
     private static int Gaps(JsonElement d) => d.GetProperty("gaps").GetInt32();
     private static bool HiddenNow(JsonElement d) => Resident(d).GetProperty("hidden").GetBoolean();
     private static JsonElement[] Balloons(AppDriver app, string kind) =>
@@ -390,6 +426,21 @@ public sealed class M9ResidentTests
             app.WaitDiag(M9SettingsTests.RecState, s => s is "Done" or "Partial" or "Failed", "옮기기 끝");
             Assert.Equal("Done", M9SettingsTests.RecState(app.Diag()));
             Assert.True(Directory.Exists(Path.Combine(dest, session)), "새 위치로 옮김");
+
+            // 옮기기 전에 열어 둔 상세는 같은 측정의 새 위치로 이어진다: 그 자리에서 메모를 저장하면 새 위치에 남는다 (G4 M9 1라운드 b3)
+            app.Select("nav.records");
+            var still = app.WaitDiag(x => x, x => M5Fixtures.Str(x, "screenDiag", "mode") == "Detail"
+                && x.GetProperty("screenDiag").TryGetProperty("detailComplete", out var c) && c.GetBoolean(), "옮긴 뒤 열려 있던 상세");
+            Assert.Equal(session, M5Fixtures.Str(still, "screenDiag", "detail", "Id"));
+            app.Invoke("records.mark.0.edit");
+            app.SetText("records.mark.0.text", "옮긴 뒤 적은 메모");
+            app.Invoke("records.mark.0.save");
+            app.WaitDiag(x => x.GetProperty("screenDiag").GetProperty("detail").GetProperty("memos").EnumerateArray().Select(m => m.GetString()).ToArray(),
+                m => m.Contains("옮긴 뒤 적은 메모"), "옮긴 뒤 저장한 메모");
+            // 노트 파일은 한글을 JSON 이스케이프로 적는다: 줄마다 읽어 메모 값을 비교
+            Assert.Contains(File.ReadAllLines(Path.Combine(dest, session, "notes.jsonl")),
+                l => JsonSerializer.Serialize(JsonDocument.Parse(l).RootElement, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping })
+                    .Contains("옮긴 뒤 적은 메모", StringComparison.Ordinal));
 
             OpenRecord("옮긴 기록");
             app.Invoke("records.report");

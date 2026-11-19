@@ -18,6 +18,11 @@ settings-journal-problem|rec-move-bad-journal|--demo steady --screen settings|wa
 settings-folder-unusable|settings-missing-folder|--demo steady --screen settings|wait:screen=settings;wait:recordsUsable=False;scroll:settings.scroll=40
 settings-diag-errors|profile|--demo steady --screen settings|wait:screen=settings;text:settings.diag.tcp.0=192.0.2;text:settings.diag.domain.1=bad;wait:diagState=dirty;invoke:settings.diag.save;wait:diagState=errors;scroll:settings.scroll=80
 settings-diag-saved|profile|--demo steady --screen settings|wait:screen=settings;text:settings.diag.domain.0=check.example.com;wait:diagState=dirty;invoke:settings.diag.save;wait:diagState=saved;scroll:settings.scroll=80
+settings-stopped|rec-move|--demo steady --screen settings --pick-folder {userData}-dest --move-fail hold|wait:screen=settings;invoke:settings.records.change;wait:dialog;invoke:dialog.confirm;wait:records=Moving;invoke:settings.records.stop;wait:records=Stopped;scroll:settings.scroll=40
+settings-conflict|rec-move-conflict|--demo steady --screen settings --pick-folder {userData}-dest|wait:screen=settings;invoke:settings.records.change;wait:records=Conflict;scroll:settings.scroll=40
+settings-diag-dirty|profile|--demo steady --screen settings|wait:screen=settings;text:settings.diag.domain.0=check.example.com;wait:diagState=dirty;scroll:settings.scroll=80
+settings-diag-failed|settings-readonly|--demo steady --screen settings|wait:screen=settings;text:settings.diag.domain.0=check.example.com;wait:diagState=dirty;invoke:settings.diag.save;wait:diagState=failed;scroll:settings.scroll=80
+settings-diag-notpersisted|settings-newer|--demo steady --screen settings|wait:screen=settings;text:settings.diag.domain.0=check.example.com;wait:diagState=dirty;invoke:settings.diag.save;wait:diagState=notPersisted;scroll:settings.scroll=80
 hint-dialog|profile|--demo steady --start --demo-hold 5 --close-to-tray on|wait:host=Measuring;close;wait:dialog
 profile-tcp|profile|--demo steady --screen profile|wait:screen=profile;select:profile.target.1.method.tcp;wait:exists=profile.target.1.port
 profile-tcp-port-error|profile|--demo steady --screen profile|wait:screen=profile;select:profile.target.1.method.tcp;wait:exists=profile.target.1.port;text:profile.target.1.port=70000;wait:dirty

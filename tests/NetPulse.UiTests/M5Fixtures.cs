@@ -120,6 +120,23 @@ internal static class M5Fixtures
                 MakeRecord(userData, "link-drop", new DateTimeOffset(2026, 11, 11, 20, 0, 0, TimeSpan.FromHours(9)), 3);
                 Directory.CreateDirectory(userData + "-dest");
                 break;
+            case "rec-move-conflict":      // 목적지에 같은 기록이 다른 내용으로 있음 (옮기기 충돌 장면)
+            {
+                Prepare(userData, "rec-move");
+                var from = Path.Combine(userData, "records");
+                var first = Directory.EnumerateDirectories(from).Select(Path.GetFileName).Order().First()!;
+                var copy = Path.Combine(userData + "-dest", first);
+                Directory.CreateDirectory(copy);
+                foreach (var f in Directory.EnumerateFiles(Path.Combine(from, first))) File.Copy(f, Path.Combine(copy, Path.GetFileName(f)));
+                File.AppendAllText(Path.Combine(copy, "rounds.jsonl"), "");
+                File.WriteAllText(Path.Combine(copy, "extra.txt"), "다른 내용");
+                break;
+            }
+            case "settings-readonly":      // 설정 파일을 쓸 수 없음 (저장 실패 장면). 지울 때 AppDriver가 속성을 푼다
+                SaveProfile(userData, "steady", TimeSpan.FromMinutes(60));
+                File.WriteAllText(Path.Combine(userData, "settings.json"), "{\"version\": 2}");
+                File.SetAttributes(Path.Combine(userData, "settings.json"), FileAttributes.ReadOnly);
+                break;
             case "rec-move-interrupted":   // 옮기기가 끊긴 상태: 위치는 목적지, 옛 위치가 남고 일지가 있다
             case "rec-move-bad-journal":   // 일지 모양이 틀림: 자동 동작 없이 경고
                 Prepare(userData, "rec-move");

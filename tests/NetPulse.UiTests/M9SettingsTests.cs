@@ -146,6 +146,33 @@ public sealed class M9SettingsTests
         finally { Cleanup(userData, dest); }
     }
 
+    /// <summary>
+    /// G4 M9 1라운드 b1: 옮기는 중 세션 종료 확정 → 옮기기 정리(되돌림·독점 놓기)까지 한도 안에서 합류한다. 기록은 하나도 잃지 않는다.
+    /// </summary>
+    [Fact]
+    public void SessionEndWhileMovingJoinsTheMoveCleanup()
+    {
+        var (userData, dest, ids) = Prepare(3);
+        var old = Path.Combine(userData, "records");
+        try
+        {
+            using var app = AppDriver.LaunchWith(userData, "--demo", "steady", "--screen", "settings", "--pick-folder", dest, "--move-fail", "hold");
+            ConfirmMove(app, "settings.records.change");
+            app.WaitDiag(RecState, s => s == "Moving", "옮기는 중");
+            app.SendSessionEnd(ending: true);
+            var flushed = AppDriver.WaitFor(() => app.ReadLog().LastOrDefault(e => e.GetProperty("kind").GetString() == "sessionEnd"
+                && e.GetProperty("data").GetProperty("step").GetString() == "flushed"), e => e.ValueKind == JsonValueKind.Object, "세션 종료 플러시");
+            var data = flushed.GetProperty("data");
+            Assert.True(data.GetProperty("done").GetBoolean(), "4초 안에 끝남");
+            Assert.True(data.GetProperty("moveDone").GetBoolean(), "옮기기 정리까지 합류");
+            app.TerminateAfterSessionEnd();
+            Assert.Equal(ids, Ids(dest).Concat(Ids(old)).Order().ToArray());                // 하나도 잃지 않았다
+            Assert.Empty(Directory.EnumerateDirectories(dest, "*" + RecordMover.MovingSuffix));
+            Record("flow-settings-sessionend-move", new { done = true, ms = data.GetProperty("ms").GetInt64(), moved = Ids(dest).Length });
+        }
+        finally { Cleanup(userData, dest); }
+    }
+
     [Fact]
     public void FolderCannotBeChangedWhileMeasuring()
     {

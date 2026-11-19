@@ -35,16 +35,46 @@ public sealed class M9HostShutdownTests : IDisposable
         }
     }
 
-    private async Task<(MeasurementHost Host, GatedWorld World)> NewHost(string scenario = "steady")
+    private async Task<(MeasurementHost Host, GatedWorld World)> NewHost(string scenario = "steady", RecordWorkGate? workGate = null)
     {
         var data = dir.Sub("u");
         var text = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "scenarios", scenario + ".json"));
         var demo = new DemoAppWorld(new DemoWorld(Scenario.Parse(text), new DemoTimeBase(Start, 600)), data, new DemoRunRules(), dir.Sub("fb"));
         var world = new GatedWorld(demo);
-        var host = new MeasurementHost(world, data, new HostOptions { PollInterval = TimeSpan.FromMilliseconds(20), AnalysisInterval = TimeSpan.FromMilliseconds(50) });
+        var host = new MeasurementHost(world, data, new HostOptions { PollInterval = TimeSpan.FromMilliseconds(20), AnalysisInterval = TimeSpan.FromMilliseconds(50), WorkGate = workGate });
         var detection = await host.DetectAsync(TestContext.Current.CancellationToken);
         host.SaveProfiles(new ProfileSet([detection.Proposal!], detection.Proposal!.Id));
         return (host, world);
+    }
+
+    /// <summary>
+    /// G4 M9 1라운드 a1: 시작은 작업 문의 표를 받고 측정 중 게시까지 쥔다. 옮기기는 그 표가 끝나기를 기다려야 해서
+    /// 시작 확인과 세션 생성 사이에 끼어들지 못하고, 독점을 얻은 뒤 호스트 상태(측정 중)를 보고 거절한다.
+    /// </summary>
+    [Fact]
+    public async Task StartHoldsAWorkTicketSoAMoveCannotSlipIn()
+    {
+        var gate = new RecordWorkGate();
+        var (host, world) = await NewHost(workGate: gate);
+        world.Release.Reset();
+        var start = host.StartAsync();
+        Assert.True(world.Entered.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+        Assert.Equal(1, gate.Active);                                         // 세션을 만드는 동안 표를 쥐고 있다
+        Assert.False(await gate.EnterExclusiveAsync(TimeSpan.FromMilliseconds(200)));   // 그 사이 독점은 기다리다 되돌린다
+        world.Release.Set();
+        Assert.True(await start);
+        Assert.Equal(0, gate.Active);
+        Assert.Equal(HostState.Measuring, host.Snapshot.State);
+        Assert.True(await gate.EnterExclusiveAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(HostState.Measuring, host.Snapshot.State);              // 옮기기는 여기서 측정 중을 보고 거절한다
+        gate.ExitExclusive();
+        // 문이 닫혀 있으면 시작하지 않는다
+        await host.ShutdownAsync();
+        Assert.True(await gate.EnterExclusiveAsync(TimeSpan.FromSeconds(5)));
+        var (host2, _) = await NewHost(workGate: gate);
+        Assert.False(await host2.StartAsync());
+        Assert.NotNull(host2.Snapshot.StartError);
+        gate.ExitExclusive();
     }
 
     [Fact]

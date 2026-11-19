@@ -193,14 +193,20 @@ public sealed class AppDriver : IDisposable
     /// <summary>
     /// 진단 값이 조건을 만족할 때까지. 읽는 순간의 중간 상태(빈 글, 아직 없는 칸, 다른 형식의 값)는 "아직"으로 보고 다시 읽는다
     /// (M8 게이트 1회차: 측정 시작 실패 장면의 빈 값 → NRE, 흐름 시험의 GetBoolean 형식 예외, M9 설계 C2).
+    /// 조건은 <b>읽기에 성공한 값에만</b> 건다: 읽기 실패를 기본값으로 바꿔 조건에 넣으면 <c>b => !b</c> 같은 조건이 거짓 통과했다 (G4 M9 1라운드 b6).
     /// </summary>
     public T WaitDiag<T>(Func<JsonElement, T> read, Func<T, bool> until, string what) =>
         WaitFor(() =>
         {
-            try { return read(Diag()); }
+            try { return new DiagRead<T>(true, read(Diag())); }
             catch (Exception ex) when (ex is JsonException or ElementNotAvailableException or KeyNotFoundException or InvalidOperationException
-                or NullReferenceException or FormatException or IndexOutOfRangeException) { return default!; }
-        }, until, what);
+                or NullReferenceException or FormatException or IndexOutOfRangeException) { return new DiagRead<T>(false, default!); }
+        }, r => r.Ok && until(r.Value), what).Value;
+
+    private readonly record struct DiagRead<T>(bool Ok, T Value)
+    {
+        public override string ToString() => Ok ? Value?.ToString() ?? "" : "(읽는 중)";
+    }
 
     public void Select(string automationId) =>
         ((SelectionItemPattern)Find(automationId).GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
@@ -483,7 +489,15 @@ public sealed class AppDriver : IDisposable
 
     public static void DeleteUserData(string folder)
     {
-        try { Directory.Delete(folder, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        try
+        {
+            // 읽기 전용으로 만든 시험 파일(설정 저장 실패 장면)도 지울 수 있게
+            if (Directory.Exists(folder))
+                foreach (var f in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories))
+                    if ((File.GetAttributes(f) & FileAttributes.ReadOnly) != 0) File.SetAttributes(f, FileAttributes.Normal);
+            Directory.Delete(folder, recursive: true);
+        }
+        catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
     private static class Native
