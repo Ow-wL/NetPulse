@@ -4,7 +4,7 @@ NetPulse는 Windows 11에서 **간헐적인 네트워크 끊김을 기록하고,
 측정을 켜 두면 공유기와 외부 대상까지 여러 곳을 함께 재고, 끊김이 생기면 그 순간의 근거(응답, 경로, 링크 상태)를 기록합니다.
 통신사에 보낼 리포트도 만들 수 있습니다.
 
-![측정 중인 홈 화면](docs/images/home.png)
+![측정 중인 홈 화면](docs/images/home.webp)
 
 ## 주요 기능
 
@@ -19,9 +19,11 @@ NetPulse는 Windows 11에서 **간헐적인 네트워크 끊김을 기록하고,
 
 | 측정 | 진단 |
 | --- | --- |
-| ![측정 화면의 타임라인](docs/images/measure.png) | ![빠른 진단 결과](docs/images/diagnose.png) |
+| ![측정 화면의 타임라인](docs/images/measure.webp) | ![빠른 진단 결과](docs/images/diagnose.webp) |
 | **기록** | **리포트** |
-| ![기록 상세](docs/images/records.png) | ![리포트 미리 보기](docs/images/report.png) |
+| ![기록 상세](docs/images/records.webp) | ![리포트 미리 보기](docs/images/report.webp) |
+| **라이트 테마** | **설정** |
+| ![라이트 테마의 홈 화면](docs/images/home-light.webp) | ![설정의 정보 카드](docs/images/settings.webp) |
 
 화면 캡처는 모두 데모 모드(합성 데이터)에서 찍었습니다.
 
