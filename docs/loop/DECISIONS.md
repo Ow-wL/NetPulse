@@ -1535,3 +1535,17 @@ Codex는 사용자 결정 세 가지(N10만, 풍선, 확인 후 옮기기)와 10
 - 기록 bench: enter·open·timeline·switch·compare 최대 33.9·37.8·31.6·20.5·33.4 ms (33 ms 초과 enter·open·compare 각 1회), 최고 전용 메모리 281 MB.
 - `manifest.json` SHA-256 `5C13B57EB06B18D07A281ADB4171C520D6F9A77095EA589DAF3464F1AB6C9D10`.
 - 게이트 밖으로 남은 것: `M9LiveRunTests`(이 PC 실측: 실제 트레이 아이콘·풍선 표시)는 돌리지 않았다. 풍선이 실제로 보이는지는 사용자 눈 확인 항목이다(설계 7.3).
+
+## 2026-11-20 · M10 범위 (사용자 결정)
+
+M9 병합(`3ed5671`) 뒤 M10 설계 전에 코드를 조사하고 사용자에게 물었다.
+
+| 쟁점 | 조사한 사실 | 결정 |
+| --- | --- | --- |
+| 버전 번호 | `Directory.Build.props` `Version` 0.5.0. 화면에는 버전이 없고 기록 머리·리포트에만 네 마디(`0.5.0.0`)로 들어감. 제품 버전에는 SDK가 `+커밋 SHA`를 붙임 | **1.0.0** |
+| 저장소 라이선스 | 공개 저장소에 LICENSE 없음. 글꼴은 OFL. Windows App SDK 2.6.5 패키지는 Microsoft Software License Terms(`license.txt`·`NOTICE.txt`), System.Diagnostics.EventLog는 MIT | **MIT**, 저작권자 `Ow-wL` |
+| 배포 파일 | `build.ps1`의 배포 폴더는 단일 파일 `NetPulse.exe`(234 MB) + `NetPulse.pri` + `App.xbf`. exe만 빈 폴더에 두고 데모로 실행하니 첫 화면이 정상(창만 캡처로 확인, 다른 화면은 미확인) | **zip 하나**를 만들고, Release 화면에는 **exe만 따로도** 올린다 (게시는 M11 인수 뒤 사용자 승인) |
+| 배포 크기 | 메타패키지가 AI·ML·검색·위젯 구성요소를 모두 끌어옴(onnxruntime 23 MB, DirectML 19 MB 등) | 쓰지 않는 구성요소를 빼서 **줄인다** (같은 2.6.5, 새 의존성 없음, 전체 시험으로 확인) |
+| M9 이월 | STATE "미해결 지적 (M9 …)" | **모두 넣는다**: G4 사소 2건, CI 디스크 시험 흔들림, 시험 공백 채우기, 실측·풍선 눈 확인 |
+
+- `M9LiveRunTests`는 M9 설계 7.3에 있었지만 만들지 않았다(이번 D4에서 만든다).
