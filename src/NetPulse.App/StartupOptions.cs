@@ -56,6 +56,23 @@ public sealed record StartupOptions
     /// <summary>시험 주입 (B3): copy:&lt;측정 Id&gt;(그 기록 복사 실패), delete:&lt;Id&gt;(원본 삭제 실패), kill-after:&lt;n&gt;(n개 옮긴 뒤 프로세스 강제 종료), cross(다른 볼륨처럼 복사 경로).</summary>
     public string? MoveFail { get; init; }
 
+    /// <summary>시험 전용 (M10 A1): 제품 버전 글을 바꾼다 (빌드 모름 장면). 데모 + 명시한 사용자 폴더에서만.</summary>
+    public string? FakeVersion { get; init; }
+    /// <summary>시험 전용 (M10 A3): 내장 고지를 읽지 못한 것처럼. 데모 + 명시한 사용자 폴더에서만.</summary>
+    public bool NoticesFail { get; init; }
+    /// <summary>시험 전용 (M10 D3): n번째 메모 쓰기가 쓰기를 마친 뒤 결과를 알리기 직전에 멈춘다. 데모 + 명시한 사용자 폴더에서만.</summary>
+    public string? MemoHold { get; init; }
+    /// <summary>시험 전용 (M10 D3): 기록 상세 열기가 작업 표를 놓은 뒤 화면 반영 직전에 멈춘다. 데모 + 명시한 사용자 폴더에서만.</summary>
+    public bool RecordsApplyHold { get; init; }
+    /// <summary>실측 시험 전용 (M10 D4): 시험 풍선을 한 번 보낸다. 데모가 아니고 NETPULSE_LIVE=1일 때만.</summary>
+    public bool LiveBalloonTest { get; init; }
+
+    /// <summary>
+    /// 시험 주입을 받아도 되는가 (M10 설계 D3): 데모와 명시한 사용자 폴더가 둘 다 있을 때만.
+    /// 실측 기본 폴더의 실제 기록에서 켜지지 않게 한다 (M9 <c>--move-fail</c>과 같은 규칙).
+    /// </summary>
+    public bool TestInjectionAllowed => Demo is not null && UserDataGiven;
+
     /// <summary>부품 전시 화면 (M2)</summary>
     public bool Showcase { get; init; }
     /// <summary>이번 실행에만 쓰는 설정 덮어쓰기 (저장하지 않음)</summary>
@@ -147,9 +164,19 @@ public sealed record StartupOptions
                 "--simulate-energy-saver" => o with { SimulateEnergySaver = true },
                 "--simulate-low-performance" => o with { SimulateLowPerformance = true },
                 "--simulate-tray-off" => o with { SimulateTrayOff = true },
+                "--fake-version" => o with { FakeVersion = Next() },
+                "--notices-fail" => o with { NoticesFail = true },
+                "--memo-hold" => o with { MemoHold = Next() is var mh && System.Text.RegularExpressions.Regex.IsMatch(mh, "^[1-9][0-9]?$") ? mh : throw new ArgumentException("--memo-hold는 1~99") },
+                "--records-apply-hold" => o with { RecordsApplyHold = true },
+                "--live-balloon-test" => o with { LiveBalloonTest = true },
                 _ => throw new ArgumentException($"알 수 없는 인수입니다: {args[i]}"),
             };
         }
+        // 시험 주입은 데모 + 명시한 사용자 폴더가 둘 다 있어야 시작한다 (하나라도 없으면 거절, M10 설계 D3)
+        if ((o.FakeVersion is not null || o.NoticesFail || o.MemoHold is not null || o.RecordsApplyHold) && !o.TestInjectionAllowed)
+            throw new ArgumentException("시험 주입 인수는 --demo와 --user-data를 함께 줄 때만 받습니다.");
+        if (o.LiveBalloonTest && (o.Demo is not null || Environment.GetEnvironmentVariable("NETPULSE_LIVE") != "1"))
+            throw new ArgumentException("--live-balloon-test는 실측(데모 아님)이고 NETPULSE_LIVE=1일 때만 받습니다.");
         if (o.UiScale is < 1 or > 3) throw new ArgumentException("--ui-scale은 1~3");
         if (o.UserData.Length == 0)
         {

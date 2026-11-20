@@ -30,7 +30,7 @@ public sealed class AppLog
             ["data"] = Clean(data is null ? null : JsonSerializer.SerializeToNode(data)),
         });
         try { lock (gate) File.AppendAllText(path, line + "\n", Encoding.UTF8); }
-        catch (IOException) { /* 기록 실패가 앱을 멈추지 않게 한다 */ }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* 기록 실패가 앱을 멈추지 않게 한다 (권한을 잃은 경우 포함, G4 M10 3라운드 2) */ }
     }
 
     /// <summary>글 값마다 <see cref="RecordFolderRules.Sanitize"/> (알려진 앞부분은 이름으로, 그 밖 절대 경로·UNC는 &lt;path&gt;).</summary>

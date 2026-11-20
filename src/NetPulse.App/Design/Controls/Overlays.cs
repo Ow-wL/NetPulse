@@ -195,6 +195,51 @@ public sealed class DialogHost : Grid
         no.Loaded += (_, _) => no.Focus(focus);
     }
 
+    /// <summary>
+    /// 내용을 담는 대화상자 (M10 A3 라이선스와 고지): 닫기 단추 하나. 내용은 높이 제한 안에서 스크롤한다.
+    /// 닫으면 연 단추로 초점이 돌아간다 (<see cref="Close(DialogChoice)"/>).
+    /// </summary>
+    public void OpenContent(Control? openedBy, string title, UIElement content, string close, double width, double maxContentHeight)
+    {
+        opener = openedBy;
+        Children.Clear();
+        Children.Add(new Border { Background = ui.Brushes.Scrim });
+        // 제목·내용·단추 세 줄 격자: 창이 낮으면(150% 배율 등) 내용 줄만 줄고 [닫기]는 늘 보인다 (M10 UI 시험 1차: 단추가 창 밖으로 밀렸다)
+        var stack = new Grid { RowSpacing = Space.S4 };
+        stack.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        stack.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        stack.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        stack.Children.Add(Fonts.Text(title, Typography.Headline, ui.Brushes.Ink));
+        var scroller = new ScrollViewer { Content = content, MaxHeight = maxContentHeight, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, Space.S3, 0) };
+        AutomationProperties.SetAutomationId(scroller, "dialog.scroll");
+        Grid.SetRow(scroller, 1);
+        stack.Children.Add(scroller);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3, HorizontalAlignment = HorizontalAlignment.Right };
+        var no = new GlassButton(ui, ButtonKind.Secondary, "dialog.cancel", close);
+        no.Click += (_, _) => Close(false);
+        buttons.Children.Add(no);
+        Grid.SetRow(buttons, 2);
+        stack.Children.Add(buttons);
+        panel = new GroupPanel("dialog.panel", title)
+        {
+            Width = width,
+            Margin = new Thickness(0, Space.S6, 0, Space.S6),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            TabFocusNavigation = KeyboardNavigationMode.Cycle,
+        };
+        panel.Children.Add(ui.Glass.Surface(GlassLevel.Dialog, stack, Radius.Outer, new Thickness(Space.S6)));
+        var esc = new KeyboardAccelerator { Key = VirtualKey.Escape };
+        esc.Invoked += (_, e) => { e.Handled = true; CloseFromEscape(); };
+        panel.KeyboardAccelerators.Add(esc);
+        Children.Add(panel);
+        Visibility = Visibility.Visible;
+        behind.IsHitTestVisible = false;
+        AutomationProperties.SetAccessibilityView(behind, AccessibilityView.Raw);
+        ui.Motion.Enter(panel);
+        no.Loaded += (_, _) => no.Focus(FocusState.Programmatic);
+    }
+
     /// <summary>Esc 키와 같은 경로 (자체 시험도 이것을 부른다).</summary>
     public void CloseFromEscape() => Close(false);
 

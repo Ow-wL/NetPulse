@@ -41,7 +41,9 @@ public sealed class M5MatrixTests
         var userData = AppDriver.NewUserData();
         M5Fixtures.Prepare(userData, scene.Prep);
         // {userData}: 그 실행의 사용자 폴더 (다른 위치 기록 열기 장면, M7)
-        var app = AppDriver.LaunchWith(userData, [.. M5Fixtures.Args(scene.Args.Replace("{userData}", userData, StringComparison.Ordinal)), "--freeze-motion", .. extra]);
+        string[] args = [.. M5Fixtures.Args(scene.Args.Replace("{userData}", userData, StringComparison.Ordinal)), "--freeze-motion", .. extra];
+        // M10: 사용 조건 화면 장면은 동의 기록 없이 띄운다
+        var app = M5Fixtures.Unconsented(scene.Prep) ? AppDriver.LaunchUnconsented(userData, args) : AppDriver.LaunchWith(userData, args);
         try
         {
             foreach (var a in scene.Actions) Act(app, a);
@@ -69,6 +71,7 @@ public sealed class M5MatrixTests
                 break;
             case "wait": Wait(app, arg); break;
             case "close": app.RequestClose(); break;   // M9: 창 닫기 요청만 (처음 숨김 안내 장면)
+            case "follow": app.FollowNextWindow(); break;   // M10: 동의 뒤 셸 창으로
             case "scroll":   // 스크롤 영역을 세로 n%로 (150%에서 아래로 밀린 카드). 스크롤할 것이 없으면 그대로
                 var at = arg.IndexOf('=');
                 app.ScrollTo(arg[..at], double.Parse(arg[(at + 1)..], System.Globalization.CultureInfo.InvariantCulture));

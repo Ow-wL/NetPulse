@@ -36,6 +36,8 @@ if ($actual.Count -ne $expected.Count) { throw "배포 파일 수가 다릅니�
 for ($i = 0; $i -lt $expected.Count; $i++) {
     if ($actual[$i].path -ne $expected[$i].path -or $actual[$i].sha256 -ne $expected[$i].sha256) { throw "배포 파일이 manifest와 다릅니다: $($expected[$i].path)" }
 }
+# 배포하는 exe 그대로 시험한다 (M10 설계 B2 [1-5]): app/는 정확히 NetPulse.exe 하나
+if ($actual.Count -ne 1 -or $actual[0].path -ne 'NetPulse.exe') { throw "배포 폴더는 NetPulse.exe 하나여야 합니다: $(($actual | ForEach-Object { $_.path }) -join ', ')" }
 Write-Host "산출물 확인: 파일 $($expected.Count)개, 커밋 $($head.Substring(0, 10))"
 
 # ---- UI 테스트 ----
@@ -46,12 +48,22 @@ $commands = @()
 $commands += Invoke-Step 'ui-build' 300 'dotnet' @('build', 'tests/NetPulse.UiTests', '-c', 'Release') $uiDir
 $trxDir = Join-Path $uiDir 'trx'
 $failed = $null
+# 단일 파일 추출 위치를 새 빈 폴더로 (M10 설계 B2): 이전 추출 캐시가 묶음 누락을 가리지 않게.
+# 만들기·환경 변수부터 정리까지 한 try/finally 안 (G4 M10 1라운드 a6: 실패·시간 초과에도 지운다)
+$extract = Join-Path ([IO.Path]::GetTempPath()) ('netpulse-extract-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 try {
+    New-Item -ItemType Directory $extract | Out-Null
+    $env:DOTNET_BUNDLE_EXTRACT_BASE_DIR = $extract
     # M5: 캡처 매트릭스(약 8분)와 측정 화면 bench(약 7분)가 더해져 10분으로는 모자란다.
     # 실측 시나리오(M5·M6 LiveRunTests)는 이 PC 네트워크를 쓰고 결과를 공개하지 않으므로 게이트에서 빼고 따로 돌린다.
     # 클래스 이름 대신 특성으로 뺀다 (M6 설계 7.5): 새 실측 시험이 클래스 목록에서 빠지는 일이 없게
-    $commands += Invoke-Step 'ui-test' 5400 'dotnet' @('test', '--project', 'tests/NetPulse.UiTests', '-c', 'Release', '--no-build', '--report-xunit-trx', '--results-directory', $trxDir, '--filter-not-trait', 'Kind=Live') $uiDir
+    # README 캡처(Kind=Docs)도 게이트 밖이다 (M10 설계 C [1-10]): build/readme-shots.ps1로 따로 찍는다
+    $commands += Invoke-Step 'ui-test' 5400 'dotnet' @('test', '--project', 'tests/NetPulse.UiTests', '-c', 'Release', '--no-build', '--report-xunit-trx', '--results-directory', $trxDir, '--filter-not-trait', 'Kind=Live', '--filter-not-trait', 'Kind=Docs') $uiDir
 } catch { $failed = $_.Exception.Message }
+finally {
+    Remove-Item Env:DOTNET_BUNDLE_EXTRACT_BASE_DIR -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $extract -ErrorAction SilentlyContinue
+}
 $trx = Get-ChildItem $trxDir -Filter *.trx -ErrorAction SilentlyContinue | Select-Object -First 1
 $summary = if ($trx) { $neutral = Join-Path $uiDir 'ui-tests.trx'; Move-Item $trx.FullName $neutral; Read-TrxSummary $neutral } else { $null }
 
@@ -112,11 +124,18 @@ if (Test-Path $g5Dir) {
     $required += @('flow-resident-hide', 'flow-resident-balloons', 'flow-settings-diagnosis', 'm9-tray-menu', 'm9-icon', 'flow-resident-sleepgap', 'flow-resident-roundtrip', 'flow-resident-roundtrip-noipv4')
     $required += @('matrix-m9-settings-normal-hc-aquatic', 'matrix-m9-settings-normal-hc-desert', 'matrix-m9-settings-moving-hc-aquatic', 'matrix-m9-hint-dialog-hc-desert')
     $required += @('matrix-m9-settings-normal-dark-reduced', 'matrix-m9-settings-moving-light-reduced', 'matrix-m9-hint-dialog-dark-reducedmotion', 'matrix-m9-settings-moving-light-reducedmotion')
+    # M10 (설계 6절 [1-11]): 사용 조건·정보·라이선스와 고지 장면 × 테마 × 배율, 고대비·효과·움직임 줄이기, 고지 bench
+    $m10Ids = @(Get-Content (Join-Path $root 'tests\NetPulse.UiTests\m10-scenes.txt') -Encoding UTF8 | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | ForEach-Object { ($_ -split '\|')[0] })
+    foreach ($id in $m10Ids) { foreach ($t in 'dark', 'light') { foreach ($s in '100', '150') { $required += "matrix-m10-$id-$t-$s" } } }
+    $required += @('bench-legal')
+    $required += @('matrix-m10-terms-hc-aquatic', 'matrix-m10-terms-hc-desert', 'matrix-m10-about-legal-expanded-hc-aquatic', 'matrix-m10-about-legal-expanded-hc-desert')
+    $required += @('matrix-m10-terms-dark-reduced', 'matrix-m10-about-legal-expanded-light-reduced', 'matrix-m10-terms-light-reducedmotion', 'matrix-m10-about-legal-expanded-dark-reducedmotion')
     $missing = @($required | Where-Object { -not (Test-Path (Join-Path $g5Dir "$_.json")) })
     $matrix = @(Get-ChildItem $g5Dir -Filter 'matrix-*.json' | Sort-Object Name)
     # M2 회귀 매트릭스는 따로 센다: M5 결과가 합쳐져 M2 캡처 누락을 가리지 않게 (G4 M5 1라운드 C3)
     # M6 결과도 M2 수에 섞이지 않게 뺀다
-    $m2Matrix = @($matrix | Where-Object { -not $_.Name.StartsWith('matrix-m5-') -and -not $_.Name.StartsWith('matrix-m6-') -and -not $_.Name.StartsWith('matrix-m7-') -and -not $_.Name.StartsWith('matrix-m8-') -and -not $_.Name.StartsWith('matrix-m9-') })
+    # M10 결과도 M2 수에 섞이지 않게 뺀다 ([2-8])
+    $m2Matrix = @($matrix | Where-Object { -not $_.Name.StartsWith('matrix-m5-') -and -not $_.Name.StartsWith('matrix-m6-') -and -not $_.Name.StartsWith('matrix-m7-') -and -not $_.Name.StartsWith('matrix-m8-') -and -not $_.Name.StartsWith('matrix-m9-') -and -not $_.Name.StartsWith('matrix-m10-') })
     $captures = @(Get-ChildItem $env:NETPULSE_UITEST_OUT -Filter *.png | Sort-Object Name | ForEach-Object { [ordered]@{ file = "ui/captures/$($_.Name)"; sha256 = Get-Sha256Text $_.FullName } })
     $bench = & $read 'bench'
     $g5 = [ordered]@{
@@ -133,6 +152,8 @@ if (Test-Path $g5Dir) {
         m6Scenes       = $m6Ids.Count
         m7Scenes       = $m7Ids.Count
         m8Scenes       = $m8Ids.Count
+        m10Scenes      = $m10Ids.Count
+        benchLegal     = & $read 'bench-legal' 
         flowReport     = & $read 'flow-report'
         benchReport    = & $read 'bench-report'
         benchReportBuild = & $read 'bench-report-build'

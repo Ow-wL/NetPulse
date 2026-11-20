@@ -24,7 +24,7 @@ public sealed class M9ResidentTests
         RecordReader.Read(RecordReader.FindSegments(sessionId, M5Fixtures.RecordRoots(userData)));
 
     /// <summary>처음 안내를 이미 본 설정 (안내 대화상자를 건너뛰는 시험).</summary>
-    private static void HintAlreadyShown(string userData)
+    internal static void HintAlreadyShown(string userData)
     {
         Directory.CreateDirectory(userData);
         File.WriteAllText(Path.Combine(userData, "settings.json"),
@@ -34,7 +34,7 @@ public sealed class M9ResidentTests
     private static IEnumerable<JsonElement> ResidentLog(AppDriver app, string what) =>
         app.ReadLog().Where(e => e.GetProperty("kind").GetString() == "resident" && e.GetProperty("data").TryGetProperty("what", out var w) && w.GetString() == what);
 
-    private static void WaitHidden(AppDriver app)
+    internal static void WaitHidden(AppDriver app)
     {
         AppDriver.WaitFor(() => !app.WindowVisible && app.Alive, b => b, "창 숨김, 프로세스 살아 있음");
         AppDriver.WaitFor(() => ResidentLog(app, "hidden").Count(), n => n >= 1, "숨김 기록");
@@ -338,7 +338,7 @@ public sealed class M9ResidentTests
     }
 
     private static int Gaps(JsonElement d) => d.GetProperty("gaps").GetInt32();
-    private static bool HiddenNow(JsonElement d) => Resident(d).GetProperty("hidden").GetBoolean();
+    internal static bool HiddenNow(JsonElement d) => Resident(d).GetProperty("hidden").GetBoolean();
     private static JsonElement[] Balloons(AppDriver app, string kind) =>
         ResidentLog(app, "balloon").Select(e => e.GetProperty("data")).Where(b => b.GetProperty("kind").GetString() == kind).ToArray();
 

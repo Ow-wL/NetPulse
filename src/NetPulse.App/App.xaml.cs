@@ -39,7 +39,16 @@ public partial class App : Application
         // 화면 앱: 전체(2세대) 수집이 프레임을 막지 않게 (M5 이월 2, M6 bench: 긴 측정의 잠정 분석이 2세대 수집을 일으켜
         // 화면 이동 프레임이 예산 가까이 튀었다). 메모리가 모자라면 런타임이 그래도 막는 수집을 한다
         System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.SustainedLowLatency;
-        try { Launch(); }
+        StartupOptions parsed;
+        try { parsed = StartupOptions.Parse(Environment.GetCommandLineArgs().Skip(1).ToArray()); }
+        catch (Exception ex) when (ex is ArgumentException or FormatException or OverflowException)
+        {
+            // 잘못된 인수 (시험 주입 조건 포함, M10 D3): 아무것도 만들지 않고 종료 코드 64로 끝낸다 (충돌 보고 없이)
+            File.WriteAllText(Path.Combine(Path.GetTempPath(), "netpulse-startup-error.log"), "arguments: " + ex.GetType().Name);
+            Environment.Exit(64);
+            return;
+        }
+        try { Launch(parsed); }
         catch (Exception ex)
         {
             // 기록을 만들기 전에 실패해도 원인을 남긴다 (임시 폴더, 예외 종류와 메시지만)
@@ -50,17 +59,88 @@ public partial class App : Application
         }
     }
 
-    private void Launch()
+    /// <summary>
+    /// 두 번째 실행이 보낸 요청을 처리하는 곳. 동의 화면 → 셸 순서로 바뀐다 (단일 실행 서버는 한 번만 연다).
+    /// UI 스레드에서만 읽고 바꾼다: 요청은 <see cref="RouteInstance"/>가 UI 큐에 넣은 뒤 <b>실행할 때</b> 이 값을 고른다.
+    /// 동의 → 셸 전환(셸 만들기·처리기 교체·동의 창 닫기)은 UI 스레드의 한 동작이라, 요청은 그 앞(동의 화면) 아니면 뒤(셸)에서만 처리된다
+    /// (G4 M10 1라운드 b1: 받을 때 처리기를 고르면 전환 직전 큐에 넣은 작업이 닫힌 동의 창을 다뤘다).
+    /// </summary>
+    private Func<string, Task<bool>> instanceHandler = _ => Task.FromResult(false);
+    private Microsoft.UI.Dispatching.DispatcherQueue? uiQueue;
+
+    /// <summary>단일 실행 서버(다른 스레드)에서 받은 요청을 UI 스레드로 넘기고, 그때의 처리기에 맡긴다. 큐에 넣지 못하면 false (closing).</summary>
+    private Task<bool> RouteInstance(string command)
     {
-        var options = StartupOptions.Parse(Environment.GetCommandLineArgs().Skip(1).ToArray());
+        var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (uiQueue is null || !uiQueue.TryEnqueue(async () =>
+        {
+            try { done.TrySetResult(await instanceHandler(command)); }
+            catch (Exception ex)
+            {
+                done.TrySetResult(false);   // 답을 먼저 (기록이 실패해도 두 번째 실행은 답을 받는다)
+                try { log?.Write("instanceCommandFailed", new { type = ex.GetType().Name }); } catch (Exception) { /* 기록 실패는 무시 */ }
+            }
+        })) done.TrySetResult(false);
+        return done.Task;
+    }
+
+    /// <summary>
+    /// 시작 (M10 설계 A2 [2-1]): 동의 전에는 인수 읽기, 앱 기록, 단일 실행 소유권, 사용 조건 화면만 한다.
+    /// 설정·세계·기록 복구·도서관·측정 호스트·진단·트레이·셸은 동의 뒤(<see cref="LaunchAfterConsent"/>)에 만든다.
+    /// 명령줄 기능 요청(<c>--start</c>, <c>--screen</c>, 기록 열기)은 그 뒤에서 한 번 처리된다.
+    /// </summary>
+    private void Launch(StartupOptions options)
+    {
         Directory.CreateDirectory(options.UserData);
         log = new AppLog(options.UserData);
+        if (options.TestInjectionAllowed)
+        {
+            if (options.FakeVersion is { } fake) AppInfo.Override(fake);
+            NetPulse.App.Legal.LegalTexts.FailForTest = options.NoticesFail;
+            TestHolds.Configure(options);
+        }
         SingleInstance? owner = null;
+        uiQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         if (!options.Showcase)
         {
             owner = ClaimInstance(options, log);
             if (owner is null) return;   // 요청을 넘기고 끝남 (Environment.Exit)
+            owner.Serve(RouteInstance);
         }
+        if (TermsConsent.IsAccepted(options.UserData))
+        {
+            LaunchAfterConsent(options, log, owner, termsSaved: true);
+            return;
+        }
+        var terms = new TermsWindow(options, log);
+        window = terms;
+        instanceHandler = command =>
+        {
+            if (command == "exit") { terms.CloseNow(); Quit(owner); }
+            else terms.BringToFront();
+            return Task.FromResult(true);
+        };
+        terms.Declined += () => { terms.CloseNow(); Quit(owner); };
+        terms.Accepted += saved =>
+        {
+            var current = log;
+            LaunchAfterConsent(options, current!, owner, saved);
+            terms.CloseNow();
+        };
+        terms.Activate();
+    }
+
+    /// <summary>동의하지 않음·동의 화면 중 종료 요청: 기록·설정을 만들지 않고 끝낸다 (종료 코드 0).</summary>
+    private void Quit(SingleInstance? owner)
+    {
+        log?.Write("shutdown", new { stopCompleted = true, rounds = 0, skipped = 0, terms = "declined" });
+        owner?.MarkClosing();
+        owner?.Dispose();
+        Exit();
+    }
+
+    private void LaunchAfterConsent(StartupOptions options, AppLog log, SingleInstance? owner, bool termsSaved)
+    {
         var load = SettingsFormat.Load(options.UserData);
         log.Write("settings", new { status = load.Status.ToString().ToLowerInvariant(), detail = load.Detail, repaired = load.Repaired });   // 칸 이름만, 값 없음
         var settings = new SettingsStore(options.UserData, load);
@@ -75,7 +155,7 @@ public partial class App : Application
             return;
         }
 
-        string version = typeof(App).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+        string version = AppInfo.Current.Version;
         IAppWorld world;
         if (options.Demo is { } demo)
         {
@@ -121,9 +201,10 @@ public partial class App : Application
             else log.Write("moveFailRefused", new { });
         }
         var shell = new AppShell(options, log, settings, host, recent, memos, diagnosis, ShutdownAsync,
-            new ResidentServices(moves, workGate, recordStartup));
+            new ResidentServices(moves, workGate, recordStartup, TermsNotSaved: !termsSaved));
         window = shell;
         shell.AttachInstance(owner!);
+        instanceHandler = shell.OnInstanceCommand;
         window.Activate();
     }
 
@@ -135,7 +216,7 @@ public partial class App : Application
     /// <summary>부품 전시 화면 (M2). 측정 없이 뜬다. 이번 실행의 테마·오로라 인수는 저장하지 않는다.</summary>
     private void LaunchShowcase(StartupOptions options, AppLog appLog, SettingsStore settings)
     {
-        appLog.Write("startup", new { mode = "showcase", version = typeof(App).Assembly.GetName().Version?.ToString() });
+        appLog.Write("startup", new { mode = "showcase", version = AppInfo.Current.Version });
         window = new ShowcaseWindow(options, appLog, settings, () =>
         {
             appLog.Write("shutdown", new { stopCompleted = true, rounds = 0, skipped = 0 });

@@ -16,6 +16,8 @@ public enum ButtonKind { Primary, Secondary, Ghost, Icon }
 public sealed class GlassButton : Button
 {
     private readonly Border hover;
+    private readonly Grid inner;
+    private readonly StackPanel row;
     private bool forcedHover;
 
     public GlassButton(Ui ui, ButtonKind kind, string automationId, string? label, string? icon = null)
@@ -32,7 +34,7 @@ public sealed class GlassButton : Button
         HorizontalAlignment = HorizontalAlignment.Left;
 
         var ink = kind == ButtonKind.Primary ? ui.Brushes.AccentInk : ui.Brushes.Ink;
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S2, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
+        row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S2, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
         if (icon is not null) row.Children.Add(Icons.Make(icon, ink, Size.IconM));
         if (label is not null && kind != ButtonKind.Icon) row.Children.Add(Fonts.Text(label, Typography.Label, ink));
 
@@ -41,7 +43,7 @@ public sealed class GlassButton : Button
         row.Margin = kind == ButtonKind.Icon ? new Thickness(0) : new Thickness(Space.S5, 0, Space.S5, 0);
         var padding = new Thickness(0);
         hover = new Border { Background = ui.Brushes.Faint, CornerRadius = new CornerRadius(Radius.Inner), Opacity = 0, IsHitTestVisible = false };
-        var inner = new Grid();
+        inner = new Grid();
         inner.Children.Add(hover);
         inner.Children.Add(row);
 
@@ -76,4 +78,25 @@ public sealed class GlassButton : Button
     }
 
     private void UpdateHover() => hover.Opacity = IsPointerOver || forcedHover ? 1 : 0;
+
+    /// <summary>
+    /// 목록 줄처럼 쓰는 넓은 버튼 (M10 고지 목록): 내용을 왼쪽에 붙이고, 이름이 버튼보다 길면 줄을 바꾼다 (높이는 글에 맞춰 는다).
+    /// 가운데 정렬 그대로면 긴 이름의 양 끝이 잘렸다 (M10 UI 시험 1차). 줄임표는 글자 잘림 검사에 걸려 쓰지 않는다.
+    /// </summary>
+    public void AlignStart()
+    {
+        var items = row.Children.ToArray();
+        row.Children.Clear();
+        if (Content is FrameworkElement body && !double.IsNaN(body.Height)) { body.MinHeight = body.Height; body.Height = double.NaN; }
+        var grid = new Grid { ColumnSpacing = row.Spacing, Margin = new Thickness(row.Margin.Left, Space.S2, row.Margin.Right, Space.S2), VerticalAlignment = VerticalAlignment.Center };
+        for (int i = 0; i < items.Length; i++)
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = i == items.Length - 1 ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
+            Grid.SetColumn((FrameworkElement)items[i], i);
+            if (items[i] is TextBlock label) label.TextWrapping = TextWrapping.WrapWholeWords;
+            grid.Children.Add(items[i]);
+        }
+        inner.Children.Remove(row);
+        inner.Children.Add(grid);
+    }
 }

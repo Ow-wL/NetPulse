@@ -94,12 +94,19 @@ internal static class M5Fixtures
         File.WriteAllText(Path.Combine(userData, ProfileStore.FileName), "{\"version\": 1, \"profiles\": [");
     }
 
+    /// <summary>동의 기록 없이 띄우는 준비인가 (M10 사용 조건 장면)</summary>
+    public static bool Unconsented(string prep) => prep is "noconsent" or "termsblocked";
+
     public static void Prepare(string userData, string prep)
     {
         var (kind, arg) = prep.Split(':') is [var k, var a] ? (k, a) : (prep, "steady");
         switch (kind)
         {
             case "none": break;
+            case "noconsent": break;   // M10: 동의 기록 없음 (사용 조건 화면)
+            case "termsblocked":       // M10: 동의 기록 자리에 폴더 → 동의를 쓰지 못함 (이번 실행만)
+                Directory.CreateDirectory(Path.Combine(userData, NetPulse.Design.Settings.TermsConsent.FileName));
+                break;
             case "profile": SaveProfile(userData, arg, arg == "steady" ? TimeSpan.FromMinutes(60) : null); break;
             case "records3": MakeRecentThree(userData); break;
             case "recorderror": MakeRecentThree(userData); MakeBrokenRecord(userData); break;

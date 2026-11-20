@@ -58,6 +58,13 @@ internal static class M7Fixtures
             case "rec-nosummary": NoSummary(userData); return true;
             case "rec-unreadable": M5Fixtures.SaveProfile(userData, "steady"); M5Fixtures.MakeBrokenRecord(userData); return true;
             case "rec-memo": AddMark(userData, Ok(userData), 30_000, "회의 중 끊김"); return true;
+            case "rec-two-memos":      // M10 D3: 서로 다른 증상 표시 둘, 노트 쓰기는 정상
+            {
+                var id = Ok(userData);
+                AddMark(userData, id, 30_000, "첫 메모", "fixture-mark-a");
+                AddMark(userData, id, 90_000, "둘째 메모", "fixture-mark-b");
+                return true;
+            }
             case "rec-memo-blocked":
             {
                 var id = Ok(userData);

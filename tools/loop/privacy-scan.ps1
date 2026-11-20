@@ -9,13 +9,15 @@
   -Staged          스테이징된 변경의 추가된 줄을 검사한다.
   -Range a..b      범위 안의 커밋을 하나씩 검사한다. 중간 커밋에 넣었다 지운 값도 찾는다.
   -Text "..."      주어진 문자열(PR 본문 등)을 검사한다.
+  -SelfTest        diff 읽기와 이메일 예외의 자체 시험만 한다 (합성 diff, 저장소를 읽지 않는다).
 
   찾으면 종료 코드 1, 없으면 0.
 #>
 param(
     [switch] $Staged,
     [string] $Range,
-    [string] $Text
+    [string] $Text,
+    [switch] $SelfTest
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -43,6 +45,10 @@ function Get-LocalIdentifiers {
             if ($line -match '^\s*SSID\s*:\s*(.+)$') { $values.Add($Matches[1].Trim()) }
         }
     } catch { }
+    # 이 PC의 git 사용자 이메일 (M10: 제3자 고지 파일에서 일반 이메일 규칙을 건너뛰므로, 사용자 자신의 주소는 따로 모든 파일에서 찾는다)
+    foreach ($scope in '--global', '--local') {
+        try { $mail = (git config $scope user.email 2>$null); if ($mail) { $values.Add($mail.Trim()) } } catch { }
+    }
     # 너무 짧거나 흔한 값은 오탐이 많아 뺀다.
     $common = @('Ethernet', 'Wi-Fi', 'WiFi', 'Loopback', '0.0.0.0', '1.1.1.1', '8.8.8.8', '8.8.4.4')
     return $values | Where-Object { $_.Length -ge 4 -and $common -notcontains $_ } | Sort-Object -Unique
@@ -58,9 +64,21 @@ $patterns = @(
 )
 $locals = Get-LocalIdentifiers
 
-function Test-Lines([string[]] $lines, [string] $where) {
-    foreach ($line in $lines) {
+# 제3자 라이선스 원문 (M10 설계 "고지 수집"): 오픈 소스 기여자의 저작권 고지에 이메일이 들어 있고 라이선스가 지우지 말라고 한다.
+# 이 파일들에서만 '이메일 주소' 규칙을 건너뛴다. 다른 규칙(사설 IP, MAC, 사용자 폴더, 이 PC 식별 값, git 사용자 이메일)은 그대로 적용한다.
+$emailExempt = @('src/NetPulse.App/Legal/THIRD-PARTY-NOTICES.txt', 'build/notices/')
+function Test-EmailExempt([string] $path) {
+    if (-not $path) { return $false }
+    foreach ($e in $emailExempt) { if ($path -eq $e -or ($e.EndsWith('/') -and $path.StartsWith($e))) { return $true } }
+    return $false
+}
+
+function Test-Lines([string[]] $lines, [string] $where, [string[]] $paths = @()) {
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        $exempt = $paths.Count -gt $i -and (Test-EmailExempt $paths[$i])
         foreach ($p in $patterns) {
+            if ($exempt -and $p.Name -eq '이메일 주소') { continue }
             if ($line -match $p.Regex) { Write-Output ("[{0}] {1}: {2}" -f $where, $p.Name, $Matches[0]) }
         }
         foreach ($v in $locals) {
@@ -71,22 +89,63 @@ function Test-Lines([string[]] $lines, [string] $where) {
     }
 }
 
-function Get-AddedLines([string[]] $diff) {
-    if (-not $diff) { return @() }   # 변경이 없으면 빈 목록
-    $diff | Where-Object { $_ } | Where-Object { $_.StartsWith('+') -and -not $_.StartsWith('+++') } | ForEach-Object { $_.Substring(1) }
+# diff를 한 번만 훑어 추가된 줄과 그 줄의 파일 경로를 짝으로 만든다 (G4 M10 1라운드 a1).
+# 파일 머리(diff --git ~ 첫 @@)의 '+++ '만 경로로 읽고, 조각(@@ 뒤) 안의 '+'로 시작하는 줄은 내용이 '++'로 시작해도 모두 추가된 줄이다.
+# (전에는 두 함수가 '+++'를 다르게 걸러 '++…' 내용 한 줄에 경로 배열이 어긋났고, 그런 줄은 검사에서 빠졌다)
+function Get-AddedEntries([string[]] $diff) {
+    $entries = New-Object System.Collections.Generic.List[object]
+    if (-not $diff) { return ,$entries }
+    $current = ''
+    $inHunk = $false
+    foreach ($l in $diff) {
+        if ($null -eq $l) { continue }
+        if ($l.StartsWith('diff --git ')) { $inHunk = $false; $current = ''; continue }
+        if (-not $inHunk) {
+            if ($l.StartsWith('+++ ')) { $current = if ($l.StartsWith('+++ b/')) { $l.Substring(6) } else { '' } }
+            elseif ($l.StartsWith('@@')) { $inHunk = $true }
+            continue
+        }
+        if ($l.StartsWith('@@')) { continue }
+        if ($l.StartsWith('+')) { $entries.Add([pscustomobject]@{ Path = $current; Text = $l.Substring(1) }) }
+    }
+    return ,$entries
+}
+
+function Test-Diff([string[]] $diff, [string] $where) {
+    $entries = Get-AddedEntries $diff
+    if ($entries.Count -eq 0) { return @() }
+    Test-Lines @($entries | ForEach-Object { $_.Text }) $where @($entries | ForEach-Object { $_.Path })
+}
+
+if ($SelfTest) {
+    $mail = 'np.selftest' + '@' + 'gmail.com'
+    $diff = @(
+        'diff --git a/build/notices/x.txt b/build/notices/x.txt', '--- a/build/notices/x.txt', '+++ b/build/notices/x.txt', '@@ -0,0 +1,3 @@',
+        '+++marker', "+contributor $mail", '+plain',
+        'diff --git a/src/a.cs b/src/a.cs', '--- a/src/a.cs', '+++ b/src/a.cs', '@@ -1,0 +1,2 @@',
+        "+// $mail", "+++$mail"
+    )
+    $entries = Get-AddedEntries $diff
+    if ($entries.Count -ne 5) { throw "자체 시험 실패: 추가된 줄 $($entries.Count)개 (5개여야 함)" }
+    if ($entries[0].Text -ne '++marker' -or $entries[0].Path -ne 'build/notices/x.txt') { throw '자체 시험 실패: ++로 시작하는 내용 줄' }
+    if ($entries[3].Path -ne 'src/a.cs' -or $entries[4].Path -ne 'src/a.cs') { throw '자체 시험 실패: 경로가 어긋났다' }
+    $hits = @(Test-Diff $diff 'selftest' | Where-Object { $_ -like '*이메일 주소*' })
+    if ($hits.Count -ne 2) { throw "자체 시험 실패: 일반 파일의 이메일 $($hits.Count)건 (2건이어야 함, 예외 파일 줄은 0건)" }
+    Write-Output '공개 전 검사 자체 시험 통과'
+    exit 0
 }
 
 $total = 0
 if ($Staged) {
     $diff = git -c core.quotepath=off diff --cached --unified=0 --no-color
-    $hits = @(Test-Lines (Get-AddedLines $diff) 'staged')
+    $hits = @(Test-Diff $diff 'staged')
     $hits | Out-Host
     $total += $hits.Count
 }
 if ($Range) {
     foreach ($sha in (git rev-list --reverse $Range)) {
         $diff = git -c core.quotepath=off show --unified=0 --no-color --format= $sha
-        $hits = @(Test-Lines (Get-AddedLines $diff) $sha.Substring(0, 8))
+        $hits = @(Test-Diff $diff $sha.Substring(0, 8))
         $hits | Out-Host
         $total += $hits.Count
     }

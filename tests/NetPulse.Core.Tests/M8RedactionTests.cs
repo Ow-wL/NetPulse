@@ -148,6 +148,9 @@ public sealed class M8RedactionTests
     [Theory]
     [InlineData("1.0", "NetPulse 1.0")]
     [InlineData("0.5.0+abc", "NetPulse 0.5.0")]
+    // M10 A1: 기록 머리 앱 버전이 네 마디(0.5.0.0)에서 세 마디(1.0.0)로 바뀐다. 옛·새 기록 모두 그대로 읽힌다
+    [InlineData("0.5.0.0", "NetPulse 0.5.0.0")]
+    [InlineData("1.0.0", "NetPulse 1.0.0")]
     [InlineData("예시 통신사 가나", "NetPulse 알 수 없음")]
     [InlineData("1.0-isp-a1", "NetPulse 1.0")]
     [InlineData("1.0 C:\\x", "NetPulse 1.0")]

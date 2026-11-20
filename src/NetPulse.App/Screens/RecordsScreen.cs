@@ -225,12 +225,16 @@ public sealed class RecordsScreen : Screen
 
     private async Task LoadDetailAsync(string key, int req)
     {
-        var opened = await Context.Records.OpenAsync(key);
+        var opening = Context.Records.OpenAsync(key);
+        lastDetailOpen = (req, opening.IsCompleted);   // 캐시에서 바로 왔는가 (시험이 캐시를 안 탔음을 확인, M10 D3)
+        var opened = await opening;
         // 타임라인의 창과 무관한 부분은 UI 밖에서 미리 구한다 (12시간 기록에서 UI 프레임을 막지 않게)
         (TimelineData Timeline, RecordDetailView View)? prepared = opened?.Record.Header is null ? null : await Task.Run(() => (Timeline: TimelineData.Build(opened).Warm(), View: RecordView.Detail(opened.Record, opened.Analysis, opened.Lifecycle)));
+        await TestHolds.RecordsApplyAsync();   // 시험 전용 멈춤 (M10 D3): 읽기를 마치고 작업 표를 놓은 뒤, 화면 반영 직전
+        detailArrived++;                       // 열기 완료가 화면 반영 단계에 왔다 (옛 완료 도착 증거)
         DispatcherQueue.TryEnqueue(() =>
         {
-            if (Context.IsClosing() || req != requestGen || detailKey != key || mode != Mode.Detail) return;
+            if (Context.IsClosing() || req != requestGen || detailKey != key || mode != Mode.Detail) { detailDiscarded++; return; }   // 옛 요청의 완료는 버린다 (시험이 버려졌음을 확인, G4 M10 1라운드 b3)
             detail = opened;
             if (prepared is { } p) { timelineData = p.Timeline; detailView = (opened!, p.View); }
             loadError = opened is null ? "기록을 읽지 못했습니다." : null;
@@ -239,6 +243,8 @@ public sealed class RecordsScreen : Screen
             scroll.ChangeView(null, 0, null, true);
             // 다시 그리면 [목록으로]가 새 줄로 옮겨 붙어 아직 배치 전이다: 프레임을 그린 뒤에 초점을 준다 (M7 UI 시험 1차: 초점이 탐색으로 빠짐)
             OnePerFrame(() => { if (req == requestGen && mode == Mode.Detail) back.Focus(FocusState.Programmatic); });
+            // 숨긴 동안 반영된 열기 완료 (M10 D3): 숨긴 창은 진단 값을 읽을 수 없어 기록으로 남긴다. 그리기 횟수가 숨길 때와 같아야 한다
+            if (Suspended) Context.Log.Write("recordsHiddenApply", new { renders, rendersAtSuspend, frameHooks = FrameHooks });
         });
     }
 
@@ -352,6 +358,9 @@ public sealed class RecordsScreen : Screen
         });
     }
 
+    private int renders, detailArrived, detailDiscarded, rendersAtSuspend = -1;
+    private (int Req, bool Cached) lastDetailOpen = (-1, false);
+
     private void Rerender()
     {
         renderedKey = "";
@@ -389,6 +398,7 @@ public sealed class RecordsScreen : Screen
         suspendFocusId = focused is not null && FocusWithin(content) ? AutomationProperties.GetAutomationId(focused) : null;
         suspendSelection = focused is TextBox tb && suspendFocusId is not null ? (tb.SelectionStart, tb.SelectionLength) : null;   // 커서·선택 (2라운드 b6)
         suspendScroll = scroll.VerticalOffset;
+        rendersAtSuspend = renders;
         renderGen++;                    // 이미 디스패처에 넘어간 조각은 세대가 달라 아무것도 하지 않는다
         perFrame.Clear();
         timelineQueued = false;
@@ -422,6 +432,7 @@ public sealed class RecordsScreen : Screen
     {
         // 숨긴 동안은 그리지 않는다: 숨기기 직전에 시작한 읽기·비교·메모 저장이 늦게 끝나도 상태만 남기고, 다시 열 때 그린다 (G4 M9 2라운드 b3)
         if (Suspended) { renderedKey = ""; return; }
+        renders++;   // 실제로 그리기에 들어간 횟수 (M10 D3: 숨긴 동안 늘지 않아야 한다)
         var items = Context.Records.Items;
         string key = $"{mode}|{items.Count}|{string.Join(",", items.Select(i => i.Stamp.Length + (i.Summary.Analyzing ? "a" : "d")))}|{Context.Records.Listed}"
             + $"|{shown}|{picking}|{string.Join(",", picked)}|{detail?.Stamp}|{loadError}|{expanded}|{string.Join(",", editing)}|{comparison is null}|{diagnosesLoaded}|{openDiagnosis?.StartedAt}";
@@ -1250,6 +1261,7 @@ public sealed class RecordsScreen : Screen
         bool Mine() => memoSaveSeq.GetValueOrDefault((key, mark.Mark)) == seq;
         SetMemoState(key, mark.Mark, "저장하는 중…", Here(), reveal: true);
         var result = await Context.Memos.SaveAsync(key, item.Entry.Segments, d.Record.Header!.Id, mark.Mark, mark.AtMs, text);
+        await TestHolds.MemoAsync();   // 시험 전용 멈춤 (M10 D3): 쓰기를 마친 뒤 화면 반영 직전
         if (Context.IsClosing()) return;
         if (!result.Latest || !Mine()) return;   // 더 새 요청이 있다: 오래된 완료는 반영하지 않는다
         if (result.State == EventWriteState.Saved)
@@ -1492,6 +1504,9 @@ public sealed class RecordsScreen : Screen
                 window = d.Record.Header is null ? null : view.Window(EndMs(d)).ToString(),
             } : null,
             detailLoading = mode == Mode.Detail && detail is null && loadError is null,
+            renders,
+            detailOpen = new { req = lastDetailOpen.Req, cached = lastDetailOpen.Cached, arrived = detailArrived, discarded = detailDiscarded },
+            detailListed = detail is { } shownDetail && Context.Records.Items.Any(i => i.Key == shownDetail.Key),   // 보이는 상세가 지금 목록의 출처(위치)에서 왔는가
             detailComplete = DetailReady,   // 아래 카드까지 그려짐 (한 프레임 늦게 만든다)
             loadError,
             editing = editing.LastOrDefault(),

@@ -16,9 +16,16 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- 앱·트레이 아이콘 (M9). tools/make-icon.ps1로 만든다 -->
     <ApplicationIcon>Assets\NetPulse.ico</ApplicationIcon>
+    <!-- 단일 파일 묶음은 압축하지 않는다: 이진 검사가 묶음 안 내용을 그대로 본다 (설계 B4) -->
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Base" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Foundation" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.DWrite" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" />
     <ProjectReference Include="..\NetPulse.Core\NetPulse.Core.csproj" />
     <ProjectReference Include="..\NetPulse.Platform\NetPulse.Platform.csproj" />
     <ProjectReference Include="..\NetPulse.Design\NetPulse.Design.csproj" />
@@ -27,10 +34,22 @@
          실행 파일의 해시가 이 파일들을 덮는다. -->
     <Content Include="..\..\assets\fonts\*.otf;..\..\assets\fonts\OFL-Pretendard.txt" Link="Fonts\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\NetPulse.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- 사용 조건·라이선스·제3자 고지 (M10 설계 A2·A3): 앱 안에 내장해 exe 하나로도 보인다. LICENSE는 저장소 루트 파일 하나만 둔다 -->
+    <None Remove="Legal/**" />
+    <Content Remove="Legal/**" />
+    <EmbeddedResource Include="Legal\TERMS.txt" LogicalName="NetPulse.Legal.TERMS.txt" />
+    <EmbeddedResource Include="Legal\THIRD-PARTY-NOTICES.txt" LogicalName="NetPulse.Legal.THIRD-PARTY-NOTICES.txt" />
+    <EmbeddedResource Include="..\..\LICENSE" Link="Legal\LICENSE.txt" LogicalName="NetPulse.Legal.LICENSE.txt" />
     <Content Include="..\..\demo\scenarios\*.json" Link="demo\scenarios\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
-  <!-- 패키지 없는 배포에서 App.xbf와 앱 .pri가 배포 폴더로 복사되지 않는 것을 M0에서 관측했다. 직접 복사한다. -->
-  <Target Name="CopyXamlArtifactsToPublish" AfterTargets="Publish">
-    <Copy SourceFiles="$(OutDir)App.xbf;$(OutDir)$(AssemblyName).pri" DestinationFolder="$(PublishDir)" Condition="Exists('$(OutDir)App.xbf')" />
+  <!-- 단일 파일 묶음에 실제로 들어가는 파일 목록 (M10 설계 B4·고지 수집 [2-5]). SDK는 묶을 항목을 ResolvedFileToPublish에서 빼서
+       FilesToBundle로 옮기므로 PrepareForBundle 뒤·GenerateSingleFileBundle 앞에서 읽는다. publish마다 새로 쓴다(비공개, obj 아래). -->
+  <Target Name="WriteBundleInputs" AfterTargets="PrepareForBundle" BeforeTargets="GenerateSingleFileBundle" Condition="'$(PublishSingleFile)' == 'true'">
+    <ItemGroup>
+      <_NetPulseBundleLine Include="@(FilesToBundle->'%(RelativePath)&#9;%(FullPath)&#9;%(NuGetPackageId)&#9;%(NuGetPackageVersion)')" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(IntermediateOutputPath)bundle-inputs.tsv" Lines="@(_NetPulseBundleLine)" Overwrite="true" />
   </Target>
+  <!-- M0에서는 App.xbf와 앱 .pri를 배포 폴더로 직접 복사했다. M10: 배포 exe 하나만으로 전체 UI 시험이 돌므로 복사하지 않는다
+       (설계 B2. build/ui-test.ps1은 app/에 exe 하나만 있을 때만 돈다). -->
 </Project>

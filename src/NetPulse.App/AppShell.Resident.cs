@@ -76,21 +76,30 @@ public sealed partial class AppShell
     }
 
     /// <summary>App이 단일 실행 개체를 넘긴다: 두 번째 실행의 열기·종료 요청을 받는다.</summary>
-    public void AttachInstance(SingleInstance owner)
+    public void AttachInstance(SingleInstance owner) => instance = owner;
+
+    /// <summary>두 번째 실행의 요청 (앱의 단일 실행 서버가 동의 뒤 이리로 넘긴다, M10 A2).</summary>
+    public Task<bool> OnInstanceCommand(string command)
     {
-        instance = owner;
-        owner.Serve(command =>
+        var accepted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!DispatcherQueue.TryEnqueue(() =>
         {
-            var accepted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (!DispatcherQueue.TryEnqueue(() =>
+            try
             {
                 if (closing || sessionEnding) { accepted.TrySetResult(false); return; }   // 종료 중: closing으로 답한다
                 if (command == "exit") BeginClose();
                 else Reopen(toMeasure: false, "secondInstance");
                 accepted.TrySetResult(true);
-            })) accepted.TrySetResult(false);
-            return accepted.Task;
-        });
+            }
+            catch (Exception ex)
+            {
+                // 처리 중 예외를 반환 Task로 잇는다: 두 번째 실행은 closing으로 답을 받는다. 답을 먼저 정하고 기록은 그다음 (기록이 실패해도 답은 간다, G4 M10 3라운드 2)
+                accepted.TrySetResult(false);
+                try { log.Write("instanceCommandFailed", new { command, type = ex.GetType().Name }); }
+                catch (Exception) { /* 기록 실패는 무시 */ }
+            }
+        })) accepted.TrySetResult(false);
+        return accepted.Task;
     }
 
     // ---------------- 닫기 = 숨김 또는 종료 ----------------
@@ -140,7 +149,19 @@ public sealed partial class AppShell
         AppWindow.Hide();
         // 숨긴 뒤 남은 프레임 구독 수 (화면·테마·프레임 측정기, 0이어야 한다: 설계 A1, G4 M9 1라운드 b2)
         log.Write("resident", new { what = "hidden", host = host.Snapshot.State.ToString(), frameHooks = FrameHooks() });
+        // 시험 전용 (M10 D3): 숨기면 멈춤 지점을 모두 푼다. 숨긴 창의 UIA 트리는 믿을 수 없어 diag.release를 누를 수 없다 (UI 시험 1차).
+        // 멈춘 작업의 완료가 정확히 숨긴 동안 도착한다
+        if (TestHolds.Active) TestHolds.ReleaseAll();
+        // 실측 시험 전용 (M10 D4): 처음 숨길 때 시험 풍선을 정확히 한 번. 호출 결과만 남긴다 (실제로 보였는지는 사용자가 확인)
+        if (options.LiveBalloonTest && !liveBalloonSent)
+        {
+            liveBalloonSent = true;
+            bool called = tray?.ShowBalloon("NetPulse 시험 풍선", "실측 시험입니다. 이 풍선이 보이면 확인해 주세요.", false) == true;
+            log.Write("liveBalloon", new { called });
+        }
     }
+
+    private bool liveBalloonSent;
 
     /// <summary>다시 열기. 화면은 그대로(강제 이동 없음), 풍선 클릭만 측정 화면으로.</summary>
     private void Reopen(bool toMeasure, string by)

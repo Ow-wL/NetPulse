@@ -1,8 +1,17 @@
 <Project>
+  <PropertyGroup>
+    <WindowsAppSdkVersion>2.6.5</WindowsAppSdkVersion>
+  </PropertyGroup>
   <!-- 패키지 버전은 여기서만 정한다. 제품 런타임 의존성을 더하려면 사용자 승인이 필요하다 (docs/loop-plan.md 4.5). -->
   <ItemGroup>
     <!-- 제품 런타임 (D1 승인) -->
-    <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.6.5" />
+    <!-- Windows App SDK는 메타패키지 대신 쓰는 구성요소만 참조한다 (M10 사용자 결정: AI·ML·Search·Widgets 빼기). 버전은 한 변수 -->
+    <PackageVersion Include="Microsoft.WindowsAppSDK.Base" Version="$(WindowsAppSdkVersion)" />
+    <PackageVersion Include="Microsoft.WindowsAppSDK.Foundation" Version="$(WindowsAppSdkVersion)" />
+    <PackageVersion Include="Microsoft.WindowsAppSDK.WinUI" Version="$(WindowsAppSdkVersion)" />
+    <PackageVersion Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="$(WindowsAppSdkVersion)" />
+    <PackageVersion Include="Microsoft.WindowsAppSDK.DWrite" Version="$(WindowsAppSdkVersion)" />
+    <PackageVersion Include="Microsoft.WindowsAppSDK.Runtime" Version="$(WindowsAppSdkVersion)" />
     <PackageVersion Include="System.Diagnostics.EventLog" Version="10.0.3" />
     <!-- 빌드·테스트 전용 -->
     <PackageVersion Include="xunit.v3" Version="4.0.3" />
