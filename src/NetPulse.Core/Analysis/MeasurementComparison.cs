@@ -138,13 +138,13 @@ public static class MeasurementComparison
 
     private static TargetPair Pair(TargetSide a, TargetSide b, string? lossBased)
     {
-        string? lossOff = lossBased ?? (a.Valid < MinValid || b.Valid < MinValid ? "유효한 응답이 100번보다 적습니다" : null)
+        string? lossOff = lossBased ?? (a.Valid < MinValid || b.Valid < MinValid ? "검사 오류를 뺀 요청이 100번보다 적습니다" : null)
             ?? (a.LossRate is null || b.LossRate is null ? "값 없음" : null);
         var loss = lossOff is null && Math.Abs(a.LossRate!.Value - b.LossRate!.Value) >= LossThreshold
             ? (a.LossRate < b.LossRate ? Lower.A : Lower.B) : Lower.None;
         // 연속 손실은 경과 시간 범위(최소)로만 비교한다. 주기가 달라도 시간 범위는 비교할 수 있다 (횟수는 값만).
         // 유효한 응답이 적은 쪽은 손실이 없어서가 아니라 관측이 없어서일 수 있다: 손실률과 같은 기준으로 억제한다 (G4 M7 1라운드 a3)
-        string? runOff = lossBased ?? (a.Valid < MinValid || b.Valid < MinValid ? "유효한 응답이 100번보다 적습니다" : null)
+        string? runOff = lossBased ?? (a.Valid < MinValid || b.Valid < MinValid ? "검사 오류를 뺀 요청이 100번보다 적습니다" : null)
             ?? (a.LongestRunOpen || b.LongestRunOpen ? "끝을 모르는 연속 손실이 있습니다" : null);
         long ra = a.LongestRunMinMs ?? 0, rb = b.LongestRunMinMs ?? 0;
         var run = runOff is null && Math.Abs(ra - rb) >= LongestThresholdMs ? (ra < rb ? Lower.A : Lower.B) : Lower.None;

@@ -70,7 +70,7 @@ public static class RecordView
             EndReason.Completed => "계획한 시간을 마침",
             EndReason.Stopped => "사용자가 멈춤",
             EndReason.Error => "오류로 끝남",
-            EndReason.Interrupted => "중간에 끊김",
+            EndReason.Interrupted => "중간에 중단됨",   // 네트워크 "끊김"과 섞이지 않게 (M11 문구 점검)
             _ => "끝 사유 알 수 없음",
         },
     };

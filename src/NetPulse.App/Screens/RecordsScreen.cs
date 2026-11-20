@@ -674,8 +674,8 @@ public sealed class RecordsScreen : Screen
         timeline.Picked += OnTimelinePicked;
         var zoomOut = new GlassButton(Ui, ButtonKind.Icon, "records.zoomout", "축소", Icons.Minus);
         var zoomIn = new GlassButton(Ui, ButtonKind.Icon, "records.zoomin", "확대", Icons.Plus);
-        var left = new GlassButton(Ui, ButtonKind.Icon, "records.left", "앞으로", Icons.Back);
-        var right = new GlassButton(Ui, ButtonKind.Icon, "records.right", "뒤로", Icons.Chevron);
+        var left = new GlassButton(Ui, ButtonKind.Icon, "records.left", "과거로", Icons.Back);            // 측정 화면과 같은 말 (M11 문구 점검)
+        var right = new GlassButton(Ui, ButtonKind.Icon, "records.right", "최근 쪽으로", Icons.Chevron);
         var all = new GlassButton(Ui, ButtonKind.Icon, "records.all", "전체 보기", Icons.ZoomAll);
         zoomOut.Click += (_, _) => OnTimeline(TimelineCommand.ZoomOut);
         zoomIn.Click += (_, _) => OnTimeline(TimelineCommand.ZoomIn);

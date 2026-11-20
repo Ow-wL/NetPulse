@@ -223,7 +223,7 @@ public static class ReportBuilder
         {
             var blocks = new List<ReportBlock>();
             var stats = record.Stats ?? StatsCalculator.Compute(rounds, targets.Select(t => t.Id).ToArray(), record.Gaps);
-            blocks.Add(new ReportTable("대상별 응답", Cols("대상", "역할", "방식", "유효 응답", "응답 없음", "손실률", "평균 지연", "최대 지연", "최대 연속 응답 없음", "검사 오류"),
+            blocks.Add(new ReportTable("대상별 응답", Cols("대상", "역할", "방식", "유효 시도", "응답 없음", "손실률", "평균 지연", "최대 지연", "최대 연속 응답 없음", "검사 오류"),
                 targets.Select(t =>
                 {
                     var s = stats.Targets.FirstOrDefault(x => x.TargetId == t.Id);

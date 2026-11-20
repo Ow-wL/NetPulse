@@ -383,7 +383,7 @@ public sealed class ReportScreen : Screen
             ReportState.Building => "만드는 중… 끝나면 내보낼 수 있습니다.",
             ReportState.Stale => "기록이 바뀌어 다시 만드는 중입니다.",
             ReportState.Failed => "만들지 못했습니다.",
-            ReportState.Ready when !options.Masked => "가리지 않은 리포트입니다. 주소와 이름이 그대로 들어갑니다.",
+            ReportState.Ready when !options.Masked => "가리지 않은 리포트입니다. 대상 이름·주소, 사업자 이름, 네트워크 어댑터 이름, 측정 ID가 그대로 들어갑니다.",
             ReportState.Ready => "미리 보기는 내보낼 파일과 같은 내용입니다.",
             _ => "",
         };
@@ -738,7 +738,7 @@ public sealed class ReportScreen : Screen
             done.TrySetResult(ok);
         }
         Context.Dialog.Closed += Closed;
-        Context.Dialog.Open(exportButton, "가리지 않은 리포트를 내보낼까요?", "대상 주소와 이름, 사업자 이름이 그대로 들어갑니다. 내가 볼 때만 쓰세요.", "내보내기", "취소");
+        Context.Dialog.Open(exportButton, "가리지 않은 리포트를 내보낼까요?", "대상 이름·주소, 사업자 이름, 네트워크 어댑터 이름, 측정 ID가 그대로 들어갑니다. 내가 볼 때만 쓰세요.", "내보내기", "취소");
         return done.Task;
     }
 
