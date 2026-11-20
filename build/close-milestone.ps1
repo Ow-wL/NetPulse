@@ -14,6 +14,8 @@
 .PARAMETER Title     PR 제목
 .PARAMETER BodyFile  PR 본문 파일 (UTF-8)
 .PARAMETER UiOptional 화면이 없는 마일스톤: ui-test.json 대신 manifest의 테스트 결과만 본다
+.PARAMETER EvidenceReview 최종 게이트 뒤 증거 검토가 있는 마일스톤 (M11 설계 D0-4 [2-2]): 대상이 X인 "검토: 증거" 요청 중
+  가장 높은 라운드의 답이 APPROVE이고, 그 요청의 "기록:" 커밋이 X의 자손이면서 HEAD의 조상인지 본다
 #>
 param(
     [Parameter(Mandatory)] [string] $Approved,
@@ -22,6 +24,7 @@ param(
     [Parameter(Mandatory)] [string] $BodyFile,
     [switch] $UiOptional,
     [switch] $Screens,
+    [switch] $EvidenceReview,
     [int] $CiTimeoutMinutes = 15
 )
 $ErrorActionPreference = 'Stop'
@@ -101,6 +104,30 @@ try {
     if (-not $verdict) { throw 'G4 답변에 판정 줄이 없습니다 (미완료).' }
     if ($verdict -notmatch $script:ApprovePattern) { throw "G4가 승인하지 않았습니다: $($verdict.Trim())" }
     $gate.g4 = [ordered]@{ request = $req.File.Name; round = $req.Round; verdict = $verdict.Trim() }
+    if ($EvidenceReview) {
+        # 증거 검토 (M11 설계 D0-4 [2-2]): G4와 별도 검토. 최종 게이트 결과와 완성 문서를 본 승인이 있어야 마감한다
+        $evidence = Get-ChildItem (Join-Path $root '.loop\reviews') -Filter '*-request.md' -ErrorAction SilentlyContinue | ForEach-Object {
+            $head = (Get-Content $_.FullName -Encoding UTF8 -TotalCount 8) -join "`n"
+            if ($head -match '(?m)^검토:\s*증거\s*$' -and $head -match "(?m)^대상:\s*$X\s*$" -and $head -match '(?m)^라운드:\s*(\d+)\s*$') {
+                $round = [int]$Matches[1]
+                $record = if ($head -match '(?m)^기록:\s*([0-9a-f]{40})\s*$') { $Matches[1] } else { $null }
+                [pscustomobject]@{ File = $_; Round = $round; Record = $record }
+            }
+        } | Sort-Object Round -Descending
+        if (-not $evidence) { throw '대상이 X인 증거 검토 요청문이 없습니다.' }
+        $ev = @($evidence)[0]
+        if (-not $ev.Record) { throw "증거 검토 요청문에 '기록: <전체 SHA>'가 없습니다: $($ev.File.Name)" }
+        $evAnswer = $ev.File.FullName -replace '-request\.md$', '-answer.md'
+        if (-not (Test-Path $evAnswer)) { throw "증거 검토 답변이 없습니다: $(Split-Path $evAnswer -Leaf)" }
+        $evVerdict = Get-FirstVerdictLine $evAnswer
+        if (-not $evVerdict) { throw '증거 검토 답변에 판정 줄이 없습니다 (미완료).' }
+        if ($evVerdict -notmatch $script:ApprovePattern) { throw "증거 검토가 승인하지 않았습니다: $($evVerdict.Trim())" }
+        & git merge-base --is-ancestor $X $ev.Record
+        if ($LASTEXITCODE -ne 0) { throw '증거 검토의 기록 커밋이 X의 자손이 아닙니다.' }
+        & git merge-base --is-ancestor $ev.Record HEAD
+        if ($LASTEXITCODE -ne 0) { throw '증거 검토의 기록 커밋이 HEAD의 조상이 아닙니다.' }
+        $gate.evidence = [ordered]@{ request = $ev.File.Name; round = $ev.Round; record = $ev.Record; verdict = $evVerdict.Trim() }
+    }
     # 배포 파일 (M10 설계 B1 [1-4]): 빌드와 같은 검사 함수로 다시 계산한다
     $release = Test-Release $artifacts $X
     $gate.release = [ordered]@{ version = $release.version; files = @($release.files | ForEach-Object { [ordered]@{ name = $_.name; sha256 = $_.sha256 } }) }
