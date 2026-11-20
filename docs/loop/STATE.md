@@ -7,10 +7,10 @@
 | 항목 | 값 |
 | --- | --- |
 | 마일스톤 | M10 릴리스 준비 |
-| 단계 | PR Ow-wL/NetPulse#6 열림(CI 실패: SDK 차이 → `f501773`에서 고정). 공개 버전을 0.9.0으로 바꿈(`23536eb`) → 이 커밋의 G4(예외)와 데스크톱 최종 게이트(사용자 허락 뒤, README 설정 캡처 다시 찍기 포함) 남음 |
+| 단계 | 데스크톱 최종 게이트 통과(승인 코드 `5c30ef2`, 0.9.0) → 마감 스크립트로 PR Ow-wL/NetPulse#6 갱신·CI, 사용자 병합 대기 |
 | 브랜치 | `loop/m10-release` (`main` `3ed5671` = M9 병합 위) |
 | 설계 검토 라운드 | 2 / 2 (1라운드 `bd63244` REVISE 높음 3·중간 8·낮음 1 → 2판, 2라운드 `755ad84` REVISE 차단 3·구현 중 결정 6 → 3판, Claude 판정) |
-| diff 리뷰 라운드 | 5 / 3 (5라운드 `f501773` SDK 고정 APPROVE, 사용자 승인 예외; 1라운드 a·b REVISE 차단 2 → 2라운드 REVISE 중요 2 → 3라운드 REVISE 중요 3 → 4라운드 APPROVE, 4라운드는 사용자 승인 예외) |
+| diff 리뷰 라운드 | 7 / 3 (7라운드 `5c30ef2` README·그림 APPROVE, 6라운드 `23536eb` 0.9.0 APPROVE·사소 1, 5라운드 `f501773` SDK 고정 APPROVE — 4~7라운드 사용자 승인 예외; 1라운드 a·b REVISE 차단 2 → 2라운드 REVISE 중요 2 → 3라운드 REVISE 중요 3 → 4라운드 APPROVE, 4라운드는 사용자 승인 예외) |
 | 누적 실패 | 0 / 8 |
 | PR | Ow-wL/NetPulse#6 (열림, 병합 전 최종 게이트·CI 필요) |
 | M9 | 끝: PR Ow-wL/NetPulse#5 사용자 병합 (`3ed5671`). G4 4라운드(사용자 승인 예외) APPROVE, 승인 코드 `762addc` |
@@ -20,17 +20,18 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 승인받은 코드 커밋 X | `1e73d6a5136f27f07dea10b43facc86fdeeada3a` (G4 4라운드 승인, 사용자 승인 예외) |
+| 승인받은 코드 커밋 X | `5c30ef2af3ada2936eebed4fdb8ee7cb83808135` (G4 7라운드 승인, 4~7라운드는 사용자 승인 예외). 공개 버전 0.9.0, SDK 10.0.115 고정(런타임 10.0.15) |
 | G1·G2 | `build/build.ps1 -Gate`: Core 532/532, Design 136/136, Platform 44/44, 미실행 0. 고지 일치(구성요소 10개), 공개 전 검사·이진 검사 자체 시험, 이진 금지 값 0건, 결정적 zip, `Test-Release` 통과 |
-| 배포 파일 | `NetPulse-1.0.0-win-x64.zip` 69,146,101 B, `NetPulse-1.0.0-win-x64.exe` 183,347,599 B (M9 245 MB에서 줄임), 묶음 입력 459개 |
-| G3·G5 | `build/ui-test.ps1`: 배포 exe UI 시험 834/834 (`Kind=Live`·`Kind=Docs` 제외, 두 번째 실행. 첫 실행은 사용자 부재로 클립보드 준비를 못 해 클립보드 시험 2건이 건너뜀, 실패 0). G5 통과, 필수 누락 0, 매트릭스 646 (M2 44), 장면 M5 30·M6 26·M7 29·M8 17·M10 9. 재부팅 없이 |
-| 고지 bench | 가장 긴 원문(33만 자) 첫 배치 30.2 ms, 펼친 뒤 1초 최대 33.5 ms·33 ms 초과 1회 (기준 50 ms·2회) |
-| 측정·리포트·기록 bench | nav 최대 34.4 ms·1회, 리포트 scroll 38.2 ms·1회, worst 61.9 ms·1회, 기록 open 38.6 ms·1회 |
-| M2 전환 bench | 전환 최대 25.2 ms, aurora 25.4 ms (기준 50 ms) |
-| 깨끗한 클론 | `tools/loop/clean-clone.ps1 -Commit 1e73d6a` 통과 (바이트 재현은 요구 아님) |
+| 배포 파일 | `NetPulse-0.9.0-win-x64.zip` 69,147,685 B, `NetPulse-0.9.0-win-x64.exe` 183,409,386 B (M9 245 MB에서 줄임), 묶음 입력 459개 |
+| G3·G5 | `build/ui-test.ps1`: 데스크톱, 배포 exe UI 시험 834/834 (`Kind=Live`·`Kind=Docs` 제외, 한 번에 통과, 사용자가 클립보드를 준비하고 PC를 비움, 재부팅 없이). G5 통과, 필수 누락 0, 매트릭스 646 (M2 44), 장면 M5 30·M6 26·M7 29·M8 17·M10 9 |
+| 고지 bench | 가장 긴 원문(33만 자) 첫 배치 37.3 ms, 펼친 뒤 1초 최대 41.0 ms·33 ms 초과 1회 (기준 50 ms·2회) |
+| 측정·리포트·기록 bench | nav 최대 46.1 ms·1회, 리포트 scroll 40.2 ms·1회, worst 61.9 ms·1회, 기록 open 40.2 ms·1회 |
+| M2 전환 bench | 전환 최대 26.7 ms, aurora 27.9 ms (기준 50 ms) |
+| 깨끗한 클론 | 코드가 같은 `f501773`에서 통과 (그 뒤는 버전·README·그림만) |
 | 실측 | `M9LiveRunTests` 사용자 입회 통과, 풍선은 사용자가 봤다 (트레이 메뉴 고르기는 시험 도구로 무시돼 `--exit`로 대신, DECISIONS) |
-| G4 | `.loop/reviews/m10-g4-r4-answer.md` APPROVE (차단·중요·사소 0) |
-| manifest.json SHA-256 | `31FDF2A2975A8BD6F75A53087347D26B060BA7A100F558D32D107860D8BDB4FC` |
+| CI | SDK 고정 뒤 `7768499`에서 push·pull_request 성공 (마감 스크립트가 최종 HEAD에서 다시 본다) |
+| G4 | `.loop/reviews/m10-g4-r7-answer.md` APPROVE (차단·중요·사소 0) |
+| manifest.json SHA-256 | `BF98200168000B9B8983598554CD82A9FB6DB91EB92E4492D1C9350D277D1848` |
 
 **저장소 이전 (2026-11-14, `DECISIONS.md` "공개 저장소 이전")**: 공개 저장소 `Ow-wL/NetPulse`는 이력을 다시 쓴 새 저장소다. 아래 M0~M4 기록의 SHA·PR 번호는 옛 저장소(`Ow-wL/NetPulse-private`, 비공개) 기준이다.
 
