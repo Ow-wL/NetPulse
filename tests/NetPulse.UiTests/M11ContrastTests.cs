@@ -13,6 +13,9 @@ namespace NetPulse.UiTests;
 /// 글자 있음/없음(<c>--hide-measured-text</c>) 두 장을 찍고, 글자 없는 배경과 토큰 글자 색의 대비를 칸별로 잰다.
 /// 측정 요소는 장면에 있는 화면 머리(제목·위 글)와 카드(제목·작은 글) 전부 — 놓인 유리 단계가 다르므로 요소마다 따로.
 /// 기준: 4.5 (본문 글자, M2 토큰 기준). 제목·카드 제목은 Ink, 위 글·카드 작은 글은 Muted.
+/// 장면마다 꼭 재야 하는 요소를 <see cref="Required"/>로 고정한다: 빠지면 실패 (M11 G4 1라운드, 개수 하한만으로는 카드 누락을 못 잡음).
+/// 본문 글은 같은 카드 유리 위의 Ink·Muted라 카드 제목·작은 글 측정이 대신하고, 단추·정보 칩·배너 글은 자기 채움 위라
+/// 토큰 대비 시험(Design ContrastMatrixTests)과 부품 전시 실측(G5Tests 대비 장면)이 본다 (DECISIONS "M11 G4 1라운드").
 /// </summary>
 public sealed class M11ContrastTests
 {
@@ -27,6 +30,17 @@ public sealed class M11ContrastTests
                 d.Add(file, scene, theme);
         return d;
     }
+
+    /// <summary>장면별 필수 측정 요소 (그 장면의 화면 머리와 카드 머리 전부).</summary>
+    internal static readonly IReadOnlyDictionary<string, string[]> Required = new Dictionary<string, string[]>
+    {
+        ["measure-live"] = ["measure.header.overline", "measure.header.title", "measure.timelinecard.title"],
+        ["measure-outage"] = ["measure.header.overline", "measure.header.title", "measure.timelinecard.title"],
+        ["firstrun-detected"] = ["firstrun.header.overline", "firstrun.header.title", "firstrun.detect.title"],
+        ["profile-ok"] = ["profile.header.overline", "profile.header.title", "profile.card.title", "profile.targets.title", "profile.targets.note"],
+        ["settings-normal"] = ["settings.header.title", "settings.appearance.title", "settings.appearance.note", "settings.resident.title"],
+        ["terms"] = ["terms.header.overline", "terms.header.title", "terms.card.title"],
+    };
 
     private static bool Measured(string id) => id.EndsWith(".title", StringComparison.Ordinal) || id.EndsWith(".overline", StringComparison.Ordinal) || id.EndsWith(".note", StringComparison.Ordinal);
 
@@ -61,7 +75,8 @@ public sealed class M11ContrastTests
             if (hide) hidden = shot; else shot.Dispose();
             Assert.Equal(0, app.Close());
         }
-        Assert.True(boxes.Count >= 2, $"{sceneId}: 잴 요소가 {boxes.Count}개");                 // 적어도 화면 머리 제목과 카드 하나
+        var missing = Required[sceneId].Where(id => !boxes.ContainsKey(id)).ToArray();
+        Assert.True(missing.Length == 0, $"{sceneId}: 재야 할 요소가 화면에 없음 (또는 화면 밖) — {string.Join(", ", missing)}");
         var results = new List<object>();
         var problems = new List<string>();
         foreach (var (id, box) in boxes.OrderBy(b => b.Key, StringComparer.Ordinal))

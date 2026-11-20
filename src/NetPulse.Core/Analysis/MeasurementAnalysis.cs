@@ -324,10 +324,11 @@ public static class Sentences
     {
         var outage = stats.First(s => s.Verdict == Verdict.ExternalOutage);
         var link = stats.First(s => s.Verdict == Verdict.LinkDown);
-        // 끊긴 길이는 분·초로 ("754초"가 아니라 "12분 34초", 화면의 다른 시간 표기와 같게, M11 문구 점검)
+        // 끊긴 길이는 분·초로 ("754초"가 아니라 "12분 34초", 화면의 다른 시간 표기와 같게, M11 문구 점검).
+        // 모두 "○ 이상"(최소 길이)에 쓰므로 올리지 않고 버린다 (TimelineModel.AtLeast와 같음, M11 G4 1라운드)
         static string Seconds(long ms)
         {
-            long s = (long)Math.Round(ms / 1000.0);
+            long s = Math.Max(0, ms) / 1000;
             if (s < 60) return $"{s}초";
             if (s < 3600) return s % 60 == 0 ? $"{s / 60}분" : $"{s / 60}분 {s % 60}초";
             long m = s / 60;

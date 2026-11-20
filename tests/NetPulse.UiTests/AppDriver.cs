@@ -19,7 +19,7 @@ public sealed class AppDriver : IDisposable
 {
     private static readonly TimeSpan StepTimeout = TimeSpan.FromSeconds(60);   // 기획서 4.9 단계당 60초
     private readonly Process process;
-    private readonly bool ownsUserData;
+    private bool ownsUserData;
     private readonly DateTime startedUtc;
     private bool closed;
     private IntPtr windowHandle;
@@ -32,6 +32,16 @@ public sealed class AppDriver : IDisposable
         windowHandle = new IntPtr(window.Current.NativeWindowHandle);
         UserData = userData;
         this.ownsUserData = ownsUserData;
+    }
+
+    /// <summary>
+    /// 호출한 쪽이 만든 사용자 폴더를 이 드라이버가 넘겨받아, 끝낼 때(앱이 살아 있지 않으면) 지운다.
+    /// 장면 열기(<c>M5MatrixTests.Open</c>)처럼 폴더를 만들어 넘기고 따로 지우지 않는 곳에서 쓴다 (M11 G4 1라운드: 매트릭스마다 폴더가 남음).
+    /// </summary>
+    internal AppDriver OwnUserData()
+    {
+        ownsUserData = true;
+        return this;
     }
 
     public int ProcessId => process.Id;

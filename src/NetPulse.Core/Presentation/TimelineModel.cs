@@ -319,10 +319,16 @@ public static class TimelineModel
         if (b.Kind == BandKind.Gap) return $"약 {Seconds(b.MinMs)}";
         if (b.Rounds == 1)
             return b.MaxMs is long m1 ? $"1회차 · 최대 약 {Seconds(m1)}" : b.OpenEnd ? "1회차 · 이어지는 중" : "1회차";
-        if (b.OpenEnd) return $"끝까지 이어짐 ({Seconds(b.MinMs)} 이상)";
+        if (b.OpenEnd) return $"끝까지 이어짐 ({AtLeast(b.MinMs)} 이상)";
         if (b.MaxMs is long max) return $"약 {Seconds(b.MinMs)}~{Seconds(max)}";
-        return $"{Seconds(b.MinMs)} 이상";
+        return $"{AtLeast(b.MinMs)} 이상";
     }
+
+    /// <summary>
+    /// "○ 이상"에 쓰는 하한 길이: 올림 없이 버린다 (59.6초가 "1분 이상"이 되면 최소 길이보다 크게 말한다, M11 G4 1라운드).
+    /// 형식은 <see cref="Seconds"/>와 같다.
+    /// </summary>
+    public static string AtLeast(long ms) => Seconds(Math.Max(0, ms) / 1000 * 1000);
 
     /// <summary>"9초", "1분 5초", "2시간 3분".</summary>
     public static string Seconds(long ms)

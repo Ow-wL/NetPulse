@@ -62,8 +62,8 @@ public static class ReportTexts
     {
         if (openAtEnd && maxMs is null)
             return life == RecordLifecycle.NoSummary
-                ? $"마지막 관측까지 이어짐, 그 뒤는 알 수 없음 ({TimelineModel.Seconds(minMs)} 이상)"
-                : $"측정 끝까지 이어짐 ({TimelineModel.Seconds(minMs)} 이상)";
+                ? $"마지막 관측까지 이어짐, 그 뒤는 알 수 없음 ({TimelineModel.AtLeast(minMs)} 이상)"
+                : $"측정 끝까지 이어짐 ({TimelineModel.AtLeast(minMs)} 이상)";
         return RecordView.Duration(minMs, maxMs, rounds);
     }
 

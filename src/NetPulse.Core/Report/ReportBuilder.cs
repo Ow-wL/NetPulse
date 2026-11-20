@@ -169,8 +169,8 @@ public static class ReportBuilder
                 stats.Select(s => new ReportRow([
                     new(ReportRun.Gen(RecordView.VerdictName(s.Verdict)), "verdict.name"),
                     new(ReportRun.Gen($"{s.Count}번"), "verdict.count"),
-                    new(ReportRun.Gen($"{TimelineModel.Seconds(s.LongestMinMs)} 이상"), "verdict.longest"),
-                    new(ReportRun.Gen($"{TimelineModel.Seconds((long)Math.Round(s.AverageMinMs))} 이상"), "verdict.average"),
+                    new(ReportRun.Gen($"{TimelineModel.AtLeast(s.LongestMinMs)} 이상"), "verdict.longest"),
+                    new(ReportRun.Gen($"{TimelineModel.AtLeast((long)s.AverageMinMs)} 이상"), "verdict.average"),
                     new(ReportRun.Gen($"{s.OpenEnded}번"), "verdict.open"),
                 ])).ToArray()));
             int partCount = stats.Sum(s => s.Count);

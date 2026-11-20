@@ -557,7 +557,7 @@ public sealed class RecordsScreen : Screen
         texts.Children.Add(sentenceText);
         var sub = new List<string>();
         if (s.Outages is int o) sub.Add(o == 0 ? "끊김 관측 안 됨" : $"끊김 {o}번");
-        if (s.LongestMinMs is long l) sub.Add($"최장 {TimelineModel.Seconds(l)} 이상");
+        if (s.LongestMinMs is long l) sub.Add($"최장 {TimelineModel.AtLeast(l)} 이상");
         if (s.FirstMemo is { } memo) sub.Add(memo);
         if (cannot is not null) sub.Add(cannot);
         var subText = Fonts.Text(string.Join(" · ", sub), Typography.Caption, Ui.Brushes.Muted);
@@ -1335,7 +1335,7 @@ public sealed class RecordsScreen : Screen
         measure.Children.Add(CompareLine("records.compare.grade", "등급", Sentences.GradeName(c.Grade.A), Sentences.GradeName(c.Grade.B), c.Grade.Lower, c.Grade.Suppressed, lowerIsWorse: true));
         measure.Children.Add(CompareLine("records.compare.outages", "끊김 수", $"{c.Outages.A}번", $"{c.Outages.B}번", Lower.None, c.Outages.Suppressed));
         measure.Children.Add(CompareLine("records.compare.perhour", "시간당 끊김", c.PerHour.A is double pa ? $"{pa:0.#}번" : "계산 안 함", c.PerHour.B is double pb ? $"{pb:0.#}번" : "계산 안 함", c.PerHour.Lower, c.PerHour.Suppressed));
-        string L((long MinMs, bool Open)? x) => x is { } v ? $"{TimelineModel.Seconds(v.MinMs)} 이상" + (v.Open ? " (끝을 모름)" : "") : "없음";
+        string L((long MinMs, bool Open)? x) => x is { } v ? $"{TimelineModel.AtLeast(v.MinMs)} 이상" + (v.Open ? " (끝을 모름)" : "") : "없음";
         measure.Children.Add(CompareLine("records.compare.longest", "최장 끊김", L(c.Longest.A), L(c.Longest.B), c.Longest.Lower, c.Longest.Suppressed));
         measure.Children.Add(Fonts.Wrapped("화살표는 표시 임계(시간당 0.5번, 10초, 0.5%p)를 넘은 차이에만 붙습니다. 통계적으로 의미 있는 차이나 회선 개선을 뜻하지 않습니다.", Typography.Caption, Ui.Brushes.Muted));
         var (measureCard, measureBody) = ScreenParts.Card(Ui, "records.compare.measure", "측정 전체", $"{na} · {nb}");
@@ -1350,7 +1350,7 @@ public sealed class RecordsScreen : Screen
             box.Children.Add(Fonts.Text($"{p.A.Target.Name} ({RecordView.MethodText(p.A.Target.Method)})", Typography.Label, Ui.Brushes.Ink));
             string Loss(TargetSide s) => s.LossRate is double rr ? $"{s.Valid}번 중 {s.Lost}번 ({LiveSummary.Percent(rr)})" : "값 없음";
             box.Children.Add(CompareLine($"records.compare.target.{i}.loss", "응답 없음", Loss(p.A), Loss(p.B), p.LossRate, p.LossSuppressed));
-            string Run(TargetSide s) => s.Valid == 0 ? "값 없음" : $"{s.MaxConsecutive}번" + (s.LongestRunMinMs is long ms ? $" · {TimelineModel.Seconds(ms)} 이상" : "") + (s.LongestRunOpen ? " (끝을 모름)" : "");
+            string Run(TargetSide s) => s.Valid == 0 ? "값 없음" : $"{s.MaxConsecutive}번" + (s.LongestRunMinMs is long ms ? $" · {TimelineModel.AtLeast(ms)} 이상" : "") + (s.LongestRunOpen ? " (끝을 모름)" : "");
             box.Children.Add(CompareLine($"records.compare.target.{i}.run", "최대 연속 손실", Run(p.A), Run(p.B), p.Consecutive, p.ConsecutiveSuppressed));
             string Ms(double? x) => x is double v ? PathMapModel.Ms(v) : "값 없음";
             box.Children.Add(CompareLine($"records.compare.target.{i}.latency", "평균 · 최대 지연", $"{Ms(p.A.AvgMs)} · {Ms(p.A.MaxMs)}", $"{Ms(p.B.AvgMs)} · {Ms(p.B.MaxMs)}", Lower.None, "값만"));

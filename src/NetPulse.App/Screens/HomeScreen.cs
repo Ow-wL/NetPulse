@@ -380,7 +380,7 @@ public sealed class HomeScreen : Screen
         grid.Children.Add(texts);
         var right = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         string count = item.Analyzing ? "분석 중" : item.Outages is int o ? $"{o}회" : "";
-        string longest = item.LongestMinMs is long l ? $"최장 {TimelineModel.Seconds(l)} 이상" : item.Outages == 0 ? "끊김" : "";
+        string longest = item.LongestMinMs is long l ? $"최장 {TimelineModel.AtLeast(l)} 이상" : item.Outages == 0 ? "끊김" : "";
         var c = Fonts.Text(count, Typography.Label, Ui.Brushes.Ink);
         c.HorizontalAlignment = HorizontalAlignment.Right;
         right.Children.Add(c);
