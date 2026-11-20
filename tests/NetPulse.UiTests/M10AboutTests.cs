@@ -25,7 +25,7 @@ public sealed class M10AboutTests
     {
         using (var app = OpenSettings())
         {
-            Assert.Equal("1.0.0", Chip(app, "version"));
+            Assert.Equal("0.9.0", Chip(app, "version"));
             Assert.Equal("데모 실행", Chip(app, "build"));                                     // 데모는 캡처가 커밋마다 바뀌지 않게
             Assert.Equal("MIT", Chip(app, "license"));
             Assert.Equal(0, app.Close());
