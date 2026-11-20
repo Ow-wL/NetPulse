@@ -24,6 +24,19 @@ public sealed class M11EditorTests
 
     private static string Value(AppDriver app, string id) => ((System.Windows.Automation.ValuePattern)app.Find(id).GetCurrentPattern(System.Windows.Automation.ValuePattern.Pattern)).Current.Value;
 
+    /// <summary>
+    /// 글 상자 값 넣기(UIA)는 바로 돌아오고 앱의 바뀜 알림은 나중에 온다. 초안을 복사·저장하는 조작 전에는 입력이 초안에 들어갈 때까지 기다린다
+    /// (노트북 게이트 3차: 주소가 들어가기 전에 [새 프로필]을 눌러 빈 복사본이 생겨 저장이 꺼진 채로 남음).
+    /// </summary>
+    private static void Settled(AppDriver app, string what) =>
+        app.WaitDiag(x => Sd(x).GetProperty("errors").GetArrayLength(), n => n == 0, what + " — 입력 반영");
+
+    private static void Rename(AppDriver app, string name)
+    {
+        app.SetText("profile.name", name);
+        app.WaitDiag(x => M5Fixtures.Str(Sd(x), "name"), n => n == name, $"프로필 이름 {name} 반영");
+    }
+
     private static void Save(AppDriver app)
     {
         app.WaitDiag(x => Sd(x).GetProperty("saveEnabled").GetBoolean(), b => b, "저장 켜짐");
@@ -63,6 +76,7 @@ public sealed class M11EditorTests
                 WaitTargets(app, 4, "대상 추가 → 4개");
                 app.SetText("profile.target.3.name", "시험 대상");
                 app.SetText("profile.target.3.address", "198.51.100.77");   // 데모 외부 대상과 겹치지 않는 문서용 주소
+                Settled(app, "시험 대상");
                 app.Invoke("profile.target.3.up");
                 app.WaitDiag(_ => Value(app, "profile.target.2.name"), n => n == "시험 대상", "위로 → 세 번째");
                 Assert.Equal(o[2].Name, Value(app, "profile.target.3.name"));
@@ -77,14 +91,15 @@ public sealed class M11EditorTests
                 WaitTargets(app, 5, "하나 더 → 5개");
                 app.SetText("profile.target.4.name", "지울 대상");
                 app.SetText("profile.target.4.address", "198.51.100.78");
+                Settled(app, "지울 대상");
 
                 // 프로필: 복사(현재가 됨) → "두 번째", 또 복사 → "지울 프로필" (다음 실행에서 지운다)
                 app.Invoke("profile.add");
                 WaitProfiles(app, 2, "프로필 복사 → 2개");
-                app.SetText("profile.name", "두 번째");
+                Rename(app, "두 번째");
                 app.Invoke("profile.add");
                 WaitProfiles(app, 3, "또 복사 → 3개");
-                app.SetText("profile.name", "지울 프로필");
+                Rename(app, "지울 프로필");
                 Save(app);
                 Assert.Equal(0, app.Close());
             }
