@@ -90,7 +90,9 @@ public sealed class M11MatrixTests
     {
         var scene = M5MatrixTests.Scenes(file).Single(s => s.Id == sceneId);
         using var app = M5MatrixTests.Open(scene, extra);
-        if (!sceneId.StartsWith("terms", StringComparison.Ordinal) && !sceneId.StartsWith("about-legal", StringComparison.Ordinal)) app.CloseToasts();
+        // 대화상자 장면은 알림 닫기가 대화상자 단추와 겹치지 않게 그대로 둔다 (M9·M10 매트릭스와 같게)
+        if (!sceneId.StartsWith("terms", StringComparison.Ordinal) && !sceneId.StartsWith("about-legal", StringComparison.Ordinal)
+            && !sceneId.Contains("confirm", StringComparison.Ordinal) && sceneId != "hint-dialog") app.CloseToasts();
         Thread.Sleep(700);
         using var shot = app.CaptureBitmap();
         var path = app.Save(shot, "matrix-" + name);
@@ -101,7 +103,13 @@ public sealed class M11MatrixTests
         Assert.True(problems.Count == 0, string.Join("\n", problems));
         Assert.True(privacy.Count == 0, string.Join("\n", privacy));
         Assert.True(app.ReadLog().All(e => e.GetProperty("kind").GetString() is not ("unhandled" or "renderFailed" or "diagFailed")), "앱 기록에 오류");
-        Assert.Equal(0, app.Close());
+        if (sceneId == "hint-dialog")
+        {
+            // 처음 숨김 안내가 창 닫기를 막고 있다: [측정 멈추고 종료]로 끝낸다 (M9MatrixTests.Finish와 같게, 노트북 게이트 1차의 닫기 시간 초과)
+            app.Invoke("dialog.alternate");
+            Assert.Equal(0, app.WaitExit(TimeSpan.FromSeconds(20)));
+        }
+        else Assert.Equal(0, app.Close());
     }
 
     [Theory, MemberData(nameof(Matrix))]

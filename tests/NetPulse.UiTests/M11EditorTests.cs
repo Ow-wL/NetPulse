@@ -48,7 +48,7 @@ public sealed class M11EditorTests
                 app.Invoke("profile.target.add");
                 WaitTargets(app, 4, "대상 추가 → 4개");
                 app.SetText("profile.target.3.name", "시험 대상");
-                app.SetText("profile.target.3.address", "198.51.100.10");
+                app.SetText("profile.target.3.address", "198.51.100.77");   // 데모 외부 대상과 겹치지 않는 문서용 주소
                 app.Invoke("profile.target.3.up");
                 app.WaitDiag(_ => Value(app, "profile.target.2.name"), n => n == "시험 대상", "위로 → 세 번째");
                 Assert.Equal(original.Targets[2].Name, Value(app, "profile.target.3.name"));
@@ -62,7 +62,7 @@ public sealed class M11EditorTests
                 app.Invoke("profile.target.add");
                 WaitTargets(app, 5, "하나 더 → 5개");
                 app.SetText("profile.target.4.name", "지울 대상");
-                app.SetText("profile.target.4.address", "198.51.100.20");
+                app.SetText("profile.target.4.address", "198.51.100.78");
                 app.Invoke("profile.target.4.remove");
                 WaitTargets(app, 4, "삭제 → 4개");
 
@@ -87,7 +87,7 @@ public sealed class M11EditorTests
             [
                 new(original.Targets[0].Name, original.Targets[0].Address.ToString(), TargetRole.Local, true),
                 new(original.Targets[1].Name, original.Targets[1].Address.ToString(), original.Targets[1].Role, false),
-                new("시험 대상", "198.51.100.10", TargetRole.Local, true),
+                new("시험 대상", "198.51.100.77", TargetRole.Local, true),
                 new(original.Targets[2].Name, original.Targets[2].Address.ToString(), original.Targets[2].Role, true),
             ];
             static Expect[] Of(IEnumerable<Target> ts) => ts.Select(t => new Expect(t.Name, t.Address.ToString(), t.Role, t.Enabled)).ToArray();
@@ -117,7 +117,7 @@ public sealed class M11EditorTests
                 Assert.Equal(0, again.Close());
             }
 
-            // 측정: 기록 머리의 대상 구성이 고른 프로필과 같다
+            // 측정: 기록 머리의 대상 구성이 고른 프로필의 켠 대상과 같다 (기록 머리는 켠 대상만 담는다: Profile.ActiveTargets)
             using (var run = AppDriver.LaunchWith(userData, "--demo", "steady", "--demo-speed", "60", "--start"))
             {
                 run.WaitDiag(x => x.GetProperty("rounds").GetInt32(), r => r >= 3, "3회차");
@@ -126,8 +126,8 @@ public sealed class M11EditorTests
                 run.WaitDiag(x => x.GetProperty("finished").ValueKind == JsonValueKind.Object, b => b, "멈춤");
                 Assert.Equal(0, run.Close());
                 var record = RecordReader.Read(RecordReader.FindSegments(session, M5Fixtures.RecordRoots(userData)));
-                Assert.Equal(expected, Of(record.Header!.Targets));
-                Assert.Equal(second.Targets.Select(t => t.Id), record.Header.Targets.Select(t => t.Id));
+                Assert.Equal(expected.Where(e => e.Enabled).ToArray(), Of(record.Header!.Targets));
+                Assert.Equal(second.Targets.Where(t => t.Enabled).Select(t => t.Id), record.Header.Targets.Select(t => t.Id));
             }
         }
         finally { AppDriver.DeleteUserData(userData); }
