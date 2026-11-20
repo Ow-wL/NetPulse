@@ -130,12 +130,21 @@ if (Test-Path $g5Dir) {
     $required += @('bench-legal')
     $required += @('matrix-m10-terms-hc-aquatic', 'matrix-m10-terms-hc-desert', 'matrix-m10-about-legal-expanded-hc-aquatic', 'matrix-m10-about-legal-expanded-hc-desert')
     $required += @('matrix-m10-terms-dark-reduced', 'matrix-m10-about-legal-expanded-light-reduced', 'matrix-m10-terms-light-reducedmotion', 'matrix-m10-about-legal-expanded-dark-reducedmotion')
+    # M11 (설계 C1·B4): 새 기본 장면 × 테마 × 배율, 장면 포함표의 추가 장면(이름은 M11MatrixTests의 Extras에서 읽는다), 전환 프레임, 동의 포함 첫 측정
+    $m11Ids = @(Get-Content (Join-Path $root 'tests\NetPulse.UiTests\m11-scenes.txt') -Encoding UTF8 | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | ForEach-Object { ($_ -split '\|')[0] })
+    foreach ($id in $m11Ids) { foreach ($t in 'dark', 'light') { foreach ($s in '100', '150') { $required += "matrix-m11-$id-$t-$s" } } }
+    $m11Extras = @([regex]::Matches((Get-Content (Join-Path $root 'tests\NetPulse.UiTests\M11MatrixTests.cs') -Encoding UTF8 -Raw), '\{ "(m11-[a-z0-9-]+)", "m') | ForEach-Object { $_.Groups[1].Value })
+    if ($m11Extras.Count -eq 0) { throw 'M11 추가 장면 목록을 읽지 못했습니다.' }
+    foreach ($n in $m11Extras) { $required += "matrix-$n" }
+    foreach ($k in 'settings', 'consent') { foreach ($p in '0', '0.5', '1') { $required += "matrix-m11-transition-$k-$p" } }
+    $required += @('flow-first-measurement-with-consent')
+    foreach ($c in 'measure-live', 'measure-outage', 'firstrun-detected', 'profile-ok', 'settings-normal', 'terms') { foreach ($t in 'dark', 'light') { $required += "contrast-m11-$c-$t" } }   # 설계 C2
     $missing = @($required | Where-Object { -not (Test-Path (Join-Path $g5Dir "$_.json")) })
     $matrix = @(Get-ChildItem $g5Dir -Filter 'matrix-*.json' | Sort-Object Name)
     # M2 회귀 매트릭스는 따로 센다: M5 결과가 합쳐져 M2 캡처 누락을 가리지 않게 (G4 M5 1라운드 C3)
     # M6 결과도 M2 수에 섞이지 않게 뺀다
     # M10 결과도 M2 수에 섞이지 않게 뺀다 ([2-8])
-    $m2Matrix = @($matrix | Where-Object { -not $_.Name.StartsWith('matrix-m5-') -and -not $_.Name.StartsWith('matrix-m6-') -and -not $_.Name.StartsWith('matrix-m7-') -and -not $_.Name.StartsWith('matrix-m8-') -and -not $_.Name.StartsWith('matrix-m9-') -and -not $_.Name.StartsWith('matrix-m10-') })
+    $m2Matrix = @($matrix | Where-Object { -not $_.Name.StartsWith('matrix-m5-') -and -not $_.Name.StartsWith('matrix-m6-') -and -not $_.Name.StartsWith('matrix-m7-') -and -not $_.Name.StartsWith('matrix-m8-') -and -not $_.Name.StartsWith('matrix-m9-') -and -not $_.Name.StartsWith('matrix-m10-') -and -not $_.Name.StartsWith('matrix-m11-') })
     $captures = @(Get-ChildItem $env:NETPULSE_UITEST_OUT -Filter *.png | Sort-Object Name | ForEach-Object { [ordered]@{ file = "ui/captures/$($_.Name)"; sha256 = Get-Sha256Text $_.FullName } })
     $bench = & $read 'bench'
     $g5 = [ordered]@{
@@ -153,6 +162,8 @@ if (Test-Path $g5Dir) {
         m7Scenes       = $m7Ids.Count
         m8Scenes       = $m8Ids.Count
         m10Scenes      = $m10Ids.Count
+        m11Scenes      = $m11Ids.Count
+        m11Extras      = $m11Extras.Count
         benchLegal     = & $read 'bench-legal' 
         flowReport     = & $read 'flow-report'
         benchReport    = & $read 'bench-report'
