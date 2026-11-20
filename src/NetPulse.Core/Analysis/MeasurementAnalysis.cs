@@ -343,7 +343,7 @@ public static class Sentences
             "undecidable" => "경로가 바뀌었거나 근거가 엇갈려 끊김의 원인을 판단할 수 없는 경우가 많습니다.",
             "link-down" => $"이 PC의 네트워크 연결(링크)이 끊긴 것이 {link.Count}번 관측됐습니다.",
             "outage-many" => $"인터넷 연결이 {outage.Count}번 끊긴 것으로 보입니다 (최장 {Seconds(outage.LongestMinMs)} 이상).",
-            "outage-long" => $"인터넷 연결이 {Seconds(outage.LongestMinMs)} 이상 끊긴 것으로 보이는 때가 있습니다.",
+            "outage-long" => $"인터넷이 {Seconds(outage.LongestMinMs)} 이상 끊긴 것으로 보입니다.",   // 기록 목록 한 줄에 들어가게 짧게 (노트북 게이트 2차 1.5배 글자 잘림)
             "external-loss-high" => $"외부 대상의 응답 손실이 {Pct(c.ExternalLossRate)}%로 많습니다.",
             "outage" => $"인터넷 연결이 {outage.Count}번 끊긴 것으로 보입니다 (최장 {Seconds(outage.LongestMinMs)} 이상).",
             "external-loss" => $"외부 대상의 응답 손실이 {Pct(c.ExternalLossRate)}%입니다.",

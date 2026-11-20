@@ -1717,3 +1717,11 @@ M10 뒤로 넘긴 것 (손대지 않음):
   - `m11-hint-dialog-*` 2건: 처음 숨김 안내가 창 닫기를 막아 닫기 시간 초과. M9 매트릭스처럼 [측정 멈추고 종료]로 끝내게 고쳤다.
   - `M11EditorTests`: 기록 머리는 켠 대상만 담는다(`Profile.ActiveTargets`). 시험 기대를 켠 대상으로 고치고, 시험 대상 주소가 데모 외부 대상(198.51.100.10)과 겹쳐 다른 문서용 주소로 바꿨다.
   - `KeyboardTests.KeyboardAloneSetsReportOptionsAndExports`: 내보낸 뒤 초점이 `report.mask.masked`에 있었다. 데스크톱 M10 게이트에서는 통과했다. 노트북 타이밍으로 보고 데스크톱에서 같은 시험이 실패하는지로 가린다 (노트북 게이트 도구 안내와 같은 기준).
+
+## 2026-11-21 · M11 노트북 게이트 2차 (`049716c`, 중간 확인, 증거 아님)
+
+- 889/901. 1차의 첫 실행 IPv4 없음·숨김 안내·편집기 실패는 모두 풀렸고, G5 장면 누락 0. 노트북 환경 기준 실패 5건(성능 예산)은 무시한다.
+- 그 외 7건과 처리:
+  - `M7MatrixTests` 기록 목록·비교 고르기 1.5배 4건: 글자 잘림 "인터넷 연결이 59초 이상 끊긴 것으로 보이는 때가 있습니다." 문구 수정(`79e4d03`)으로 한 줄 요약이 길어졌다(목록 줄은 말줄임 한 줄). 원래 문구보다 짧은 "인터넷이 {시간} 이상 끊긴 것으로 보입니다."로 고쳤다. 단정하지 않는다는 점검 의도는 그대로다.
+  - `KeyboardTests.KeyboardAloneSetsReportOptionsAndExports`: 이번에는 내보내기까지 통과한 뒤 닫을 때 0xC000027B (WER: combase.dll `80000013` RO_E_CLOSED, 이벤트: Microsoft.UI.Xaml.dll 3.3.0.0). 앱 기록은 `closeStep close`까지 정상. M7부터 계측 중인 드문 닫기 충돌과 같은 모양이다(STATE "M7 4 닫기 0xC000027B"). M11 변경과 관련 없는 기존 관찰로 보고, 데스크톱 게이트에서 다시 나는지 본다.
+  - `M6FlowTests.EnterWhileASiteCheckRunsKeepsThatChecksBaseline`, `KeyboardTests.KeyboardAloneOpensARecordGoesBackAndCompares`: 노트북 게이트 도구가 안내한 노트북 타이밍 시험. 데스크톱 게이트에서 가린다.
