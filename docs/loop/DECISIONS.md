@@ -1623,3 +1623,20 @@ M9 병합(`3ed5671`) 뒤 M10 설계 전에 코드를 조사하고 사용자에�
 | README 캡처 | `build/readme-shots.ps1`(507b98ac62 배포 exe)로 8장을 찍어 7장을 골랐다(동의 화면은 뺌). PNG는 장당 470~645 KB라 WebP로 저장: 무손실 5장(276~394 KB), 무손실이 400 KB를 넘는 홈·라이트 홈은 손실 95 품질(85~92 KB). 256색 줄이기는 색(증상 표시 노랑)·배경이 깨져 쓰지 않았다. 홈 밖 화면에는 사이드바 [홈]의 키보드 초점 테두리가 보인다(앱 기본 초점, 그대로 둠) |
 
 - 결과(디버그, 작업 트리): M10TermsTests 10, M10AboutTests 4, M9GapTests 5, M9SettingsTests 9, M10MatrixTests 44 모두 통과. 단위 Core 532·Design 136·Platform 44 통과. 전체 시험은 게이트에서.
+
+## 2026-11-20 · M10 G4 1~4라운드와 게이트 (`b33f098` → `35f8f65` → `75203c9` → `1e73d6a`)
+
+| 라운드 | 판정 | 지적 | Claude 판정과 고침 |
+| --- | --- | --- | --- |
+| 1a (배포·스크립트) | REVISE | 차단 1·중요 4·사소 1 | 모두 수용 (`35f8f65`). a1 공개 전 검사가 '+++'를 두 함수에서 다르게 걸러 '++…' 내용 한 줄에 경로가 어긋났다(뒤 파일의 이메일이 예외 파일 소속으로) → diff 한 번 훑기 `Get-AddedEntries`, 자체 시험(`-SelfTest`, 빌드에서 돈다). a2 출처별 라이선스 원문 강제 없음(EventLog는 THIRD-PARTY-NOTICES만) → LICENSE* 또는 build/notices 필수, EventLog는 nuspec MIT일 때 같은 dotnet/runtime 런타임 팩 LICENSE.TXT를 명시해 싣는다. a3·a4 Test-Release가 커밋 Version·exe 버전·기록 개수를 보지 않음 → `Get-CommitVersion`, exe 제품 버전 = 버전+커밋, 파일 기록 3개·zip 기록 5개 이름별 대조 (변조 3종 거절 확인). a5 비ASCII 대소문자 → 대·소문자 표기 추가(2라운드에서 다시). a6 ui-test 추출 폴더 정리 범위 |
+| 1b (앱·시험) | REVISE | 차단 1·중요 2·사소 1 | 모두 수용. b1 동의→셸 전환 직전 큐에 넣은 두 번째 실행 작업이 닫힌 동의 창을 다룰 수 있었다 → `RouteInstance`: 서버 스레드는 UI 큐에 넣기만, 실행할 때 그때의 처리기 (경쟁 UI 시험 4회). b2 고지 프레임 측정 구독이 숨김 정리·구독 수에 없음 → 설정 화면 `OnSuspend`·`FrameHooks` (UI 시험). b3 옮기기 경쟁 시험이 옛 완료 처리 전에 통과 가능 → 버림 횟수·`detailListed` 진단, 시험이 버림 뒤를 본다. b4 주입 거절 조합·종료 코드 64 |
+| 2 | REVISE | 중요 2 | 수용 (`75203c9`). a5 혼합 대소문자(비ASCII 두 글자를 서로 다른 방향) 누락 → 바이트를 UTF-8·UTF-16LE(짝수·홀수 시작)로 풀어 유니코드 `OrdinalIgnoreCase` (묶음 입력 459개 12.3초). 셸 `OnInstanceCommand` 큐 예외·`BeginClose` 예외 미관찰 → try/catch, 종료 코드 70 |
+| 3 (마지막) | REVISE | 중요 3, 차단 0 | 수용 (`1e73d6a`). `BeginClose` 보호 범위가 첫 await 앞·정리 단계를 덮지 않음 → 본문 전체 try, 정리 단계마다 받고 마지막 창 닫기는 반드시. 기록 실패가 답·종료 코드를 막을 수 있음 → 답·종료 코드를 먼저, `AppLog`는 권한 오류도 삼킨다. `WhenAny`가 종료 작업 실패를 넘기지 않음 → 끝난 작업은 await, 한도 뒤 남은 작업에는 실패 관찰 |
+| 4 (사용자 승인 예외, "4라운드 진행") | APPROVE | 0 | `1e73d6a` 승인. 세 지적 해소, 정상 종료 순서 유지 확인. 한계로 적음: 한도 뒤 남은 종료 작업의 실패 관찰은 프로세스가 살아 있는 동안만 (코드 판단, 재현 아님) |
+
+- 3라운드가 REVISE여서 사용자에게 물어 4라운드를 예외로 했다 (M9와 같은 방식, 머리 세 줄은 손으로 확인하고 `-Gate` 없이 호출).
+- 3라운드 고침 뒤 확인: 단위 Core 532·Design 136·Platform 44, UI(디버그) M9ResidentTests 12·M10TermsTests 11·M9SettingsTests 9. 닫기 예외를 주입하는 시험은 없다.
+- 깨끗한 클론 (`tools/loop/clean-clone.ps1 -Commit 75203c9`): 통과 2.4분, 1.0.0, zip 69,147,571 B·exe 183,355,791 B. 저장소 빌드와 바이트는 다르다(요구 아님).
+- 게이트 첫 실행 (`1e73d6a`, 사용자 부재, 재부팅 없이): `build/build.ps1 -Gate` 통과(evidence true). 배포 exe UI 시험 834건 실패 0·통과 832·건너뜀 2 — 실제 클립보드 시험 2건(`M6FlowTests.CopyPutsExactlyTheCopyTextOnTheRealClipboard`, `M7FlowTests.EpisodeDetailCopiesExactlyAndMovesTheTimeline`)이 클립보드의 이미지 형식 때문에 덮어쓰지 않고 건너뜀(형식 번호만 확인, 내용은 읽지 않음). 그때 전경은 사용자 앱이었다.
+- 게이트 두 번째 실행 (4라운드 승인 뒤, 사용자가 클립보드에 글을 넣고 PC를 비움): UI 시험 834/834, G5 통과(누락 0, 매트릭스 646, M2 44). 고지 bench 30.2 ms·33 ms 초과 1회. STATE "지난 마일스톤의 게이트 (M10)".
+- 깨끗한 클론 `1e73d6a`: 통과.

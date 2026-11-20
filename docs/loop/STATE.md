@@ -7,14 +7,30 @@
 | 항목 | 값 |
 | --- | --- |
 | 마일스톤 | M10 릴리스 준비 |
-| 단계 | 구현 1·2차 커밋(`54a2c73`, `f8db2c7`), 단위 시험 통과 → M10·D3 UI 시험(디버그) 남음 (사용자가 PC를 쓸 때는 돌리지 않음) |
+| 단계 | 게이트 통과(승인 코드 `1e73d6a`) → 마감 스크립트로 푸시·PR, 사용자 병합 대기 |
 | 브랜치 | `loop/m10-release` (`main` `3ed5671` = M9 병합 위) |
 | 설계 검토 라운드 | 2 / 2 (1라운드 `bd63244` REVISE 높음 3·중간 8·낮음 1 → 2판, 2라운드 `755ad84` REVISE 차단 3·구현 중 결정 6 → 3판, Claude 판정) |
-| diff 리뷰 라운드 | 0 / 3 |
+| diff 리뷰 라운드 | 4 / 3 (1라운드 a·b REVISE 차단 2 → 2라운드 REVISE 중요 2 → 3라운드 REVISE 중요 3 → 4라운드 APPROVE, 4라운드는 사용자 승인 예외) |
 | 누적 실패 | 0 / 8 |
-| PR | 없음 (G4 승인 뒤 마감 스크립트가 만든다) |
+| PR | 마감 스크립트가 만든다 (이 커밋 뒤) |
 | M9 | 끝: PR Ow-wL/NetPulse#5 사용자 병합 (`3ed5671`). G4 4라운드(사용자 승인 예외) APPROVE, 승인 코드 `762addc` |
 | M10 범위 (사용자 결정) | 버전 1.0.0, MIT(저작권자 Ow-wL), zip 하나 + Release에 exe 따로, AI·ML 구성요소 빼서 크기 줄이기, M9 이월 모두 (DECISIONS "M10 범위") |
+
+## 지난 마일스톤의 게이트 (M10, 2026-11-20)
+
+| 항목 | 값 |
+| --- | --- |
+| 승인받은 코드 커밋 X | `1e73d6a5136f27f07dea10b43facc86fdeeada3a` (G4 4라운드 승인, 사용자 승인 예외) |
+| G1·G2 | `build/build.ps1 -Gate`: Core 532/532, Design 136/136, Platform 44/44, 미실행 0. 고지 일치(구성요소 10개), 공개 전 검사·이진 검사 자체 시험, 이진 금지 값 0건, 결정적 zip, `Test-Release` 통과 |
+| 배포 파일 | `NetPulse-1.0.0-win-x64.zip` 69,146,101 B, `NetPulse-1.0.0-win-x64.exe` 183,347,599 B (M9 245 MB에서 줄임), 묶음 입력 459개 |
+| G3·G5 | `build/ui-test.ps1`: 배포 exe UI 시험 834/834 (`Kind=Live`·`Kind=Docs` 제외, 두 번째 실행. 첫 실행은 사용자 부재로 클립보드 준비를 못 해 클립보드 시험 2건이 건너뜀, 실패 0). G5 통과, 필수 누락 0, 매트릭스 646 (M2 44), 장면 M5 30·M6 26·M7 29·M8 17·M10 9. 재부팅 없이 |
+| 고지 bench | 가장 긴 원문(33만 자) 첫 배치 30.2 ms, 펼친 뒤 1초 최대 33.5 ms·33 ms 초과 1회 (기준 50 ms·2회) |
+| 측정·리포트·기록 bench | nav 최대 34.4 ms·1회, 리포트 scroll 38.2 ms·1회, worst 61.9 ms·1회, 기록 open 38.6 ms·1회 |
+| M2 전환 bench | 전환 최대 25.2 ms, aurora 25.4 ms (기준 50 ms) |
+| 깨끗한 클론 | `tools/loop/clean-clone.ps1 -Commit 1e73d6a` 통과 (바이트 재현은 요구 아님) |
+| 실측 | `M9LiveRunTests` 사용자 입회 통과, 풍선은 사용자가 봤다 (트레이 메뉴 고르기는 시험 도구로 무시돼 `--exit`로 대신, DECISIONS) |
+| G4 | `.loop/reviews/m10-g4-r4-answer.md` APPROVE (차단·중요·사소 0) |
+| manifest.json SHA-256 | `31FDF2A2975A8BD6F75A53087347D26B060BA7A100F558D32D107860D8BDB4FC` |
 
 **저장소 이전 (2026-11-14, `DECISIONS.md` "공개 저장소 이전")**: 공개 저장소 `Ow-wL/NetPulse`는 이력을 다시 쓴 새 저장소다. 아래 M0~M4 기록의 SHA·PR 번호는 옛 저장소(`Ow-wL/NetPulse-private`, 비공개) 기준이다.
 
