@@ -1757,3 +1757,10 @@ M10 뒤로 넘긴 것 (손대지 않음):
 - 896/901. 노트북 환경 기준 실패 4건(성능 예산: G5 idle, M5G5, M7G5, M8G5)은 무시한다. G5 누락 0.
 - `M11EditorTests`와 대비 시험 12개, 3차에서 실패한 `M9ResidentTests` 풍선 시험은 통과했다.
 - 그 외 1건: `KeyboardTests.KeyboardAloneOpensARecordGoesBackAndCompares` (노트북 타이밍 시험, 2차에도 나옴). 데스크톱 게이트에서 가린다.
+
+## 2026-11-21 · M11 G4 3라운드 (`ea683f9`, APPROVE: 차단 0·중요 0·사소 1)
+
+- 승인 코드 X = `ea683f92e863f1a7a6fbf9ffef7813ad394189b7`. 원문: `.loop/reviews/m11-g4-r3-*.md`.
+- 2라운드 지적(대비 실측 근거)의 정정이 코드와 맞다고 확인받았다. 1·2라운드에서 해소로 본 항목이 다시 깨지지 않았다.
+- 사소 1건: 대비 시험 주석의 "정보 칩(옅은 채움 위 Ink)"은 `StatusChip` 구성이고 `ScreenParts.InfoChip`은 컨트롤 유리 위 Muted 라벨·Ink 값이다. 라운드 상한에 닿았고 승인 뒤 코드를 바꾸면 게이트를 다시 돌아야 하므로 M12로 넘겨 STATE 미해결 지적(M11)에 적었다.
+- 다음: 데스크톱 최종 게이트를 X로 돈다(사용자 허락 뒤, 클립보드 준비·PC 비움).
