@@ -91,7 +91,7 @@ M11 설계 A·C·D·E·G (`docs/loop/M11-design.md` 3판). 기획서 1절 "루�
 | 대비 실측 (화면 화소) | 22개 실측 파일, 요소 76개: 유리 4층 표본(다크·라이트 각 7), M5~M8 지정 장면(홈·진단·기록·리포트), M11 C2 장면 6개 × 다크·라이트의 화면 머리·카드 머리 글. **없는 것**: 위 "대비 실측 추가"의 단추·칩·배너·카드 본문 글 (M12) | 모두 기준 통과, 가장 낮은 값 5.91:1 (다크 컨트롤 유리 위 Muted) |
 | 원본 시각 검토 (사람 눈 대신 Claude와 하위 에이전트 5개) | 화면별 접촉 시트 55장(캡처 763장 전부, `artifacts/ea683f92e8/review/`)을 모두 봄. 원본은 M5~M11 제품 화면의 상태마다 다크 150% 1장과 대체 모드(고대비·투명 끔·움직임 끔·고대비 150%) 캡처 전부를 원래 크기로 열었다. M2 부품 전시 44장과 G5 표본·아이콘·전환 프레임은 대부분 시트로만 봤다(`c3-e.md`). 묶음별 원본 약 76·61·45·41·47장. 시트로만 본 캡처는 작은 글자 잘림을 놓쳤을 수 있다 | 아래 결함 목록. 결함 후보는 Claude가 원본으로 다시 보고 0.9.0 게이트 캡처(`5c30ef2`)와 비교했다 |
 
-**0.9.0과 비교**: 결함 후보 장면을 0.9.0 게이트 캡처(같은 장면·테마·배율)와 비교했다. 화소까지 같은 것은 `profile-ok`·`pending-diagnose`(4장 모두)와 `records-detail-trend-sparse` 다크 100%뿐이다. 나머지는 측정 시각·데이터·바꾼 문구 때문에 화소가 달라서, 결함 자리를 잘라 나란히 놓고 눈으로 비교했다(`profile-tcp-port-error`, `records-detail-trend-sparse` 150%, `records-list-problems` 150%, `report-exported`·`report-exporting` 150%, `home-measuring`, `about-legal-expanded`, `diagnose-site-running`, `m7-measure-finished-link` — 마지막은 화소까지 같음). 아래 결함은 따로 적은 두 가지(측정 끝 타임라인, 포트 칸 잘림)를 빼면 **0.9.0 캡처에도 같은 자리에 있다**.
+**0.9.0과 비교**: 결함 후보 장면을 0.9.0 게이트 캡처(같은 장면·테마·배율)와 비교했다. 화소까지 같은 것은 `profile-ok`·`pending-diagnose`(4장 모두), `records-detail-trend-sparse` 다크 100%, `m7-measure-finished-link` 다크 100%뿐이다. 나머지는 측정 시각·데이터·바꾼 문구 때문에 화소가 달라서, 결함 자리를 잘라 나란히 놓고 눈으로 비교했다(`profile-tcp-port-error`, `records-detail-trend-sparse` 150%, `records-list-problems` 150%, `report-exported`·`report-exporting` 150%, `home-measuring`, `about-legal-expanded`, `diagnose-site-running`). 아래 결함은 따로 적은 두 가지(측정 끝 타임라인, 포트 칸 잘림)를 빼면 **0.9.0 캡처에도 같은 자리에 있다**.
 
 | 화면 | 결함 | 구분 | 처리 |
 | --- | --- | --- | --- |
