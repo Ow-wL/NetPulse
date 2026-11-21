@@ -14,8 +14,11 @@ namespace NetPulse.UiTests;
 /// 측정 요소는 장면에 있는 화면 머리(제목·위 글)와 카드(제목·작은 글) 전부 — 놓인 유리 단계가 다르므로 요소마다 따로.
 /// 기준: 4.5 (본문 글자, M2 토큰 기준). 제목·카드 제목은 Ink, 위 글·카드 작은 글은 Muted.
 /// 장면마다 꼭 재야 하는 요소를 <see cref="Required"/>로 고정한다: 빠지면 실패 (M11 G4 1라운드, 개수 하한만으로는 카드 누락을 못 잡음).
-/// 본문 글은 같은 카드 유리 위의 Ink·Muted라 카드 제목·작은 글 측정이 대신하고, 단추·정보 칩·배너 글은 자기 채움 위라
-/// 토큰 대비 시험(Design ContrastMatrixTests)과 부품 전시 실측(G5Tests 대비 장면)이 본다 (DECISIONS "M11 G4 1라운드").
+/// 이 시험이 재지 않는 것 (DECISIONS "M11 G4 2라운드", 실제 화면 실측은 M12 과제):
+/// - 단추(강조 채움 위 AccentInk, 컨트롤 유리 위 Ink)·정보 칩(옅은 채움 위 Ink)·배너(내용 유리 위 Ink) 글은 토큰 계산(Design ContrastMatrixTests)만 있다.
+///   부품 전시 실측(G5Tests 대비 장면)은 유리 4층 위의 Ink·Muted 표본 7개만 재고 실제 부품은 재지 않는다.
+/// - 카드 본문 글은 화면에서 재지 않는다. 작은 글이 있는 카드(profile.targets.note, settings.appearance.note)만 그 카드 유리 위 Muted를 재고,
+///   그런 글이 없는 카드(예: 측정 타임라인의 범위 글 measure.timeline.range)는 토큰 계산만 있다.
 /// </summary>
 public sealed class M11ContrastTests
 {
