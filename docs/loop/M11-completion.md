@@ -21,11 +21,11 @@ M11 설계 A·C·D·E·G (`docs/loop/M11-design.md` 3판). 기획서 1절 "루�
 | F5 끊김 분석 | 원인 구간 후보 (단정하지 않음) | M4·M7 | `AnalysisTests`(예: ExternalOutageWithRouterUpPointsAfterRouter), `M7FlowTests.AFinishedMeasurementReopensWithTheSameValuesBeforeAndAfterRestart` | 증거 있음 | 최종 게이트 | **증명됨** |
 | F6 결과 비교 | 두 측정 비교 (대상 대응, 비교 조건, 화살표 규칙) | M7 | `M7ComparisonTests`, `M7FlowTests.ComparisonMatchesCoreAndMismatchedConditionsSuppressArrows` | 증거 있음 | 최종 게이트 | **증명됨** |
 | F7 보조 | DNS 캐시 비우기(확인 후), **Windows 설정 열기**, 결과 폴더 열기 | M6 | 비우기 `M6FlowTests.Flush*`, 폴더 `RecordFolderOpensTheMeasurementSegmentWhileMeasuringOtherwiseTheRoot`. 설정 열기는 단추가 있는지만 (`M6FlowTests.cs:124`) | **미검증 (설정 열기)** | B1: 단추를 눌러 데모 호출 기록(`settings:`) 단언 | **증명됨** (B1 `M6FlowTests.SettingsButtonsOpenTheMatchingWindowsSettingsPageOnce`: 데모 호출 기록이 그 대상·한 번. 실제 설정 창은 열지 않음) |
-| R1 대상 탐지·설정 | 첫 실행에 게이트웨이를 찾아 구성 제안, 대상 추가·수정·삭제·순서, 측정 프로필 | M3·M5 | `ProfileDetectionTests`, `M5FlowTests.EditorBlocksInvalidChangesAndIsReadOnlyWhileMeasuring`, FirstRunToStop(이름·시간 수정). 대상 삭제는 취소로 되돌리는 시험만 | **미검증 (추가·삭제·순서·사용·역할, 프로필 추가·삭제·선택, 다시 탐지의 저장·재시작·기록 머리)** | B2 | **증명됨** (B2 `M11EditorTests.EditorChangesAreSavedSurviveARestartAndReachTheRecordHeader`) |
+| R1 대상 탐지·설정 | 첫 실행에 게이트웨이를 찾아 구성 제안, 대상 추가·수정·삭제·순서, 측정 프로필 | M3·M5 | `DetectionTests`, `M5FlowTests.EditorBlocksInvalidChangesAndIsReadOnlyWhileMeasuring`, FirstRunToStop(이름·시간 수정). 대상 삭제는 취소로 되돌리는 시험만 | **미검증 (추가·삭제·순서·사용·역할, 프로필 추가·삭제·선택, 다시 탐지의 저장·재시작·기록 머리)** | B2 | **증명됨** (B2 `M11EditorTests.EditorChangesAreSavedSurviveARestartAndReachTheRecordHeader`) |
 | R2 어댑터 범용 링크 근거 | 드라이버에 의존하지 않음, 유선과 Wi‑Fi, 상태 네 가지(미지원·접근 거부·이벤트 없음·끊김 관측)를 정상으로 보지 않음 | M4 | 유선: `EvidenceTests`, `SessionLinkTests`, `M4IntegrationTests.RealSessionKeepsLinkEvidenceThroughFiles`, `docs/loop/m4/pc-measurement.md`. Wi‑Fi 해석 시험 없음 | 유선 증거 있음 / **미검증 (Wi‑Fi 해석)** / **미검증 (Wi‑Fi 하드웨어)** | B3 (해석, 설계 "B3 계약"), 하드웨어는 인수 8 | 유선 **증명됨**, Wi‑Fi 해석 **증명됨** (B3 `M11WlanTests` 6개, 계약 표) / Wi‑Fi 하드웨어 **미검증** → 인수 8 |
 | R3 리포트 | N6과 같음 | M8 | N6 | 증거 있음 | 최종 게이트 | **증명됨** |
-| R4 테스트·CI·버전·배포·README | | M1·M10 | CI(`.github/workflows/ci.yml`, UI 시험 제외), `M10AboutTests.AboutCardShowsVersionBuildAndLicense`, `tools/loop/clean-clone.ps1`, README | 증거 있음 | 최종 X에서 CI·깨끗한 클론 | **증명됨** (깨끗한 클론 `ea683f9` 통과. CI는 M11 PR에서) |
-| R5 범용 사용 환경 | 저장 위치 대체, 손상 기록, 절전 복귀, 150%, 키보드, IPv4 경로 없음 안내 | M2·M3·M9 | `UnwritableFolderFallsBack`, `RecordMoverTests`, `HiddenSleepGapIsShownOnReopenWithoutADropoutBalloon`, `KeyboardTests`, `RoundTripWorksWhenTheFirstRunFindsNoIpv4Route`, 매트릭스 1.5 | 증거 있음 / **한계 (150%는 `--ui-scale` 시뮬레이션)** | 최종 게이트, 인수 4 | **증명됨** / **한계** (150%는 시뮬레이션) → 인수 4 |
+| R4 테스트·CI·버전·배포·README | | M1·M10 | CI(`.github/workflows/ci.yml`, UI 시험 제외), `M10AboutTests.AboutCardShowsVersionBuildAndLicense`, `tools/loop/clean-clone.ps1`, README | 증거 있음 | 최종 X에서 CI·깨끗한 클론 | 로컬 **증명됨** (최종 게이트 단위 시험, 깨끗한 클론 `ea683f9` 통과) / 최종 CI **미검증** (M11 PR에서 돈다) |
+| R5 범용 사용 환경 | 저장 위치 대체, 손상 기록, 절전 복귀, 150%, 키보드, IPv4 경로 없음 안내 | M2·M3·M9 | `UnwritableFolderFallsBack`, `M9RecordMoveTests`·`M9MoveServiceTests`, `HiddenSleepGapIsShownOnReopenWithoutADropoutBalloon`, `KeyboardTests`, `RoundTripWorksWhenTheFirstRunFindsNoIpv4Route`, 매트릭스 1.5 | 증거 있음 / **한계 (150%는 `--ui-scale` 시뮬레이션)** | 최종 게이트, 인수 4 | **증명됨** / **한계** (150%는 시뮬레이션) → 인수 4 |
 | N1 겹침 타임라인 | 확대·이동, 손실 띠, 증상, 링크 마커 | M5·M7 | `M5ModelTests`, `M5FlowTests.TimelineZoomsPansAndReturnsToNow`, `KeyboardTests.ClickingAnOutageOnTheTimelineOpensThatEpisodeRow`, 장면 `measure-linkdrop` | 증거 있음 | 최종 게이트 | **증명됨** |
 | N2 등급 | "관측 부족"·"판단 불가" 포함, 근거 없이 좋은 등급 없음 | M4 | `AnalysisTests`(CleanMeasurementIsGood, MostlyErrorsIsInsufficientNotGood, UndecidableWhenHoldsDominate, ManySkippedRoundsAreLowCoverage) | 증거 있음 | 최종 게이트 | **증명됨** |
 | N3 끊김 목록·통계 | | M4·M7 | `AnalysisTests.EpisodesBreakOnGapAndHaveOpenEnds`, `M7FlowTests.ListRowsMatchTheCatalog…` | 증거 있음 | 최종 게이트 | **증명됨** |
@@ -89,28 +89,31 @@ M11 설계 A·C·D·E·G (`docs/loop/M11-design.md` 3판). 기획서 1절 "루�
 | --- | --- | --- |
 | 배치 검사 (잘림·글자 잘림·겹침, `diag.layout`) | 매트릭스 장면 캡처 633장 (M5~M11 기본 장면과 추가 장면, 대체 모드 포함). **없는 것**: 전환 프레임 21장, M2 부품 전시 44장, G5 표본·키보드·아이콘·리포트 출력 캡처 | 633장 모두 위반 0 (장면 기록의 `layoutProblems`) |
 | 대비 실측 (화면 화소) | 22개 실측 파일, 요소 76개: 유리 4층 표본(다크·라이트 각 7), M5~M8 지정 장면(홈·진단·기록·리포트), M11 C2 장면 6개 × 다크·라이트의 화면 머리·카드 머리 글. **없는 것**: 위 "대비 실측 추가"의 단추·칩·배너·카드 본문 글 (M12) | 모두 기준 통과, 가장 낮은 값 5.91:1 (다크 컨트롤 유리 위 Muted) |
-| 원본 시각 검토 (사람 눈 대신 Claude와 하위 에이전트 5개) | 화면별 접촉 시트 55장(캡처 763장 전부, `artifacts/ea683f92e8/review/`)을 모두 봄. 원본은 상태마다 다크 150% 1장과 대체 모드(고대비·투명 끔·움직임 끔·고대비 150%) 캡처 전부를 원래 크기로 열었다. 묶음별 원본 약 76·61·45·41·47장. 시트로만 본 캡처는 작은 글자 잘림을 놓쳤을 수 있다 | 아래 결함 목록. 결함 후보는 Claude가 원본으로 다시 보고 0.9.0 게이트 캡처(`5c30ef2`)와 비교했다 |
+| 원본 시각 검토 (사람 눈 대신 Claude와 하위 에이전트 5개) | 화면별 접촉 시트 55장(캡처 763장 전부, `artifacts/ea683f92e8/review/`)을 모두 봄. 원본은 M5~M11 제품 화면의 상태마다 다크 150% 1장과 대체 모드(고대비·투명 끔·움직임 끔·고대비 150%) 캡처 전부를 원래 크기로 열었다. M2 부품 전시 44장과 G5 표본·아이콘·전환 프레임은 대부분 시트로만 봤다(`c3-e.md`). 묶음별 원본 약 76·61·45·41·47장. 시트로만 본 캡처는 작은 글자 잘림을 놓쳤을 수 있다 | 아래 결함 목록. 결함 후보는 Claude가 원본으로 다시 보고 0.9.0 게이트 캡처(`5c30ef2`)와 비교했다 |
 
-**0.9.0과 비교**: 결함 후보가 나온 10개 장면을 0.9.0 게이트 캡처와 화소로 비교했다. 7개(`profile-tcp-port-error`, `records-detail-trend-sparse`, `report-exported`, `report-exporting`, `home-measuring`, `pending-diagnose`, `profile-ok`)는 같은 그림이고, 3개(`records-list-problems` 150%, `about-legal-expanded`, `diagnose` 펼침)는 M11에서 바꾼 문구·내용 자리만 다르다. 아래 결함은 측정 끝 타임라인 1건을 빼고 **0.9.0에 이미 있던 것**이다.
+**0.9.0과 비교**: 결함 후보 장면을 0.9.0 게이트 캡처(같은 장면·테마·배율)와 비교했다. 화소까지 같은 것은 `profile-ok`·`pending-diagnose`(4장 모두)와 `records-detail-trend-sparse` 다크 100%뿐이다. 나머지는 측정 시각·데이터·바꾼 문구 때문에 화소가 달라서, 결함 자리를 잘라 나란히 놓고 눈으로 비교했다(`profile-tcp-port-error`, `records-detail-trend-sparse` 150%, `records-list-problems` 150%, `report-exported`·`report-exporting` 150%, `home-measuring`, `about-legal-expanded`, `diagnose-site-running`, `m7-measure-finished-link` — 마지막은 화소까지 같음). 아래 결함은 따로 적은 두 가지(측정 끝 타임라인, 포트 칸 잘림)를 빼면 **0.9.0 캡처에도 같은 자리에 있다**.
 
 | 화면 | 결함 | 구분 | 처리 |
 | --- | --- | --- | --- |
-| 측정 끝 (다크) | `m5-measure-done-dark-100`에서 타임라인 지연 선이 거의 빠짐. 선 화소 수(같은 자르기): 0.9.0과 이전 게이트 대부분 약 2,100, M8 `26bd0be`·M10 `1e73d6a`에서 한 번씩 약 210, M11 게이트 5번 모두 약 210. 같은 X의 `dark-150`은 19, `light-100`은 정상. `m7-measure-finished-link-dark-100`은 0.9.0과 같음 | 간헐 → 이번에 매번. 원인 미확인 (측정이 끝날 때 다시 그리는 시점 문제로 추정). 실제 사용 화면에서도 나는지 미확인 | M12 첫 조사 과제 |
-| 프로필 편집 | 대상 줄에 포트 오류가 나 줄이 높아지면 Ping/TCP·로컬/외부 선택이 큰 원으로 늘어남. 포트 칸이 좁아 "7000"이 잘림. 프로필 이름 칸 정렬 어긋남 | 0.9.0과 같음 | M12 |
+| 측정 끝 (다크) | `m5-measure-done-dark-100`에서 타임라인 지연 선이 거의 빠짐. 선 화소 수(100% 캡처, 자르기 (297,250)–(1222,520), 조건 B>200·G>150·R<170): 0.9.0과 이전 게이트 대부분 약 2,100, M8 `26bd0be`·M10 `1e73d6a`에서 한 번씩 약 210, M11 게이트 5번 모두 약 210. 같은 X의 `dark-150`도 눈으로 보면 선이 빠짐(150%는 같은 자르기로 세지 않음), `light-100`은 정상. 차트 정보가 사라지므로 **중요** | 간헐 → 이번에 매번. 원인 미확인 (측정이 끝날 때 다시 그리는 시점 문제로 추정). 실제 사용 화면에서도 나는지 미확인 | M12 첫 조사 과제 |
+| 프로필 편집 | 대상 줄에 포트 오류가 나 줄이 높아지면 Ping/TCP 선택이 큰 원으로 늘어남. 프로필 이름 칸 정렬 어긋남 | 0.9.0과 같음 | M12 |
+| 프로필 편집 | 포트 칸이 좁아 입력에 초점이 있으면(지우기 단추가 나옴) "70000"이 잘림 | 0.9.0 캡처는 초점이 TCP 선택에 있어 값이 다 보임 → 같은 조건의 0.9.0 발생 여부 미확인 (장면 설정·`ProfileEditor` 배치는 M11에서 바뀌지 않음) | M12 |
 | 기록 목록 150% | 오른쪽 칩이 넓으면 첫 줄 요약이 말줄임표 없이 잘림 (배치 검사는 잘림을 허용된 글 칸 안으로 봄) | 0.9.0과 같음 | M12 |
 | 기록 상세·측정 메모 150% | 타임라인 범례 끝 "증상 표시"가 잘림 | 0.9.0과 같음 | M12 |
 | 리포트 150% | 만드는 중·내보냄·실패 안내가 첫 화면 아래로 밀림. "내보내는 중…" 비활성 단추 글 약 1.7:1 | 0.9.0과 같음 | M12 (대비 실측과 함께) |
 | 진단 | 펼친 카드 상세 줄이 18px 왼쪽에서 시작. 점검 중 초점이 "DNS 캐시 비우기"로 감 | 0.9.0과 같음 | M12 |
 | 라이선스와 고지 | 펼쳐도 화살표 방향이 그대로. 100% 펼침에서 테두리 한 줄이 남음 | 0.9.0과 같음 | M12 |
 | 홈 | 경로 맵 선이 인터넷 노드에 닿지 않음. 진단 대기 카드 설명 약 2.3~2.8:1 | 0.9.0과 같음 | M12 (대비 실측과 함께) |
-| 고대비 | 비활성 저장 단추 약 1.4:1 (시스템 GrayText). 보조 글·사이드바 메뉴가 GrayText | M2 설계 대응(GrayText → 보조·비활성) | M12에서 대응 재검토 |
+| 고대비 | 비활성 저장 단추 약 1.4:1: 글은 `AccentInk`(고대비에서 HighlightText)이고 비활성이면 단추 전체 불투명도를 0.45로 낮춤(`GlassButton`) | 0.9.0과 같음, 비활성 흐림 처리 | M12 (대비 실측과 함께) |
+| 고대비 | 보조 글·사이드바 메뉴가 GrayText(비활성과 같은 시스템 색) | M2 설계 대응(GrayText → 보조·비활성) | M12에서 대응 재검토 |
 | 투명 효과 끔 | 불투명 면이 다크 자줏빛, 라이트 베이지로 물듦 | `Materials.OpaqueSurface` 설계대로 | M12 흑요석 결과 함께 디자인 판단 |
 | 리포트 출력 | 최악 예시 HTML의 결론(21599번)과 끊김 줄(19600번)이 다른 기준으로 셈. "43200회/차" 줄바꿈 | 0.9.0과 같음 (HTML 차이는 표 머리 "유효 응답" → "유효 시도" 1곳) | M12 문구 중간·낮음과 함께 |
+| 측정 끝 (링크 확대) | 범위가 1:20:00~1:20:59(축도 59초)인데 뒤에 "· 2분"으로 표기 (`c3-a.md` 문제 9) | 0.9.0과 같음 (화소 같음) | M12 문구와 함께 |
 | 여러 캡처 | 사이드바 "홈"에 초점 테두리가 남음 | 시험이 화면을 프로그램으로 옮기는 탓으로 추정 (미확인) | M12에서 확인 |
 
 관찰로 둔 것 (결함 아님): 150% 첫 실행·사용 조건 실패 화면의 단추 줄은 스크롤 영역 안에 있음(확인), 150% 표 단위 줄바꿈, 미리보기 x≈1214의 회색 선, 비활성 단추 글이 흐린 것(비활성 상태).
 
-판단 (사용자 결정 "기록하고 M12로", 2026-11-22): 승인 코드 X는 그대로 둔다. 위 결함은 출시본 0.9.0에 이미 있던 표시 문제이고, 고치면 새 X·G4·데스크톱 게이트가 다시 필요하다. 타임라인 선 빠짐은 M11 변경과의 관계를 아직 가리지 못했으므로 M12 첫 조사 과제로 둔다 (M11에서 타임라인 쪽 변경은 `TimelineModel`의 띠 설명 글 하한 길이(`AtLeast`)와 측정 결과 줄 글뿐이고 선 그리기 코드는 바뀌지 않았다. 같은 현상이 M8·M10 게이트에서도 났다).
+판단 (사용자 결정 "기록하고 M12로", 2026-11-22): 승인 코드 X는 그대로 둔다. 위 결함은 측정 끝 타임라인과 포트 칸 잘림(0.9.0 같은 조건 미확인)을 빼면 출시본 0.9.0 캡처에도 있던 표시 문제이고, 고치면 새 X·G4·데스크톱 게이트가 다시 필요하다. 타임라인 선 빠짐은 M11 변경과의 관계를 아직 가리지 못했으므로 M12 첫 조사 과제로 둔다 (M11에서 타임라인 쪽 변경은 `TimelineModel`의 띠 설명 글 하한 길이(`AtLeast`)와 측정 결과 줄 글뿐이고 선 그리기 코드는 바뀌지 않았다. 같은 현상이 M8·M10 게이트에서도 났다).
 
 ### 재검토 (C4)
 
@@ -134,7 +137,7 @@ M11 설계 A·C·D·E·G (`docs/loop/M11-design.md` 3판). 기획서 1절 "루�
 | 조건 | 근거 | M11 전 | M11에서 | 최종 |
 | --- | --- | --- | --- | --- |
 | 3. 설정 없이 측정 시작 | `M5FlowTests.FirstMeasurementStartsInOneAction`, M10 실측(동의 → 시작) | 증거 있음 (데모, M10 실측은 `507b98a` 빌드) | B4, 최종 exe 실측 D3 | **증명됨** (`M11FlowTests` 동의 포함 3단계 이하, 최종 exe 실측 `M9LiveRunTests` 동의 → 실제 탐지 → 시작) |
-| 4. 자동 테스트·CI·깨끗한 클론 | CI 성공 `7768499`, 깨끗한 클론 `f501773`·`75203c9`·`1e73d6a` | 증거 있음 (M10 커밋) | 최종 X에서 둘 다 | **증명됨** (최종 게이트 단위 시험, 깨끗한 클론 `ea683f9` 2.4분. CI는 M11 PR에서) |
+| 4. 자동 테스트·CI·깨끗한 클론 | CI 성공 `7768499`, 깨끗한 클론 `f501773`·`75203c9`·`1e73d6a` | 증거 있음 (M10 커밋) | 최종 X에서 둘 다 | 로컬 **증명됨** (최종 게이트 단위 시험, 깨끗한 클론 `ea683f9` 2.4분) / 최종 CI **미검증** (M11 PR에서 돈다) |
 | 5. 모든 마일스톤 G1~G5와 PR | STATE "지난 마일스톤의 게이트" M2~M10. PR: M0~M4는 옛 비공개 저장소 `Ow-wL/NetPulse-private`, M5~M10은 공개 저장소 `Ow-wL/NetPulse` #1~#6 (모두 병합). G4 라운드 상한 예외는 모두 사용자 승인 기록 | 증거 있음 | M11 PR | M11 PR에서 (G4 3라운드 승인, G5는 증거 검토로 확정) |
 | 6. 맨 위 커밋에서 전체 게이트 | — | 아직 | D0~D1 | **증명됨** (X `ea683f9`: 빌드 게이트 → UI 901/901 → G5 누락 0, DECISIONS "M11 데스크톱 최종 게이트") |
 
@@ -174,7 +177,7 @@ M11 설계 A·C·D·E·G (`docs/loop/M11-design.md` 3판). 기획서 1절 "루�
 
 | 분류 | 파일 | 내용 |
 | --- | --- | --- |
-| (다) 표시 | `QuickDiagnosis.cs`, `MeasurementAnalysis.cs`, `MeasurementComparison.cs`, `RecordView.cs`, `RecordsScreen.cs`, `ReportScreen.cs`, `ReportBuilder.cs`, `ReportTexts.cs`, `HomeScreen.cs`, `MeasureScreen.cs` | 문구 점검 높음 11건(판정 이름 "확인 필요"·"확인 못 함", 단정 줄임, 가리지 않은 리포트 안내에 어댑터 이름·측정 ID, 끊긴 길이 분·초, 타임라인 단추 이름 등), "○ 이상" 하한 길이를 버림(`TimelineModel.AtLeast`) |
+| (다) 표시 | `QuickDiagnosis.cs`, `MeasurementAnalysis.cs`, `MeasurementComparison.cs`, `RecordView.cs`, `TimelineModel.cs`, `RecordsScreen.cs`, `ReportScreen.cs`, `ReportBuilder.cs`, `ReportTexts.cs`, `HomeScreen.cs`, `MeasureScreen.cs` | 문구 점검 높음 11건(판정 이름 "확인 필요"·"확인 못 함", 단정 줄임, 가리지 않은 리포트 안내에 어댑터 이름·측정 ID, 끊긴 길이 분·초, 타임라인 단추 이름 등), "○ 이상" 하한 길이를 버림(`TimelineModel.AtLeast`) |
 | (나) 동작 보존 | `LinkLogReader.cs` | B3 시험 경계 뽑기 (계약 표를 단언하는 `M11WlanTests`, 기존 시험 통과) |
 | (나) 동작 보존 | `ScreenParts.cs`, `MeasureParts.cs`, `ProfileEditor.cs` | 대비 실측용 숨김 고리(`--hide-measured-text`에서만)와 자동화 ID, 진단 값 `name` (화면 표시 변화 없음) |
 | 배포 밖 | `build/close-milestone.ps1`, `build/ui-test.ps1` | 마감 `-EvidenceReview`, 게이트 필수 결과 목록 (묶음에 들어가지 않음) |
