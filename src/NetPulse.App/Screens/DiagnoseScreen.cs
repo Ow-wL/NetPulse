@@ -228,6 +228,9 @@ public sealed class DiagnoseScreen : Screen
         // 점검 중 입력 칸의 Enter는 바쁨으로 끝난다: 진행 중인 점검의 기준(그 뒤의 수정 포함)을 덮지 않는다 (G4 3라운드 1)
         if (r == DiagnosisRequest.Started)
             NoteDisplacedFocus(siteRun, had, e => siteDisplaced = e, b => siteBaseline = b);
+        // 요청 수·마지막 응답(시험 고리)을 진단에 바로 알린다: 바쁨·입력 오류는 진단 호스트를 바꾸지 않아 진단이 다시 쓰이지 않았다
+        // (절전 모드 노트북에서 진행 중 Enter의 "바쁨"이 점검이 끝날 때까지 보이지 않음, M12 노트북 최종 게이트 1회차)
+        Context.QueueDiag();
     }
 
     private void ConfirmFlush(Control opener)
