@@ -133,6 +133,23 @@ public sealed class M12SignalStatisticsTests
         Assert.Equal(Math.Round((80.0 + 20.0 + 90.0) / 3, 2), a.Stats.QualityAvg);
     }
 
+    /// <summary>G4 M12 3라운드 1: 변경 이벤트를 잃은 뒤 다른 묶음의 체크포인트만 와도 앞 묶음(이미 체크포인트로 저장된 범위)을 버리지 않는다.</summary>
+    [Fact]
+    public void CheckpointOfAnotherRunAfterALostChangeKeepsTheEarlierRun()
+    {
+        var events = new List<JsonObject>
+        {
+            Signal("change", 0, new JsonObject { ["state"] = "ok", ["quality"] = 80, ["sampleMs"] = 0 }),
+            Signal("checkpoint", 60_000, new JsonObject { ["reason"] = "periodic", ["state"] = "ok", ["quality"] = 80, ["firstMs"] = 0, ["lastMs"] = 60_000, ["runSamples"] = 61 }),
+            // 70초 20% 변경 이벤트는 잃었다
+            Signal("checkpoint", 130_000, new JsonObject { ["reason"] = "periodic", ["state"] = "ok", ["quality"] = 20, ["firstMs"] = 70_000, ["lastMs"] = 130_000, ["runSamples"] = 61 }),
+        };
+        var a = Assert.Single(SignalEvidenceBuilder.FromEvents(events, 1000).Adapters);
+        Assert.Equal([new SignalRun(SignalState.Ok, 80, null, 0, 60_000, 61), new SignalRun(SignalState.Ok, 20, null, 70_000, 130_000, 61)], a.Runs);
+        Assert.False(a.Runs[1].Continues);   // 사이를 모르므로 잇지 않는다
+        Assert.Equal(122, a.Stats.Samples);
+    }
+
     /// <summary>G4 M12 1라운드 2: 같은 어댑터를 다시 관측해도 앞 묶음의 마지막 표본은 그 묶음의 관측 종료에서 잘린다.</summary>
     [Fact]
     public void ResumedObservationKeepsTheEarlierEndBoundary()

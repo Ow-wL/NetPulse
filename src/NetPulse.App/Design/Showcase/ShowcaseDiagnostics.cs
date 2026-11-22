@@ -78,7 +78,8 @@ public sealed partial class ShowcaseWindow
     private object SettleDiag()
     {
         drawSettle ??= new DrawSettle(root, QueueDiag);
-        return drawSettle.Diag(ui, pendingWork, sectionGeneration, 0,
+        // 결(배경 무늬) 그리기도 예약된 그리기·세대에 넣는다 (셸과 같음, G4 M12 3라운드 2)
+        return drawSettle.Diag(ui, pendingWork + (ui.Lights.GrainPending ? 1 : 0), sectionGeneration + ui.Lights.GrainGeneration, 0,
             () => DrawSettle.LaidOut(sectionHost, sectionHost.Children), () => true);
     }
 

@@ -79,6 +79,7 @@ public sealed partial class ShowcaseWindow : Window
         stateChoice.Changed += v => { ui.Lights.SetState(v == "problem"); QueueDiag(); };
         ui.Effects.Changed += (_, _) => { QueueDiag(); if (rail.Current == "contrast") ShowSection("contrast"); };
         ui.Motion.ActiveChanged += QueueDiag;
+        ui.Lights.GrainSettled += QueueDiag;   // 결 그리기가 끝나면 "그리기 끝남"을 다시 쓴다 (G4 M12 3라운드 2)
         ui.Theme.TransitionChanged += QueueDiag;
         dialog.Closed += _ => QueueDiag();
         root.GotFocus += (_, _) => QueueDiag();

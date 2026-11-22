@@ -253,10 +253,15 @@ public static class SignalEvidenceBuilder
                         || Long(e, "runSamples") is not long n) break;
                     var q = Int(e, "quality");
                     var r = Int(e, "rssi");
-                    // 지금 묶음을 갱신한다. 그 묶음의 변경 이벤트를 잃었으면 체크포인트로 새로 연다 (이어짐은 모름 → 끊김)
-                    t.Open = t.Open is { } open && open.FirstMs == f && open.State == cs && open.Quality == q && open.RssiDbm == r
-                        ? open with { LastMs = l, Samples = n }
-                        : new SignalRun(cs, q, r, f, l, n);
+                    // 지금 묶음을 갱신한다. 그 묶음의 변경 이벤트를 잃었으면 체크포인트로 새로 연다 (이어짐은 모름 → 끊김).
+                    // 열려 있던 다른 묶음은 버리지 않고 아는 데까지 닫는다 (G4 M12 3라운드 1: 0~60초 80% 뒤 70초 변경을 잃고 130초 체크포인트만 남아도 80% 묶음이 남게)
+                    if (t.Open is { } open && open.FirstMs == f && open.State == cs && open.Quality == q && open.RssiDbm == r)
+                        t.Open = open with { LastMs = l, Samples = n };
+                    else
+                    {
+                        if (t.Open is { } other) t.Closed.Add(other);
+                        t.Open = new SignalRun(cs, q, r, f, l, n);
+                    }
                     if (Str(e, "reason") == "end")
                     {
                         t.EndedMs = Long(e, "endMs") ?? Long(e, "at");
