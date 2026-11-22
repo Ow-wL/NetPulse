@@ -183,6 +183,7 @@ public sealed class Lights
     {
         if (!grainOn) return;
         grainPending = true;
+        grainBuild++;   // 새 예약은 진행 중인 만들기를 모두 무효로 한다: 늦게 끝난 옛 작업이 완료 표시 뒤에 이미지를 덮지 않게 (G4 M12 2라운드 1)
         grainTimer ??= CreateGrainTimer();
         grainTimer.Stop();
         grainTimer.Start();
@@ -211,19 +212,19 @@ public sealed class Lights
             GrainDone();
             return;
         }
-        int build = ++grainBuild;
+        int build = grainBuild;   // 이 예약의 세대 (예약·끄기마다 오른다)
         _ = Task.Run(() => NetPulse.Design.GrainMask.Build(size.Width, size.Height, size.Scale)).ContinueWith(t =>
         {
             queue.TryEnqueue(() =>
             {
-                if (build != grainBuild) return;   // 그 사이 크기가 또 바뀌었거나 결을 껐다 (새 예약이 끝을 알린다)
+                if (build != grainBuild) return;   // 그 사이 새 예약이 걸렸거나 결을 껐다: 버린다 (새 예약이 끝을 알린다)
                 if (!t.IsFaulted)
                 {
                     grainMask = t.Result;
                     grainSize = size;
                     Paint(t.Result, size, theme, w, h);
                 }
-                if (!(grainTimer?.IsRunning ?? false)) GrainDone();   // 만드는 사이 새 예약이 걸렸으면 그것이 끝을 알린다
+                GrainDone();
             });
         }, TaskScheduler.Default);
     }

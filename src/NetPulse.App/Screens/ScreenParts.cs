@@ -18,26 +18,32 @@ public static class ScreenParts
     /// 다시 붙인 단추에 초점을 준다. 이미 붙어 있고 켜져 있으면 바로, 아니면 붙은 뒤(Loaded)나 켜진 뒤에 한 번.
     /// 느린 PC(M12 노트북 중간 확인)에서는 낮은 우선순위 작업·프레임 콜백이 다시 넣은 단추의 Loaded보다 먼저 와서 초점을 주지 못했다
     /// (리포트: 내보내는 동안 단추가 빠지며 옮겨 간 가리기 단추에 초점이 남음, 기록: [목록으로] 대신 탐색).
-    /// 예약은 이럴 때 버린다 (G4 M12 1라운드 4): <paramref name="still"/>이 거짓, 예약한 뒤 초점이 다른 곳으로 옮겨 감(사용자 조작),
+    /// 예약은 이럴 때 버린다: <paramref name="still"/>이 거짓, 예약한 뒤 사용자가 키를 누르거나 포인터를 누름(창 전체에서, 처리된 입력 포함),
     /// <see cref="Waits.FocusRestore"/>가 지남. 버리거나 주면 구독을 모두 푼다.
+    /// 초점 위치 비교로는 시스템의 초점 재배치(단추가 빠지며 이동)와 사용자 조작을 가를 수 없어 입력 자체를 본다 (G4 M12 1라운드 4·2라운드 2).
     /// </summary>
-    /// <param name="scope">초점 위치를 읽을 화면 (지금 화면 트리에 붙어 있는 요소)</param>
+    /// <param name="scope">입력을 지켜볼 화면 (지금 창 트리에 붙어 있는 요소. 창의 루트 내용에 건다)</param>
     public static void FocusWhenReady(Control target, FrameworkElement scope, Func<bool> still)
     {
         if (!still()) return;
         if (target.IsLoaded && target.IsEnabled && target.Focus(FocusState.Programmatic)) return;
-        var before = scope.XamlRoot is { } xr ? FocusManager.GetFocusedElement(xr) : null;
+        var watch = scope.XamlRoot?.Content as UIElement ?? scope;
         bool done = false;
         RoutedEventHandler? loaded = null;
         DependencyPropertyChangedEventHandler? enabled = null;
+        KeyEventHandler? key = null;
+        PointerEventHandler? pointer = null;
         var timer = target.DispatcherQueue.CreateTimer();
         timer.Interval = Waits.FocusRestore;
         timer.IsRepeating = false;
         void Stop()
         {
+            if (done) return;
             done = true;
             target.Loaded -= loaded;
             target.IsEnabledChanged -= enabled;
+            watch.RemoveHandler(UIElement.KeyDownEvent, key);
+            watch.RemoveHandler(UIElement.PointerPressedEvent, pointer);
             timer.Stop();
         }
         void Try()
@@ -45,16 +51,18 @@ public static class ScreenParts
             if (done) return;
             if (!still()) { Stop(); return; }
             if (!target.IsLoaded || !target.IsEnabled) return;
-            var now = scope.XamlRoot is { } r ? FocusManager.GetFocusedElement(r) : null;
-            bool moved = before is not null && now is not null && !ReferenceEquals(now, before) && !ReferenceEquals(now, target);
             Stop();
-            if (!moved) target.Focus(FocusState.Programmatic);
+            target.Focus(FocusState.Programmatic);
         }
         loaded = (_, _) => Try();
         enabled = (_, _) => Try();
-        timer.Tick += (_, _) => { if (!done) Stop(); };
+        key = (_, _) => Stop();        // 사용자가 기다리는 사이 움직였다: 초점을 빼앗지 않는다
+        pointer = (_, _) => Stop();
+        timer.Tick += (_, _) => Stop();
         target.Loaded += loaded;
         target.IsEnabledChanged += enabled;
+        watch.AddHandler(UIElement.KeyDownEvent, key, true);
+        watch.AddHandler(UIElement.PointerPressedEvent, pointer, true);
         timer.Start();
     }
 
