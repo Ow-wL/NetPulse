@@ -163,6 +163,9 @@ public sealed class DiagnoseScreen : Screen
         {
             noteBaseline(userActions);
             if (top && displaced) scroll.ChangeView(null, 0, null, true);   // 진행 중에도 결론 자리가 보이게
+            // 기준을 잡았음을 진단에도 알린다: 다시 쓰지 않으면 다른 이유(빛 움직임 등)로 진단이 갱신될 때까지 기준이 -1로 남았다
+            // (절전 모드 노트북에서 점검이 끝날 때까지 "점검 중, 기준 잡힘"이 한 번도 보이지 않음, M12 노트북 3차·M11 노트북)
+            Context.QueueDiag();
         });
     }
 
