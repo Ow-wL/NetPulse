@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "name": "wifi-weak-drop",
+  "seed": 21,
+  "durationRounds": 180,
+  "startAt": "2026-11-13T13:20:00+09:00",
+  "network": {
+    "kind": "wireless"
+  },
+  "targets": [
+    {
+      "id": "gateway",
+      "role": "local",
+      "address": "192.0.2.1",
+      "name": "공유기"
+    },
+    {
+      "id": "ext-a",
+      "role": "external",
+      "address": "198.51.100.10",
+      "name": "예시 통신사 A",
+      "provider": "예시 통신사 A"
+    },
+    {
+      "id": "ext-b",
+      "role": "external",
+      "address": "203.0.113.20",
+      "name": "예시 통신사 B",
+      "provider": "예시 통신사 B"
+    }
+  ],
+  "segments": [
+    {
+      "from": 0,
+      "to": 180,
+      "target": "gateway",
+      "rtt": {
+        "base": 3,
+        "jitter": 1
+      }
+    },
+    {
+      "from": 0,
+      "to": 180,
+      "target": "ext-a",
+      "rtt": {
+        "base": 19,
+        "jitter": 6
+      }
+    },
+    {
+      "from": 0,
+      "to": 180,
+      "target": "ext-b",
+      "rtt": {
+        "base": 25,
+        "jitter": 8
+      }
+    },
+    {
+      "from": 100,
+      "to": 118,
+      "target": "gateway",
+      "rtt": {
+        "base": 14,
+        "jitter": 10
+      }
+    },
+    {
+      "from": 118,
+      "to": 126,
+      "target": "*",
+      "result": "lost"
+    }
+  ],
+  "links": [
+    {
+      "from": 118,
+      "to": 126
+    }
+  ],
+  "signal": [
+    {
+      "from": 0,
+      "to": 60,
+      "quality": 86,
+      "rssi": -51
+    },
+    {
+      "from": 60,
+      "to": 90,
+      "quality": 62,
+      "rssi": -64
+    },
+    {
+      "from": 90,
+      "to": 110,
+      "quality": 38,
+      "rssi": -74
+    },
+    {
+      "from": 110,
+      "to": 118,
+      "quality": 14,
+      "rssi": -85
+    },
+    {
+      "from": 118,
+      "to": 126,
+      "state": "notConnected"
+    },
+    {
+      "from": 126,
+      "to": 180,
+      "quality": 82,
+      "rssi": -54
+    }
+  ]
+}

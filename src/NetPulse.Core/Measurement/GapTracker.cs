@@ -49,6 +49,14 @@ public sealed class GapTracker(TimeSpan interval)
     private TimeSpan? clockBaseline;
     private long lastClockMs = long.MinValue;
 
+    private long powerChanges;
+
+    /// <summary>
+    /// 받아들인 절전·복귀 알림 수. 회차 밖에서 읽는 표본(신호, M12 설계 C [1-4])이 두 표본 사이에 절전 공백이 끼었는지
+    /// 이 값의 변화로 안다 (공백을 건너 선을 잇지 않게).
+    /// </summary>
+    public long PowerChanges { get { lock (gate) return powerChanges; } }
+
     /// <summary>지금 절전 중(복귀 알림 전)인지.</summary>
     public bool Suspended { get { lock (gate) return suspends.Count > 0 && suspends[^1].ToMs is null; } }
 
@@ -60,6 +68,7 @@ public sealed class GapTracker(TimeSpan interval)
             long from = Ms(elapsed);
             // 이미 처리한 회차 중 마지막 것이 직전 회차 후보 (뒤에 오는 회차가 더 늦게 시작했으면 OnRound가 고친다)
             suspends.Add(new Suspend { FromMs = from, FromWall = wall, LastRoundBefore = lastRound is not null && lastStartMs <= from ? lastRound : null });
+            powerChanges++;
         }
     }
 
@@ -71,6 +80,7 @@ public sealed class GapTracker(TimeSpan interval)
             var s = suspends[^1];
             s.ToMs = Math.Max(s.FromMs, Ms(elapsed));
             s.ToWall = wall;
+            powerChanges++;
         }
     }
 

@@ -28,6 +28,8 @@ public sealed record SessionOptions
     public TimeSpan LinkLogTimeout { get; init; } = TimeSpan.FromSeconds(5);
     /// <summary>직접 관측 표본 큐 크기 (기본 1024).</summary>
     public int LinkQueueCapacity { get; init; } = MeasurementSession.LinkQueueCapacityDefault;
+    /// <summary>Wi‑Fi 신호 읽기 (M12 설계 C). 링크 직접 관측이 감시하는 무선 어댑터를 회차마다 읽는다 (Links가 있어야 쓴다).</summary>
+    public NetPulse.Core.Evidence.ISignalSource? Signal { get; init; }
     public IPowerEvents? Power { get; init; }
     public string AppVersion { get; init; } = "0.0.0";
     /// <summary>회차 큐 크기 (기본 3600 = 1시간).</summary>
@@ -114,7 +116,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
         var probes = targets.ToDictionary(t => t.Id, options.ProbeFor);
         long limit = profile.Duration.Ticks / Profile.Interval.Ticks;
         engine = new MeasurementEngine(clock, new DispatchProbe(probes), targets.Select(t => t.ToProbeTarget()).ToArray(), Profile.Interval, limit,
-            options.Links is { } links ? new RoutesWithLinks(options.Routes, links, () => directCapability == NetPulse.Core.Evidence.LinkCapability.Supported) : options.Routes, Enqueue);
+            options.Links is { } links ? new RoutesWithLinks(options.Routes, links, () => directCapability == NetPulse.Core.Evidence.LinkCapability.Supported, ObserveSignal) : options.Routes, Enqueue);
         CreateLinkQueue(options.LinkQueueCapacity);
         linkCutoffMs = header.PlannedMs;   // 계획 끝 뒤의 링크 표본은 처음부터 받지 않는다 (M4 G4 4라운드 2)
         powerSubscription = options.Power?.Subscribe(() => gaps.OnSuspend(clock.Elapsed, clock.Now), () => gaps.OnResume(clock.Elapsed, clock.Now));
@@ -274,6 +276,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
                         if (!queue.Reader.TryRead(out item)) break;
                     }
                     DrainLinks();
+                    DrainSignal();
                     DrainUserEvents();
                     Process(item);
                 }
@@ -542,6 +545,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
             // 알림 해제 (해제 뒤 도착한 콜백은 버린다, M4 설계 A5 종료 순서)
             linkClosed = true;
             try { options.Links?.Dispose(); } catch (Exception) { }
+            CloseSignal();
             queue.Writer.TryComplete();
             bool sealFailed = false;
             if (!await Within(worker, options.DrainTimeout).ConfigureAwait(false))
@@ -636,6 +640,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
         {
             DrainUserEvents();   // 처리 작업이 마저 쓰지 못한(마감된) 사용자 이벤트
             foreach (var g in gaps.Close(endMs, endWall)) WriteGapEvent(g);
+            FinishSignal(endMs, endWall);
             FinishLinks(endElapsed, endWall);
             List<(long From, long To)> ranges;
             lock (sync) ranges = Merge(unprocessedRanges);

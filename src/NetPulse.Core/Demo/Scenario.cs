@@ -37,8 +37,31 @@ public sealed class Scenario
     /// <summary>선택 (M6): 데모 진단 검사기의 덮어쓰기 (M6 설계 3.2). 없는 필드는 시간축 규칙을 따른다.</summary>
     public ScenarioDiagnosis? Diagnosis { get; init; }
 
+    /// <summary>
+    /// 선택 (M12 설계 C 데모): Wi‑Fi 신호 구간 (from 이상 to 미만, 겹치면 뒤에 적힌 구간이 이긴다). network.kind가 wireless일 때만 적을 수 있다.
+    /// 구간 밖은 링크가 내려간 동안 연결 안 됨, 그 밖 품질 <see cref="DefaultQuality"/>%·<see cref="DefaultRssi"/> dBm.
+    /// </summary>
+    public IReadOnlyList<ScenarioSignal>? Signal { get; init; }
+
+    public const int DefaultQuality = 80, DefaultRssi = -55;
+
     /// <summary>그 회차에 데모 링크가 내려가 있는지.</summary>
     public bool LinkDownAt(long round) => Links?.Any(l => round >= l.From && round < l.To) ?? false;
+
+    /// <summary>그 회차의 데모 신호 읽기. 무선 시나리오가 아니면 null.</summary>
+    public NetPulse.Core.Evidence.SignalReading? SignalAt(long round)
+    {
+        if (Network?.Kind != "wireless") return null;
+        var hit = Signal?.LastOrDefault(s => round >= s.From && round < s.To);
+        if (hit is null)
+            return LinkDownAt(round)
+                ? new(NetPulse.Core.Evidence.SignalState.NotConnected, null, null, "not-connected", null)
+                : new(NetPulse.Core.Evidence.SignalState.Ok, DefaultQuality, DefaultRssi, null, "realtime");
+        var state = ScenarioSignal.ParseState(hit.State)!.Value;
+        return state == NetPulse.Core.Evidence.SignalState.Ok
+            ? new(state, hit.Quality, hit.Rssi, null, hit.Quality is null ? "rssi" : "realtime")
+            : new(state, null, null, "demo-" + hit.State, null);
+    }
 
     /// <summary>재생할 회차 수 (0 이상 이 값 미만).</summary>
     public long RoundCount => DurationRounds ?? Segments.Max(s => s.To);
@@ -103,6 +126,19 @@ public sealed class Scenario
         {
             if (net.Kind is not ("wired" or "wireless" or "none")) throw new ScenarioException("network.kind는 wired, wireless, none 중 하나입니다.");
             if (net.OtherGateways < 0) throw new ScenarioException("network.otherGateways는 0 이상입니다.");
+        }
+        if (Signal is { Count: > 0 } && Network?.Kind != "wireless") throw new ScenarioException("signal은 network.kind가 wireless일 때만 적을 수 있습니다.");
+        foreach (var (signal, i) in (Signal ?? []).Select((s, i) => (s, i)))
+        {
+            if (signal.From < 0 || signal.To <= signal.From) throw new ScenarioException($"신호 {i}: from은 0 이상, to는 from보다 커야 합니다.");
+            if (ScenarioSignal.ParseState(signal.State) is not { } state)
+                throw new ScenarioException($"신호 {i}: state는 ok, notConnected, denied, unsupported, failed 중 하나입니다.");
+            bool hasValue = signal.Quality is not null || signal.Rssi is not null;
+            if (state == NetPulse.Core.Evidence.SignalState.Ok && !hasValue) throw new ScenarioException($"신호 {i}: ok에는 quality나 rssi가 있어야 합니다.");
+            if (state != NetPulse.Core.Evidence.SignalState.Ok && hasValue) throw new ScenarioException($"신호 {i}: ok가 아니면 quality·rssi를 적지 않습니다.");
+            if (signal.Quality is < 0 or > 100) throw new ScenarioException($"신호 {i}: quality는 0~100입니다.");
+            if (signal.Rssi is < NetPulse.Core.Evidence.SignalReading.MinRssi or > NetPulse.Core.Evidence.SignalReading.MaxRssi)
+                throw new ScenarioException($"신호 {i}: rssi는 -127~0입니다.");
         }
         if (Faults is { } f)
         {
@@ -182,6 +218,18 @@ public sealed class ScenarioLink
 {
     public required long From { get; init; }
     public required long To { get; init; }
+}
+
+/// <summary>데모 신호 구간 (M12 설계 C). ok면 quality(0~100)나 rssi(dBm) 중 하나 이상, 그 밖 상태면 값 없음.</summary>
+public sealed class ScenarioSignal
+{
+    public required long From { get; init; }
+    public required long To { get; init; }
+    public string State { get; init; } = "ok";
+    public int? Quality { get; init; }
+    public int? Rssi { get; init; }
+
+    internal static NetPulse.Core.Evidence.SignalState? ParseState(string? s) => NetPulse.Core.Evidence.SignalText.Parse(s);
 }
 
 public sealed class ScenarioRtt

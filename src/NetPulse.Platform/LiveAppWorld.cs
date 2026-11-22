@@ -55,6 +55,7 @@ public sealed class LiveAppWorld(string userData) : IAppWorld
             Profile = profile, Clock = new SystemClock(), ProbeFor = t => ProbeFactory.For(t, profile.Timeout),
             Primary = primary, Fallback = fallback,
             Routes = new RouteObserver(), Power = new PowerEvents(), Links = new LinkObserver(), LinkLog = new LinkLogReader(),
+            Signal = new WlanSignalReader(),   // M12 설계 C: 위치 권한이 필요 없는 호출만 (핸들은 처음 읽을 때 연다)
             AppVersion = appVersion,
         });
     }

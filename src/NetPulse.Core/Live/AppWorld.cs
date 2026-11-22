@@ -92,7 +92,7 @@ public sealed class DemoAppWorld : IAppWorld
         session = MeasurementSession.Start(new SessionOptions
         {
             Profile = profile, Clock = run.Clock, ProbeFor = run.ProbeFor, Primary = run.Primary, Fallback = run.Fallback,
-            Routes = run.Network, Links = run.Network, Power = run.Power, LinkLogSettle = TimeSpan.Zero, AppVersion = appVersion,
+            Routes = run.Network, Links = run.Network, Signal = run.Network, Power = run.Power, LinkLogSettle = TimeSpan.Zero, AppVersion = appVersion,
         });
         return session;
     }

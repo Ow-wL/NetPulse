@@ -209,14 +209,15 @@ public sealed partial class MeasurementSession
         lock (sync)
         {
             var links = SnapshotLinks();
+            var signal = SnapshotSignal();
             var status = StatusUnlocked();
             var gapsCopy = gapSpans.ToArray();
             long from = after?.Seq ?? -1;
             if (after is null || from < liveFirstSeq)
-                return new LiveDelta(after ?? new LiveCursor(Id, liveFirstSeq), true, [], gapsCopy, links, status);
+                return new LiveDelta(after ?? new LiveCursor(Id, liveFirstSeq), true, [], gapsCopy, links, status) { Signal = signal };
             int index = (int)(from - liveFirstSeq);
             var items = index >= liveItems.Count ? [] : liveItems.GetRange(index, liveItems.Count - index).ToArray();
-            return new LiveDelta(new LiveCursor(Id, nextSeq), false, items, gapsCopy, links, status);
+            return new LiveDelta(new LiveCursor(Id, nextSeq), false, items, gapsCopy, links, status) { Signal = signal };
         }
     }
 
@@ -230,7 +231,7 @@ public sealed partial class MeasurementSession
             var events = publishedOrder.Select(id => analysisEvents[(int)(long.Parse(id.AsSpan(1)) - 1)].DeepClone().AsObject()).ToArray();
             var states = publishedOrder.Select(id => new EventRef(id, publishedEvents[id].Published)).ToArray();
             return new AnalysisInputs(header, publishedRounds.ToArray(), gapSpans.ToArray(), events,
-                links, (long)clock.Elapsed.TotalMilliseconds, clock.Now, new LiveCursor(Id, nextSeq), states);
+                links, (long)clock.Elapsed.TotalMilliseconds, clock.Now, new LiveCursor(Id, nextSeq), states) { Signal = SnapshotSignal() };
         }
     }
 
