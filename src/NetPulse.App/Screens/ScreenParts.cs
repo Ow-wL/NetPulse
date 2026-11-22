@@ -27,9 +27,13 @@ public static class ScreenParts
     public static FrameworkElement InfoChip(Ui ui, string id, string label, string value)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S2, VerticalAlignment = VerticalAlignment.Center };
-        row.Children.Add(Fonts.Text(label, Typography.Caption, ui.Brushes.Muted));
+        var l = Fonts.Text(label, Typography.Caption, ui.Brushes.Muted);
+        AutomationProperties.SetAutomationId(l, id + ".label");
+        row.Children.Add(l);
         var v = Fonts.Text(value, Typography.Label, ui.Brushes.Ink);
         AutomationProperties.SetAutomationId(v, id + ".value");
+        // 실측 대비 시험 (M12 설계 F): 라벨·값만 투명하게 그려 컨트롤 유리를 찍는다
+        if (ui.Options.HideMeasuredText) l.Foreground = v.Foreground = ui.Brushes.Transparent;
         row.Children.Add(v);
         var panel = new GroupPanel(id, label + " " + value);
         panel.Children.Add(ui.Glass.Surface(GlassLevel.Control, row, Radius.Inner, new Thickness(Space.S4, Space.S2, Space.S4, Space.S2)));

@@ -72,12 +72,12 @@ public sealed class M5G5Tests
             app.Select("nav.home");
             var d = app.WaitDiag(x => x, x => M5Fixtures.Str(x, "screen") == "home" && x.GetProperty("reduceMotion").GetBoolean()
                 && x.GetProperty("active").GetProperty("move").GetInt32() + x.GetProperty("active").GetProperty("scale").GetInt32() + x.GetProperty("active").GetProperty("repeat").GetInt32() == 0, "움직임 0");
-            Thread.Sleep(700);
-            using var a = app.CaptureBitmap();
+            var (settledShot, shotWait) = app.WaitSettledAndCapture();   // 고정 대기 대신 상태 기반 대기 (M12 G1-B). 그 뒤 500 ms 간격 비교는 그대로
+            using var a = settledShot;
             Thread.Sleep(500);
             using var b = app.CaptureBitmap();
             var diff = ImageCompare.Diff(a, b);
-            Record("reducedmotion-home", new { diff.Mean, diff.P99, active = d.GetProperty("active") });
+            Record("reducedmotion-home", new { diff.Mean, diff.P99, active = d.GetProperty("active"), captureWait = shotWait.Json });
             Assert.True(diff.Mean <= 1.0 && diff.P99 <= 4, $"캡처 차이 평균 {diff.Mean:0.00}, 99백분위 {diff.P99}");
             app.Close();
         }

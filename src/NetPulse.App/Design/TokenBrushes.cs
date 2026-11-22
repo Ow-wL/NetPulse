@@ -18,6 +18,9 @@ public sealed class TokenBrushes
     public SolidColorBrush Muted { get; } = new();
     /// <summary>비활성 글 (고대비에서 GrayText, 그 밖에는 Muted와 같은 색)</summary>
     public SolidColorBrush Disabled { get; } = new();
+    /// <summary>비활성 단추 글·아이콘, 점선 테두리 (M12 설계 F, 고대비에서 GrayText)</summary>
+    public SolidColorBrush DisabledInk { get; } = new();
+    public SolidColorBrush DisabledEdge { get; } = new();
     public SolidColorBrush Faint { get; } = new();
     public SolidColorBrush Accent { get; } = new();
     public SolidColorBrush AccentInk { get; } = new();
@@ -46,6 +49,8 @@ public sealed class TokenBrushes
         Ink.Color = ToColor(p.Ink);
         Muted.Color = ToColor(p.Muted);
         Disabled.Color = ToColor(p.Disabled);
+        DisabledInk.Color = ToColor(p.DisabledInk);
+        DisabledEdge.Color = ToColor(p.DisabledEdge);
         Faint.Color = ToColor(p.Faint);
         Accent.Color = ToColor(p.Accent);
         AccentInk.Color = ToColor(p.AccentInk);

@@ -53,7 +53,8 @@ public sealed partial class AppShell
             loadStatus = host.LoadStatus.ToString(),
             recent = new { listed = recent.Listed, items = recent.Items.Select(i => new { i.Entry.Id, i.Analyzing, grade = i.Grade?.ToString(), i.Outages, i.Error, life = i.Entry.Lifecycle.ToString() }) },
             screenDiag = screens.Current?.Diag(),
-            outage = observation.Current != NetPulse.Core.Presentation.ObservationKind.None,
+            settle = SettleDiag(),
+            outage =observation.Current != NetPulse.Core.Presentation.ObservationKind.None,
             observation = observation.Current.ToString(),
             theme = mode.Theme.ToString().ToLowerInvariant(),
             material = mode.Material.ToString().ToLowerInvariant(),
@@ -80,6 +81,20 @@ public sealed partial class AppShell
             resident = ResidentDiag(),
         };
         diag.Text = JsonSerializer.Serialize(state);
+    }
+
+    private DrawSettle? drawSettle;
+
+    /// <summary>
+    /// "그리기 끝남" (M12 설계 G1-B [2-4]): 예약된 그리기 = 셸 렌더 큐(<see cref="QueueRender"/>) + 화면 호스트(공통 요소 이동 대기·지금 화면의 프레임 작업),
+    /// 장면 세대 = 화면 호스트(이동·다시 그리기) + 화면 안의 다시 그리기, 배치 = 지금 화면의 등장 카드, 타임라인 = 지금 화면의 타임라인.
+    /// </summary>
+    private object SettleDiag()
+    {
+        drawSettle ??= new DrawSettle(root, QueueDiag);
+        var current = screens.Current;
+        return drawSettle.Diag(ui, (renderQueued ? 1 : 0) + screens.PendingDraws, screens.Generation, current?.SceneGeneration ?? 0,
+            () => screens.LaidOut, () => screens.Current?.SettleTimeline is not { } t || t.FrameMatches);
     }
 
     private void RunSelfTest()

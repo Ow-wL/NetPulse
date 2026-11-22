@@ -74,15 +74,15 @@ public sealed class M12MatrixTests
         var scene = M5MatrixTests.Scenes(file).Single(s => s.Id == sceneId);
         using var app = M5MatrixTests.Open(scene, extra);
         app.CloseToasts();
-        Thread.Sleep(700);
-        using var shot = app.CaptureBitmap();
+        var (settledShot, shotWait) = app.WaitSettledAndCapture();   // 고정 대기 대신 상태 기반 대기 (M12 G1-B)
+        using var shot = settledShot;
         var path = app.Save(shot, "matrix-" + name);
         var problems = M5MatrixTests.LayoutProblems(app.LayoutNow());
         var privacy = M9MatrixTests.PrivateText(app.Window);
         var diag = app.Diag();
         problems.AddRange(M5MatrixTests.TimelineProblems(diag));
         problems.AddRange(SignalProblems(sceneId, diag));
-        Record("matrix-" + name, new { name, sceneFile = file, scene = sceneId, meta, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, layoutProblems = problems, privacy, diag });
+        Record("matrix-" + name, new { name, sceneFile = file, scene = sceneId, meta, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, captureWait = shotWait.Json, layoutProblems = problems, privacy, diag });
         Assert.Equal((Size.WindowWidth, Size.WindowHeight), (shot.Width, shot.Height));
         Assert.True(problems.Count == 0, string.Join("\n", problems));
         Assert.True(privacy.Count == 0, string.Join("\n", privacy));

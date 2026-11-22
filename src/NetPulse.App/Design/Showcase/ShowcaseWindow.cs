@@ -196,13 +196,19 @@ public sealed partial class ShowcaseWindow : Window
         var items = build().ToArray();
         foreach (var item in items) sectionHost.Children.Add(item);
         scroll.ChangeView(0, 0, null, true);
+        sectionGeneration++;   // 장면 세대 (M12 G1-B "그리기 끝남")
         ui.Motion.Stagger(items);
         if (id == "toasts") ShowAllToasts();
         if (id == "dialog" && options.OpenDialog && !dialog.IsOpen)
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            pendingWork++;
+            if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
+                pendingWork--;
                 if (FindById(root, "dialog.open") is Control opener) OpenDialog(opener, FocusState.Programmatic);
-            });
+                QueueDiag();
+            })) pendingWork--;
+        }
         log.Write("section", new { id });
         QueueDiag();
     }

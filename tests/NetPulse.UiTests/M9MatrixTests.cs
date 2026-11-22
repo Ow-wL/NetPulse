@@ -67,14 +67,14 @@ public sealed class M9MatrixTests
     {
         using var app = M5MatrixTests.Open(Scene(id), "--theme", theme, "--ui-scale", scale);
         if (!id.Contains("confirm", StringComparison.Ordinal) && id != "hint-dialog") app.CloseToasts();
-        Thread.Sleep(700);
-        using var shot = app.CaptureBitmap();
+        var (settledShot, shotWait) = app.WaitSettledAndCapture();   // 고정 대기 대신 상태 기반 대기 (M12 G1-B)
+        using var shot = settledShot;
         string name = $"m9-{id}-{theme}-{(scale == "1" ? "100" : "150")}";
         var path = app.Save(shot, "matrix-" + name);
         var problems = M5MatrixTests.LayoutProblems(app.LayoutNow());
         var diag = app.Diag();
         var privacy = PrivateText(app.Window);
-        Record("matrix-" + name, new { name, scene = id, theme, scale, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, layoutProblems = problems, privacy, diag });
+        Record("matrix-" + name, new { name, scene = id, theme, scale, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, captureWait = shotWait.Json, layoutProblems = problems, privacy, diag });
         Assert.Equal((Size.WindowWidth, Size.WindowHeight), (shot.Width, shot.Height));
         Assert.True(problems.Count == 0, string.Join("\n", problems));
         Assert.True(privacy.Count == 0, string.Join("\n", privacy));
@@ -99,11 +99,11 @@ public sealed class M9MatrixTests
     {
         using var app = M5MatrixTests.Open(Scene(sceneId), extra.Split(' '));
         if (sceneId != "hint-dialog") app.CloseToasts();
-        Thread.Sleep(700);
-        using var shot = app.CaptureBitmap();
+        var (settledShot, shotWait) = app.WaitSettledAndCapture();   // 고정 대기 대신 상태 기반 대기 (M12 G1-B)
+        using var shot = settledShot;
         var path = app.Save(shot, "matrix-" + name);
         var problems = M5MatrixTests.LayoutProblems(app.LayoutNow());
-        Record("matrix-" + name, new { name, scene = sceneId, extra, file = Path.GetFileName(path), layoutProblems = problems, diag = app.Diag() });
+        Record("matrix-" + name, new { name, scene = sceneId, extra, file = Path.GetFileName(path), captureWait = shotWait.Json, layoutProblems = problems, diag = app.Diag() });
         Assert.Equal((Size.WindowWidth, Size.WindowHeight), (shot.Width, shot.Height));
         Assert.True(problems.Count == 0, string.Join("\n", problems));
         Assert.True(app.ReadLog().All(e => e.GetProperty("kind").GetString() is not ("unhandled" or "renderFailed" or "diagFailed")), "앱 기록에 오류");

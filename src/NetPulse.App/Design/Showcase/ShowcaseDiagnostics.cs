@@ -64,8 +64,22 @@ public sealed partial class ShowcaseWindow
             snapshotLayers = ui.Theme.SnapshotLayersInTree,
             lowPerformance = ui.Pacer.Low,
             frameBaselineMs = ui.Pacer.Baseline,
+            settle = SettleDiag(),
         };
         diag.Text = JsonSerializer.Serialize(state);
+    }
+
+    private DrawSettle? drawSettle;
+    private int sectionGeneration, pendingWork;
+
+    /// <summary>
+    /// "그리기 끝남" (M12 설계 G1-B [2-4]): 예약된 그리기 = 대화상자 절의 열기 예약, 장면 세대 = 절 바꾸기, 배치 = 지금 절의 카드. 타임라인 조건 없음.
+    /// </summary>
+    private object SettleDiag()
+    {
+        drawSettle ??= new DrawSettle(root, QueueDiag);
+        return drawSettle.Diag(ui, pendingWork, sectionGeneration, 0,
+            () => DrawSettle.LaidOut(sectionHost, sectionHost.Children), () => true);
     }
 
     private void RunSelfTest()

@@ -352,11 +352,11 @@ public sealed class G5Tests
             app.Select("toolbar.theme.light");
             app.WaitDiag(d => d.GetProperty("inTransition").GetBoolean(), t => t, "원형 전환 진행 중 (진행도 고정)");
         }
-        Thread.Sleep(700);
-        using var shot = app.CaptureBitmap();
+        var (settledShot, shotWait) = app.WaitSettledAndCapture();   // 고정 대기 대신 상태 기반 대기 (M12 G1-B). 고정한 원형 전환은 앱이 세지 않는다
+        using var shot = settledShot;
         var path = app.Save(shot, "matrix-" + name);
         var diag = app.Diag();
-        Record("matrix-" + name, new { name, args, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, diag });
+        Record("matrix-" + name, new { name, args, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, captureWait = shotWait.Json, diag });
         Assert.Equal((NetPulse.Design.Tokens.Size.WindowWidth, NetPulse.Design.Tokens.Size.WindowHeight), (shot.Width, shot.Height));
         Assert.Equal(0, app.Close());
     }

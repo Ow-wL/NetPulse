@@ -740,8 +740,25 @@ public sealed class RecordsScreen : Screen
         }
         var next = perFrame.Dequeue();
         int gen = renderGen;
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { if (!Context.IsClosing() && !Suspended && gen == renderGen) next(); });
+        // 큐에 넘긴 조각도 실행이 끝날 때까지 예약된 그리기로 센다 (M12 G1-B). 세대가 달라 건너뛰어도 실행된 것으로 뺀다
+        inFlight++;
+        if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            inFlight--;
+            Context.QueueDiag();   // 낮은 우선순위라 이 조각(과 조각이 새로 예약한 것) 뒤에 진단을 쓴다
+            if (!Context.IsClosing() && !Suspended && gen == renderGen) next();
+        })) inFlight--;
     }
+
+    private int inFlight;
+
+    /// <summary>"그리기 끝남" (M12 설계 G1-B): 프레임 목록에 남은 조각 + 낮은 우선순위 큐에 넘겨 아직 돌지 않은 조각.</summary>
+    public override int PendingDraws => perFrame.Count + inFlight;
+
+    /// <summary>화면 안의 다시 그리기 세대 (실제로 그릴 때와 숨길 때 오른다).</summary>
+    public override int SceneGeneration => renderGen;
+
+    public override TimelinePanel? SettleTimeline => timeline;
 
     private void QueueTimeline()
     {

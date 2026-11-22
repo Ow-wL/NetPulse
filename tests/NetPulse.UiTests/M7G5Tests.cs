@@ -37,11 +37,11 @@ public sealed class M7G5Tests
     {
         using var app = M5MatrixTests.Open(Scene(sceneId), extra.Split(' '));
         app.CloseToasts();
-        Thread.Sleep(700);
-        using var shot = app.CaptureBitmap();
+        var (settledShot, shotWait) = app.WaitSettledAndCapture();   // 고정 대기 대신 상태 기반 대기 (M12 G1-B)
+        using var shot = settledShot;
         var path = app.Save(shot, "matrix-" + name);
         var problems = M5MatrixTests.LayoutProblems(app.LayoutNow());
-        Record("matrix-" + name, new { name, scene = sceneId, extra, file = Path.GetFileName(path), layoutProblems = problems, diag = app.Diag() });
+        Record("matrix-" + name, new { name, scene = sceneId, extra, file = Path.GetFileName(path), captureWait = shotWait.Json, layoutProblems = problems, diag = app.Diag() });
         Assert.Equal((Size.WindowWidth, Size.WindowHeight), (shot.Width, shot.Height));
         Assert.True(problems.Count == 0, string.Join("\n", problems));
         Assert.True(app.ReadLog().All(e => e.GetProperty("kind").GetString() is not ("unhandled" or "renderFailed" or "diagFailed")), "앱 기록에 오류");
@@ -58,11 +58,12 @@ public sealed class M7G5Tests
         app.Invoke("records.row.0");
         app.WaitDiag(d => d.GetProperty("screenDiag").TryGetProperty("detail", out var x) && x.ValueKind == JsonValueKind.Object
             && d.GetProperty("screenDiag").TryGetProperty("detailComplete", out var c) && c.GetBoolean(), b => b, "상세");
-        Thread.Sleep(500);
-        using var shot = app.CaptureBitmap();
+        // 고정 대기 대신 상태 기반 대기 (M12 G1-B). 진행도 고정 모션은 앱이 세지 않는다. 최대 대기는 지금까지의 500 ms 그대로
+        var (settledShot, shotWait) = app.WaitSettledAndCapture(TimeSpan.FromMilliseconds(500));
+        using var shot = settledShot;
         string name = $"m7-transition-crossfade-{progress}";
         var path = app.Save(shot, "matrix-" + name);
-        Record("matrix-" + name, new { name, kind = "crossfade", progress, file = Path.GetFileName(path), diag = app.Diag() });
+        Record("matrix-" + name, new { name, kind = "crossfade", progress, file = Path.GetFileName(path), captureWait = shotWait.Json, diag = app.Diag() });
         Assert.Equal(0, app.Close());
     }
 

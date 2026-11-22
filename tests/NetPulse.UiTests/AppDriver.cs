@@ -201,6 +201,56 @@ public sealed class AppDriver : IDisposable
         return full.Clone(rect, PixelFormat.Format32bppArgb);
     }
 
+    /// <summary>
+    /// 매트릭스 캡처 전 상태 기반 대기 (M12 설계 G1-B [1-1], 고정 대기 700 ms를 바꿈). 장면의 기대 상태(<c>wait:</c>)는 호출 전에 끝나 있어야 한다.
+    /// 그다음 (2) 앱이 알린 "그리기 끝남"(진단 <c>settle.settled</c>) → (3) 창 캡처 두 번이 같고 그 사이 진단의 settle 값(장면 세대 포함)이 그대로.
+    /// <paramref name="max"/>(기본 700 ms)를 넘으면 그때 찍는다. 돌려준 그림은 호출한 쪽이 버린다.
+    /// </summary>
+    public (Bitmap Shot, SettleResult Wait) WaitSettledAndCapture(TimeSpan? max = null)
+    {
+        var limit = max ?? Settle.MaxWait;
+        var watch = Stopwatch.StartNew();
+        int captures = 0;
+        bool reported = false;
+        Bitmap? previous = null;
+        string? previousKey = null;
+        (bool Present, bool Settled, string Key) Read()
+        {
+            try { return Settle.Read(Diag()); }
+            catch (Exception ex) when (ex is JsonException or ElementNotAvailableException or InvalidOperationException or TimeoutException) { return (false, false, ""); }
+        }
+        try
+        {
+            while (true)
+            {
+                var now = Read();
+                reported |= now.Present;
+                if (!now.Settled) { previous?.Dispose(); previous = null; previousKey = null; }
+                else if (previous is null || now.Key != previousKey)
+                {
+                    previous?.Dispose();
+                    previous = CaptureBitmap(); captures++;
+                    previousKey = now.Key;
+                }
+                else
+                {
+                    var next = CaptureBitmap(); captures++;
+                    var after = Read();
+                    if (after.Settled && after.Key == previousKey && Settle.SameImage(previous, next))
+                        return (next, new SettleResult(true, false, watch.ElapsedMilliseconds, captures, true));
+                    previous.Dispose();
+                    previous = next;
+                    previousKey = after.Settled ? after.Key : null;
+                }
+                if (watch.Elapsed >= limit) break;
+                Thread.Sleep(now.Settled ? Settle.CaptureGap : Settle.Poll);
+            }
+        }
+        finally { previous?.Dispose(); }
+        var shot = CaptureBitmap(); captures++;
+        return (shot, new SettleResult(false, true, watch.ElapsedMilliseconds, captures, reported));
+    }
+
     /// <summary>앱 프로세스의 다른 창 하나(트레이 팝업 메뉴 등)를 그 창만 캡처한다 (PrintWindow, 화면 영역 캡처 아님).</summary>
     public static Bitmap CaptureWindow(IntPtr hwnd, uint flags = 2)
     {

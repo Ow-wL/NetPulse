@@ -130,7 +130,7 @@ public sealed class MeasureScreen : Screen
         now.Click += (_, _) => OnTimeline(TimelineCommand.ToNow);
         (timelineCard, timelineBody) = ScreenParts.Card(Ui, "measure.timelinecard", "타임라인", "", left, right, zoomOut, zoomIn, all, now);
         // 보이는 범위는 카드 머리가 아니라 본문 위 한 줄 (좁은 창에서 머리의 조작 버튼과 다투지 않게)
-        range = Fonts.Text("", Typography.Caption, Ui.Brushes.Muted);
+        range = Fonts.Text("", Typography.Caption, Context.Options.HideMeasuredText ? Ui.Brushes.Transparent : Ui.Brushes.Muted);   // 실측 대비 시험: 카드 본문 글 (M12 설계 F)
         AutomationProperties.SetAutomationId(range, "measure.timeline.range");
         timelineStack.Children.Add(range);
         timelineStack.Children.Add(timeline);
@@ -177,6 +177,7 @@ public sealed class MeasureScreen : Screen
 
     public override IReadOnlyList<UIElement> Parts => [header, timelineCard, cards, marksCard];
     public override FrameworkElement? SharedTarget => timelineCard;
+    public override TimelinePanel? SettleTimeline => timeline;   // "그리기 끝남" 타임라인 조건 (M12 G1-B)
 
     /// <summary>범례: 줄을 넘기는 공용 범례 (150%에서 잘리지 않게, M11 C3) + Wi‑Fi 신호 항목 (M12 설계 C).</summary>
     private UIElement Legend() => legend = new TimelineLegend(Ui, "measure.timeline.legend");

@@ -155,6 +155,7 @@ public sealed class HomeScreen : Screen
     }
 
     public override IReadOnlyList<UIElement> Parts => [header, heroCard, mapCard, chartCard, diagCard, recentCard];
+    public override TimelinePanel? SettleTimeline => timeline;   // "그리기 끝남" 타임라인 조건 (M12 G1-B)
 
     private bool? twoColumns;
 

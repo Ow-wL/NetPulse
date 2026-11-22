@@ -103,6 +103,12 @@ public sealed class TimelinePanel : UserControl
     public int? FirstFrameColumns { get; private set; }
     public bool HasFrame => frame is not null;
 
+    /// <summary>
+    /// "그리기 끝남"의 타임라인 조건 (M12 설계 G1-B [2-4]): 화면에 배치돼 폭이 있고 장면을 가진 타임라인만 본다.
+    /// 그때 장면에 쓴 열 수가 지금 열 수(= round(plotWidth))와 같아야 한다. 시험의 <c>TimelineProblems</c>와 같은 판정.
+    /// </summary>
+    public bool FrameMatches => !IsLoaded || ActualWidth <= 0 || !HasFrame || FrameColumns == Columns;
+
     /// <summary>진단 값: 장면 유무, 지금 폭, 장면에 쓴 열 수. 장면이 있으면 열 수가 지금 폭과 같아야 한다 (M12 설계 A)</summary>
     public object Diag() => new
     {

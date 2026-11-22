@@ -217,6 +217,8 @@ if (Test-Path $g5Dir) {
     if ($m12Extras.Count -eq 0) { throw 'M12 추가 장면 목록을 읽지 못했습니다.' }
     foreach ($n in $m12Extras) { $required += "matrix-$n" }
     foreach ($c in 'measure-live', 'measure-outage', 'firstrun-detected', 'profile-ok', 'settings-normal', 'terms') { foreach ($t in 'dark', 'light') { $required += "contrast-m11-$c-$t" } }   # 설계 C2
+    # M12 설계 F: 부품(단추·칩·배너)과 카드 본문 글의 화면 대비 (장면은 M12ContrastTests.Scenes와 같다)
+    foreach ($c in 'measure-done', 'measure-startfail', 'firstrun-detected', 'profile-locked', 'records-list', 'settings-about') { foreach ($t in 'dark', 'light') { $required += "contrast-m12-$c-$t" } }
     $missing = @($required | Where-Object { -not (Test-Path (Join-Path $g5Dir "$_.json")) })
     $matrix = @(Get-ChildItem $g5Dir -Filter 'matrix-*.json' | Sort-Object Name)
     # M2 회귀 매트릭스는 따로 센다: M5 결과가 합쳐져 M2 캡처 누락을 가리지 않게 (G4 M5 1라운드 C3)

@@ -30,6 +30,8 @@ public static class Size
     public const double NavRailWidth = 232;
     public const double FocusOuter = 2, FocusInner = 1;
     public const double Hairline = 1;
+    /// <summary>비활성 단추 점선 테두리: 칠한 길이, 빈 길이 (선 굵기 배수, M12 설계 F)</summary>
+    public const double DisabledDashOn = 3, DisabledDashOff = 2;
     public const double IconStroke = 1.7;
     public const double ToggleTrackWidth = 40, ToggleTrackHeight = 22, ToggleKnob = 16;
     public const double ToastWidth = 340, DialogWidth = 420;

@@ -189,6 +189,12 @@ public sealed class ReportScreen : Screen
 
     public override int FrameHooks => (drawing is null ? 0 : 1) + (clearing is null ? 0 : 1);
 
+    /// <summary>"그리기 끝남" (M12 설계 G1-B): 종이 면 그리기·지난 종이 면 떼기가 프레임에 걸려 있는 동안 (숨김으로 멈춘 그리기는 보이지 않으니 뺀다).</summary>
+    public override int PendingDraws => FrameHooks;
+
+    /// <summary>종이 면을 새로 그릴 때마다 오른다.</summary>
+    public override int SceneGeneration => drawGen;
+
     private EventHandler<object>? drawing, clearing;
     private Panel? clearingOld;
 
@@ -524,6 +530,7 @@ public sealed class ReportScreen : Screen
             Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFrame;
             if (ReferenceEquals(clearing, (EventHandler<object>)OnFrame)) { clearing = null; clearingOld = null; }
             paperHost.Children.Remove(old);
+            Context.QueueDiag();   // 예약된 그리기가 줄었다 (M12 G1-B "그리기 끝남")
         }
         if (clearing is { } previous)
         {
