@@ -13,6 +13,31 @@ namespace NetPulse.App.Screens;
 /// <summary>화면들이 함께 쓰는 작은 부품과 색 고르기.</summary>
 public static class ScreenParts
 {
+    /// <summary>
+    /// 다시 붙인 단추에 초점을 준다. 이미 붙어 있고 켜져 있으면 바로, 아니면 붙은 뒤(Loaded)나 켜진 뒤에 한 번.
+    /// 느린 PC(M12 노트북 중간 확인)에서는 낮은 우선순위 작업·프레임 콜백이 다시 넣은 단추의 Loaded보다 먼저 와서 초점을 주지 못했다
+    /// (리포트: 내보내는 동안 단추가 빠지며 옮겨 간 가리기 단추에 초점이 남음, 기록: [목록으로] 대신 탐색). <paramref name="still"/>이 거짓이 되면 주지 않는다.
+    /// </summary>
+    public static void FocusWhenReady(Control target, Func<bool> still)
+    {
+        if (target.IsLoaded && target.IsEnabled && target.Focus(FocusState.Programmatic)) return;
+        bool done = false;
+        RoutedEventHandler? loaded = null;
+        DependencyPropertyChangedEventHandler? enabled = null;
+        void Try()
+        {
+            if (done || !target.IsLoaded || !target.IsEnabled) return;
+            done = true;
+            target.Loaded -= loaded;
+            target.IsEnabledChanged -= enabled;
+            if (still()) target.Focus(FocusState.Programmatic);
+        }
+        loaded = (_, _) => Try();
+        enabled = (_, _) => Try();
+        target.Loaded += loaded;
+        target.IsEnabledChanged += enabled;
+    }
+
     /// <summary>등급 색 (언제나 글자·등급 이름과 함께 쓴다).</summary>
     public static Brush GradeBrush(Ui ui, Grade? g) => g switch
     {

@@ -256,6 +256,11 @@ public sealed class ScenarioDiagnosis
     public string? FlushDns { get; init; }
     /// <summary>검사별 지연 ms (adapter, gateway, tcp, dns, https, portal, link, site, flushDns): 진행 장면용.</summary>
     public IReadOnlyDictionary<string, int>? DelayMs { get; init; }
+    /// <summary>
+    /// HTTPS 검사 제한 시간 ms (1000~60000, 없으면 기본 4.5초). 시험용: "진행 중" 상태를 느린 PC에서도 확실히 붙잡게
+    /// (M12 노트북 중간 확인: 기본 4.5초 안에 진행 중 Enter가 닿지 못했다).
+    /// </summary>
+    public int? HttpsTimeoutMs { get; init; }
 
     internal static readonly string[] Outcomes = ["ok", "fail", "error", "timeout"];
     private static readonly string[] DelayKeys = ["adapter", "gateway", "tcp", "dns", "https", "portal", "link", "site", "flushDns"];
@@ -290,6 +295,7 @@ public sealed class ScenarioDiagnosis
             Outcome(site.Dns, "site.dns");
             Outcome(site.Https, "site.https");
         }
+        if (HttpsTimeoutMs is < 1000 or > 60_000) throw new ScenarioException("diagnosis.httpsTimeoutMs: 1000~60000입니다.");
         foreach (var (key, ms) in DelayMs ?? new Dictionary<string, int>())
         {
             if (!DelayKeys.Contains(key)) throw new ScenarioException($"diagnosis.delayMs: 모르는 검사입니다: {key}");

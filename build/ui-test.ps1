@@ -92,8 +92,13 @@ try {
     # 실측 시나리오(M5·M6 LiveRunTests)는 이 PC 네트워크를 쓰고 결과를 공개하지 않으므로 게이트에서 빼고 따로 돌린다.
     # 클래스 이름 대신 특성으로 뺀다 (M6 설계 7.5): 새 실측 시험이 클래스 목록에서 빠지는 일이 없게
     # README 캡처(Kind=Docs)도 게이트 밖이다 (M10 설계 C [1-10]): build/readme-shots.ps1로 따로 찍는다
-    $commands += Invoke-Step 'ui-test' 5400 'dotnet' @('test', '--project', 'tests/NetPulse.UiTests', '-c', 'Release', '--no-build', '--report-xunit-trx', '--results-directory', $trxDir, '--filter-not-trait', 'Kind=Live', '--filter-not-trait', 'Kind=Docs') $uiDir
+    # M12: 시험이 1,000개를 넘고 최종 게이트가 노트북이라 90분에 끊겼다 (노트북 중간 확인, 885개째) → 150분
+    $commands += Invoke-Step 'ui-test' 9000 'dotnet' @('test', '--project', 'tests/NetPulse.UiTests', '-c', 'Release', '--no-build', '--report-xunit-trx', '--results-directory', $trxDir, '--filter-not-trait', 'Kind=Live', '--filter-not-trait', 'Kind=Docs') $uiDir
 } catch { $failed = $_.Exception.Message }
+finally {
+    Remove-Item Env:DOTNET_BUNDLE_EXTRACT_BASE_DIR -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $extract -ErrorAction SilentlyContinue
+}
 # 성능 시험 반복 (M12 설계 G2): 같은 exe로 성능 시험만 더 돌려 모두 보존한다. 결과는 ui/perf-run-<n>/ (캡처 폴더와 따로)
 $perfRuns = @()
 $perfTests = @('NetPulse.UiTests.G5Tests.FramesAndResourcesStayWithinBudget', 'NetPulse.UiTests.M5G5Tests.MeasureScreenStaysWithinBudget',
@@ -126,10 +131,6 @@ if ($null -eq $failed) {
         $perfRuns += [ordered]@{ run = $n; tests = $runSummary; passed = $runPassed; error = $runError }
         if (-not $runPassed -and $null -eq $failed) { $failed = "성능 시험 반복 $n 실패: $runError" }
     }
-}
-finally {
-    Remove-Item Env:DOTNET_BUNDLE_EXTRACT_BASE_DIR -ErrorAction SilentlyContinue
-    Remove-Item -Recurse -Force $extract -ErrorAction SilentlyContinue
 }
 $trx = Get-ChildItem $trxDir -Filter *.trx -ErrorAction SilentlyContinue | Select-Object -First 1
 $summary = if ($trx) { $neutral = Join-Path $uiDir 'ui-tests.trx'; Move-Item $trx.FullName $neutral; Read-TrxSummary $neutral } else { $null }

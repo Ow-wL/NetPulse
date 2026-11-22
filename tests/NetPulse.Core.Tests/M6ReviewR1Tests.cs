@@ -86,6 +86,16 @@ public sealed class M6ReviewR1Tests : IDisposable
         Assert.False(adapter.HasDns);                                 // 적은 필드만 바뀜
     }
 
+    /// <summary>M12 노트북 중간 확인: 시나리오가 HTTPS 제한 시간을 정할 수 있다 (시험용, 1~60초). 없으면 기본값.</summary>
+    [Fact]
+    public void ScenarioCanSetTheHttpsTimeLimit()
+    {
+        Assert.Equal(new DiagnosisSettings().HttpsTimeout, DemoDiagnosticProbes.Settings(Load("outage-long")).HttpsTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(15), DemoDiagnosticProbes.Settings(Load("outage-long", """{ "httpsTimeoutMs": 15000 }""")).HttpsTimeout);
+        Assert.Throws<ScenarioException>(() => Load("outage-long", """{ "httpsTimeoutMs": 999 }"""));
+        Assert.Throws<ScenarioException>(() => Load("outage-long", """{ "httpsTimeoutMs": 60001 }"""));
+    }
+
     [Fact]
     public async Task ProbesUseTheRoundAtTheCallNotAfterTheDelay()
     {

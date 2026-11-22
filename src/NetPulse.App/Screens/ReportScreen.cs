@@ -479,7 +479,7 @@ public sealed class ReportScreen : Screen
         }
         stack.Children.Add(row);
         body.Set(stack, "error");
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { if (retry.IsLoaded) retry.Focus(FocusState.Programmatic); });
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => ScreenParts.FocusWhenReady(retry, () => true));
         return card;
     }
 
@@ -718,7 +718,7 @@ public sealed class ReportScreen : Screen
         Rerender();
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
-            if (leakKinds.Count == 0 && exportButton.IsLoaded) exportButton.Focus(FocusState.Programmatic);
+            if (leakKinds.Count == 0) ScreenParts.FocusWhenReady(exportButton, () => leakKinds.Count == 0 && !exporting);
         });
     }
 

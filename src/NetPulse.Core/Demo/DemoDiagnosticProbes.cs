@@ -45,6 +45,7 @@ public sealed class DemoDiagnosticProbes : IDiagnosticProbes
         TcpTargets = scenario.Targets.Where(t => t.Role == "external").Take(2).Select(t => IPAddress.Parse(t.Address)).ToArray(),
         Domains = SlotDomains,
         PortalUri = PortalUri,
+        HttpsTimeout = scenario.Diagnosis?.HttpsTimeoutMs is int ms ? TimeSpan.FromMilliseconds(ms) : new DiagnosisSettings().HttpsTimeout,
     };
 
     private long Round => (long)world.TimeBase.Scaled.TotalSeconds;
