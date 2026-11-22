@@ -89,6 +89,9 @@ public sealed class M10AboutTests
         int over33 = frames.GetProperty("over33").GetInt32();
         // M12 설계 G2: 창 모니터의 주사율로 "긴 간격"을 세고 지금 프로필의 고지 상한을 쓴다 (standard 판정도 남긴다)
         double? hz = frames.TryGetProperty("hz", out var hzProp) && hzProp.ValueKind == JsonValueKind.Number ? hzProp.GetDouble() : null;
+        // 측정 앞뒤 주사율이 다르거나 앞에서 못 읽었으면 앱이 hz를 비우고 refreshChanged를 남긴다 (G4 M12 1라운드 6)
+        bool refreshChanged = frames.TryGetProperty("refreshChanged", out var rc) && rc.GetBoolean();
+        Assert.False(refreshChanged, "고지 측정 중 모니터·주사율이 바뀌었거나 측정 앞에서 읽지 못함 (앞 " + (frames.TryGetProperty("hzBefore", out var hb) ? hb.ToString() : "없음") + ")");
         Assert.True(hz is > 0, "주사율을 확정하지 못함 (출처 " + (frames.TryGetProperty("refreshSource", out var rs) ? rs.GetString() : "없음") + ")");
         var gaps = frames.GetProperty("gaps").EnumerateArray().Select(g => g.GetDouble()).ToArray();
         var limits = FrameContract.For(Perf.Profile, hz!.Value);

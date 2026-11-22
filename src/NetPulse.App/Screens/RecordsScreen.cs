@@ -244,7 +244,7 @@ public sealed class RecordsScreen : Screen
             scroll.ChangeView(null, 0, null, true);
             // 다시 그리면 [목록으로]가 새 줄로 옮겨 붙어 아직 배치 전이다: 프레임을 그린 뒤에 초점을 준다 (M7 UI 시험 1차: 초점이 탐색으로 빠짐)
             // 프레임 콜백은 그 프레임의 배치보다 먼저라 느린 PC에서는 아직 붙기 전일 수 있다: 붙은 뒤에 준다 (M12 노트북 중간 확인)
-            OnePerFrame(() => { if (req == requestGen && mode == Mode.Detail) ScreenParts.FocusWhenReady(back, () => req == requestGen && mode == Mode.Detail); });
+            OnePerFrame(() => { if (req == requestGen && mode == Mode.Detail) ScreenParts.FocusWhenReady(back, this, () => req == requestGen && mode == Mode.Detail && !Suspended); });
             // 숨긴 동안 반영된 열기 완료 (M10 D3): 숨긴 창은 진단 값을 읽을 수 없어 기록으로 남긴다. 그리기 횟수가 숨길 때와 같아야 한다
             if (Suspended) Context.Log.Write("recordsHiddenApply", new { renders, rendersAtSuspend, frameHooks = FrameHooks });
         });

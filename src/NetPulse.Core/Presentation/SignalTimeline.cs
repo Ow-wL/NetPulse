@@ -115,6 +115,7 @@ public static class SignalTimeline
             var (t, r) = merged[i];
             long to = r.LastMs + intervalMs;
             if (t.EndMs is long end) to = Math.Min(to, Math.Max(r.LastMs, end));
+            if (r.EndMs is long own) to = Math.Min(to, Math.Max(r.LastMs, own));   // 그 묶음의 관측 종료 (같은 어댑터를 다시 관측해도, G4 M12 1라운드 2)
             if (i + 1 < merged.Length) to = Math.Min(to, merged[i + 1].Run.FirstMs);
             to = Math.Max(to, r.FirstMs);
             bool sameAsPrev = i > 0 && ReferenceEquals(merged[i - 1].Track, t);

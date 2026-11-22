@@ -46,7 +46,8 @@ public static class StartTrace
             string run = (string)o["run"]!, step = (string)o["step"]!;
             DateTimeOffset? at = o["t"]?.GetValueKind() == JsonValueKind.String
                 && DateTimeOffset.TryParse((string)o["t"]!, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var t) ? t : null;
-            int? code = o["code"]?.GetValueKind() == JsonValueKind.Number ? (int)o["code"]! : null;
+            // 종료 코드는 int 범위 숫자만 (범위 밖·소수는 없음으로): 변환 예외가 앱 시작을 막지 않게 (G4 M12 1라운드 3)
+            int? code = o["code"] is JsonValue cv && cv.GetValueKind() == JsonValueKind.Number && cv.TryGetValue<int>(out var c) ? c : null;
             if (!steps.TryGetValue(run, out var list)) { steps[run] = list = []; order.Add(run); }
             list.Add((step, at, code));
         }

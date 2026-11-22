@@ -1965,3 +1965,20 @@ G1-B 캡처 전 대기 (`docs/loop/m12/capture-wait.md`):
   - 움직임 줄이기 뒤 화면 변화 1건(평균 0.82·99백분위 12): 켠 직후 불투명도 전환이 300 ms 안에 안 끝남으로 본다(확인 안 함). → 시험이 최대 3초 동안 0.5초 쌍이 같아지기를 기다린다. 계속 움직이면 여전히 실패.
   - 리포트 성능 1건: report-worst 최대 127.6 ms(기준 100 ms·6회, 긴 간격 6회). 같은 구간 GC 정지 합 460 ms(이전 노트북 3번: 최대 83~89 ms, GC 258~304 ms). 표본 하나라 고치지 않았다. 3차 실행을 성능 3회 반복으로 돌려 흔들림인지 회귀인지 본다.
 - 3차 `daf08d5`(성능 3회 반복)는 사용자 허락("지금 돌려")으로 실행 중.
+
+## 2026-11-23 · M12 G4 1라운드 (`3957b86`, REVISE: 차단 0·중요 6·사소 2)
+
+검토 원문: `.loop/reviews/m12-g4-r1-*.md`. Codex는 정적 분석으로 반례를 들었다(실행 재현 아님). 중요 6건을 코드로 확인했고 모두 맞아 고쳤다. 빌드만 확인했다(경고·오류 0), 시험은 노트북에서.
+
+1. 신호 묶음 복원: 가운데 변경 이벤트를 잃으면 열린 묶음을 `prev*` 확인 없이 늘렸다 → 열린 묶음이 `prev*`와 시작·상태·값이 같을 때만 이어 붙이고, 다르면 열린 묶음은 아는 데까지 닫고 앞 묶음을 `prev*`로 따로 만든다. 시험 `LosingAMiddleChangeEventDoesNotMergeDifferentRuns`.
+2. 관측 종료 경계: 같은 어댑터를 다시 관측하면 앞 묶음의 마지막 표본이 간격 하나를 통째로 가졌다 → `SignalRun.EndMs`(그 묶음을 끝낸 관측 종료). 세션의 마지막 체크포인트·기록 복원이 넣고, 통계(`Weight`)·그림(`SignalTimeline.Trace`)이 그 시각에서 자른다. 기존 기록 형식은 그대로(`end` 체크포인트의 `endMs`). 시험 `ResumedObservationKeepsTheEarlierEndBoundary`, 기존 시험 3곳의 기대 묶음에 `EndMs`.
+3. 시작 기록: int 범위 밖·소수 종료 코드가 변환 예외로 앱 시작을 막을 수 있었다 → `TryGetValue<int>`로 읽고, `StartupTrace.Begin`은 어떤 예외도 `Failure`로만 남긴다. 시험 `OutOfRangeExitCodesAreReadAsNoCode`.
+4. 지연 초점: 조건 확인이 즉시 경로에 없고, 사용자가 초점을 옮겨도 나중에 빼앗을 수 있었고, 구독이 남을 수 있었다 → `FocusWhenReady(target, scope, still)`: 처음에 조건 확인, 예약 뒤 초점이 다른 곳으로 옮겨 갔으면 주지 않음, `Waits.FocusRestore`(2초)가 지나거나 조건이 거짓이면 구독을 모두 푼다. 호출부 조건에 화면 숨김(`Suspended`)을 더했다.
+5. 결 그리기와 "그리기 끝남": 333 ms 타이머 → 백그라운드 만들기 → UI 반영이 `pendingWork`에 없었다 → `Lights.GrainPending`을 예약된 그리기에, `GrainGeneration`을 세대에 넣고, 끝나면 진단을 다시 쓴다. `GrainReady`도 예약 중이면 거짓. `docs/loop/m12/capture-wait.md` 갱신.
+6. 고지 성능 시험의 주사율: 끝에서만 읽었다 → `LegalView.Measuring`에서 측정 앞 주사율을 읽고, 앞뒤 주사율·모니터가 다르거나 앞에서 못 읽으면 `hz`를 비우고 `refreshChanged`를 남긴다. 시험은 `refreshChanged`가 거짓이어야 한다 (FramePacer 구간과 같은 계약).
+
+사소 2건 (고치지 않음, 기록):
+- 결론 문장은 끊김(episode) 수, 등급의 `outage-many`는 하위 구간 수: 한 끊김 안에 외부 끊김 하위 구간이 3개면 "매우 나쁨 / 1번 끊김"이 가능하다. 등급 기준(M3부터)을 바꾸지 않는다. 1.0.0 뒤 문구에서 단위를 드러내는 것을 검토한다.
+- 비활성 표현 불일치 (`SettingToggle`·`RowButton`·`SegmentedChoice`): 구현 중 결정 (3)에 적은 잔여 그대로.
+
+Codex가 확인했다고 한 것: WLAN 메모리 해제·잠금, opcode·구조체 오프셋(Microsoft 문서 대조), `current_connection`·목록·스캔 경로 없음, 신호가 판정·등급·후보에 들어가지 않음, 리포트 어댑터 가림, A 폭 0 방어, `Main` 대체가 생성 시작 함수를 그대로 부름, low·standard 예산과 결정 일치, 성능 반복 판정, 문서용 주소만 씀. 못 본 것: D 문구 전수, E·F 계산 시험 전체, UI 장면, 실제 Wi‑Fi·대비·깜빡임.

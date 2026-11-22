@@ -51,8 +51,9 @@ public static class StartupTrace
                 if (StartTrace.Trimmed(lines, new FileInfo(path).Length) is { } kept) File.WriteAllLines(path, kept, new UTF8Encoding(false));
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        catch (Exception ex)
         {
+            // 보조 진단 파일이다: 읽기·해석·자르기의 어떤 실패도 앱 시작을 막지 않는다 (G4 M12 1라운드 3). 종류만 앱 기록에
             Failure ??= ex.GetType().Name;
         }
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Step(StartTrace.ExitStep, Environment.ExitCode);

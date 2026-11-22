@@ -232,6 +232,7 @@ public sealed partial class AppShell : Window
         Grid.SetColumn(screens, 1);
         appGrid.Children.Add(screens);
         root.Children.Add(ui.Lights.Root);
+        ui.Lights.GrainSettled += QueueDiag;   // 결 그리기가 끝나면 "그리기 끝남"을 다시 쓴다 (G4 M12 1라운드 5)
         root.Children.Add(appGrid);
         root.Children.Add(toasts);
         root.Children.Add(dialog);

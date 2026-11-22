@@ -93,7 +93,8 @@ public sealed partial class AppShell
     {
         drawSettle ??= new DrawSettle(root, QueueDiag);
         var current = screens.Current;
-        return drawSettle.Diag(ui, (renderQueued ? 1 : 0) + screens.PendingDraws, screens.Generation, current?.SceneGeneration ?? 0,
+        // 결(배경 무늬) 그리기도 예약된 그리기·장면 세대에 넣는다 (G4 M12 1라운드 5)
+        return drawSettle.Diag(ui, (renderQueued ? 1 : 0) + screens.PendingDraws + (ui.Lights.GrainPending ? 1 : 0), screens.Generation + ui.Lights.GrainGeneration, current?.SceneGeneration ?? 0,
             () => screens.LaidOut, () => screens.Current?.SettleTimeline is not { } t || t.FrameMatches);
     }
 

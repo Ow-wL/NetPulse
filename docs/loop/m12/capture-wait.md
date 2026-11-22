@@ -23,8 +23,10 @@ settled = pendingWork == 0 && finiteMotions == 0 && laidOut && timelineOk
 | 기록 화면 낮은 우선순위 큐 (타임라인 `QueueTimeline` 포함) | `RunOnePerFrame`에서 넘길 때 `inFlight++` | 넘긴 작업이 돌 때 `inFlight--` (세대가 달라 건너뛰어도), 넘기기 실패 시 바로 `inFlight--` |
 | 리포트 종이 면 그리기·지난 면 떼기 | `ReportScreen.Draw`·`ClearPaper`가 프레임에 걸 때 (`drawing`·`clearing`, `FrameHooks`로 셈) | 다 그리거나 다 떼서 프레임에서 뗄 때, 세대가 바뀌어 버릴 때, 화면을 떠나 멈출 때 |
 | 쇼케이스 대화상자 절의 열기 예약 | `ShowcaseWindow.ShowSection`에서 넘길 때 `pendingWork++` | 그 작업이 돌 때 `pendingWork--` |
+| 배경 결 그리기 (G4 M12 1라운드 5) | `Lights.ScheduleGrain`에서 `grainPending = true` (1로 셈) | 결을 붙였을 때, 그릴 것이 없을 때(같은 크기·아직 배치 전), 결을 껐을 때, 만들기 실패. 만드는 사이 새 예약이 걸리면 그 예약이 끝낸다. 끝나면 `GrainSettled`로 진단을 다시 쓴다 |
 
-셸 값은 `renderQueued + ScreenHost.PendingDraws`(공통 요소 이동 대기 + **지금 화면**의 `Screen.PendingDraws`).
+셸 값은 `renderQueued + ScreenHost.PendingDraws`(공통 요소 이동 대기 + **지금 화면**의 `Screen.PendingDraws`) + 결 그리기 예약.
+셸의 `generation`에는 결 이미지를 붙인 횟수(`Lights.GrainGeneration`)를 더한다.
 작업이 끝나 수가 줄 때 진단을 다시 쓰게 했다 (기록 화면 조각 실행, 리포트 떼기 끝. 셸 렌더와 리포트 그리기 끝은 원래 진단을 다시 썼다).
 
 ### finiteMotions: 끝나는 모션 수

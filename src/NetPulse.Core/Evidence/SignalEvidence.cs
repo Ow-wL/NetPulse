@@ -51,7 +51,9 @@ public interface ISignalSource : IDisposable
 /// <param name="LastMs">마지막 표본 경과 ms (반복 표본은 줄로 쓰지 않으므로 실시간 사본·체크포인트·다음 변경 이벤트로만 안다)</param>
 /// <param name="Samples">표본 수</param>
 /// <param name="Continues">바로 앞 묶음에서 끊김 없이 이어짐 (공백·넘침·번호 바뀜·관측 종료가 사이에 없음). 그리기가 선을 이을지 정한다</param>
-public sealed record SignalRun(SignalState State, int? Quality, int? RssiDbm, long FirstMs, long LastMs, long Samples, bool Continues = false);
+/// <param name="EndMs">이 묶음을 끝낸 관측 종료 시각 (어댑터가 경로에서 빠짐·측정 끝). 마지막 표본의 간격을 여기서 자른다.
+/// 같은 어댑터를 나중에 다시 관측해도 앞 묶음의 경계가 남는다 (G4 M12 1라운드 2). 모르면 null</param>
+public sealed record SignalRun(SignalState State, int? Quality, int? RssiDbm, long FirstMs, long LastMs, long Samples, bool Continues = false, long? EndMs = null);
 
 /// <summary>상태별 수 (표본 수 또는 ms). 값 비교가 되도록 필드로 둔다 (요약과 재계산을 같다고 비교, [2-3]).</summary>
 public readonly record struct SignalStateCounts(long Ok, long NotConnected, long Denied, long Unsupported, long Failed)
@@ -112,10 +114,14 @@ public sealed record SignalStats(
 /// </summary>
 public static class SignalStatistics
 {
-    /// <summary>묶음 하나의 유효 시간 ms: (표본 수 − 1) × 간격 + min(간격, 끝 − 마지막 표본), 단 묶음 시작부터 끝까지를 넘지 않는다.</summary>
+    /// <summary>
+    /// 묶음 하나의 유효 시간 ms: (표본 수 − 1) × 간격 + min(간격, 끝 − 마지막 표본), 단 묶음 시작부터 끝까지를 넘지 않는다.
+    /// 끝은 전체 관측 종료와 그 묶음의 관측 종료(<see cref="SignalRun.EndMs"/>) 중 이른 것이다.
+    /// </summary>
     public static long Weight(SignalRun run, long intervalMs, long endMs)
     {
         if (run.Samples <= 0 || run.FirstMs > endMs) return 0;
+        if (run.EndMs is long own) endMs = Math.Min(endMs, Math.Max(own, run.LastMs));
         long w = (run.Samples - 1) * intervalMs + Math.Clamp(endMs - run.LastMs, 0, intervalMs);
         return Math.Min(w, Math.Max(0, endMs - run.FirstMs));
     }
@@ -253,9 +259,9 @@ public static class SignalEvidenceBuilder
                         : new SignalRun(cs, q, r, f, l, n);
                     if (Str(e, "reason") == "end")
                     {
-                        t.Closed.Add(t.Open);
-                        t.Open = null;
                         t.EndedMs = Long(e, "endMs") ?? Long(e, "at");
+                        t.Closed.Add(t.Open with { EndMs = t.EndedMs });
+                        t.Open = null;
                     }
                     break;
                 case "summary":
@@ -281,18 +287,30 @@ public static class SignalEvidenceBuilder
         return new SignalEvidence(adapters);
     }
 
-    /// <summary>변경 이벤트의 prev* 필드로 앞 묶음을 닫는다. 앞 묶음을 모르면(앞 이벤트 유실) prev 값으로 만든다.</summary>
+    /// <summary>
+    /// 변경 이벤트의 prev* 필드로 앞 묶음을 닫는다. 열린 묶음이 바로 그 앞 묶음(시작·상태·값이 같음)일 때만 이어 붙인다.
+    /// 다르면 사이의 변경 이벤트를 잃은 것이다: 열린 묶음은 아는 데까지만 닫고 앞 묶음은 prev 값으로 따로 만든다
+    /// (0초 80% → 1초 20% → 2초 90%에서 1초 이벤트를 잃어도 80% 묶음을 20% 구간까지 늘리지 않는다, G4 M12 1라운드 1).
+    /// </summary>
     private static void ClosePrevious(Track t, JsonObject e)
     {
         long last = Long(e, "prevLastMs")!.Value;
+        var ps = SignalText.Parse(Str(e, "prevState"));
+        long? pf = Long(e, "prevFirstMs"), pn = Long(e, "prevSamples");
+        int? pq = Int(e, "prevQuality"), pr = Int(e, "prevRssi");
         if (t.Open is { } open)
         {
-            t.Closed.Add(open with { LastMs = last, Samples = Long(e, "prevSamples") ?? open.Samples });
             t.Open = null;
-            return;
+            bool same = pf is null || (open.FirstMs == pf && (ps is null || open.State == ps) && open.Quality == pq && open.RssiDbm == pr);
+            if (same)
+            {
+                t.Closed.Add(open with { LastMs = last, Samples = pn ?? open.Samples });
+                return;
+            }
+            t.Closed.Add(open);
         }
-        if (SignalText.Parse(Str(e, "prevState")) is { } ps && Long(e, "prevFirstMs") is long pf && Long(e, "prevSamples") is long pn)
-            t.Closed.Add(new SignalRun(ps, Int(e, "prevQuality"), Int(e, "prevRssi"), pf, last, pn));
+        if (ps is { } state && pf is long first && pn is long n)
+            t.Closed.Add(new SignalRun(state, pq, pr, first, last, n));
     }
 
     private static SignalStats? ParseSummary(JsonObject e)

@@ -114,6 +114,47 @@ public sealed class M12SignalStatisticsTests
         Assert.Equal(71_000, a.Stats.EndMs);   // 요약이 없으면 마지막 저장 표본도 간격 하나를 갖는다
     }
 
+    /// <summary>G4 M12 1라운드 1: 가운데 변경 이벤트(1초 20%)를 잃어도 80% 묶음을 늘리지 않고 prev 값으로 20% 묶음을 복원한다.</summary>
+    [Fact]
+    public void LosingAMiddleChangeEventDoesNotMergeDifferentRuns()
+    {
+        var events = new List<JsonObject>
+        {
+            Signal("change", 0, new JsonObject { ["state"] = "ok", ["quality"] = 80, ["sampleMs"] = 0 }),
+            // 1초 20% 변경 이벤트는 잃었다
+            Signal("change", 2_000, new JsonObject { ["state"] = "ok", ["quality"] = 90, ["sampleMs"] = 2_000, ["prevState"] = "ok", ["prevQuality"] = 20,
+                ["prevFirstMs"] = 1_000, ["prevLastMs"] = 1_000, ["prevSamples"] = 1 }),
+        };
+        var a = Assert.Single(SignalEvidenceBuilder.FromEvents(events, 1000).Adapters);
+        Assert.Equal(3, a.Runs.Count);
+        Assert.Equal(new SignalRun(SignalState.Ok, 80, null, 0, 0, 1), a.Runs[0]);
+        Assert.Equal(new SignalRun(SignalState.Ok, 20, null, 1_000, 1_000, 1), a.Runs[1]);
+        Assert.Equal(90, a.Runs[2].Quality);
+        Assert.Equal(Math.Round((80.0 + 20.0 + 90.0) / 3, 2), a.Stats.QualityAvg);
+    }
+
+    /// <summary>G4 M12 1라운드 2: 같은 어댑터를 다시 관측해도 앞 묶음의 마지막 표본은 그 묶음의 관측 종료에서 잘린다.</summary>
+    [Fact]
+    public void ResumedObservationKeepsTheEarlierEndBoundary()
+    {
+        var events = new List<JsonObject>
+        {
+            Signal("change", 900, new JsonObject { ["state"] = "ok", ["quality"] = 80, ["sampleMs"] = 900 }),
+            Signal("checkpoint", 1_000, new JsonObject { ["reason"] = "end", ["state"] = "ok", ["quality"] = 80, ["firstMs"] = 900, ["lastMs"] = 900,
+                ["runSamples"] = 1, ["endMs"] = 1_000 }),
+            Signal("change", 2_000, new JsonObject { ["state"] = "ok", ["quality"] = 40, ["sampleMs"] = 2_000 }),
+            Signal("checkpoint", 3_000, new JsonObject { ["reason"] = "end", ["state"] = "ok", ["quality"] = 40, ["firstMs"] = 2_000, ["lastMs"] = 2_000,
+                ["runSamples"] = 1, ["endMs"] = 3_000 }),
+        };
+        var a = Assert.Single(SignalEvidenceBuilder.FromEvents(events, 1000).Adapters);
+        Assert.Equal(1_000, a.Runs[0].EndMs);
+        Assert.Equal(100, SignalStatistics.Weight(a.Runs[0], 1000, 3_000));          // 900 → 1000 (유선으로 바뀐 때)
+        Assert.Equal(1_100, a.Stats.StateMs.Ok);                                      // 100 + 1000
+        Assert.Equal(Math.Round((80.0 * 100 + 40.0 * 1000) / 1_100, 2), a.Stats.QualityAvg);
+        var trace = NetPulse.Core.Presentation.SignalTrace.FromEvidence(new SignalEvidence([a]), 1000);
+        Assert.Equal(1_000, trace.Runs[0].ToMs);                                     // 그림도 유선으로 바뀐 때까지만
+    }
+
     private static JsonObject Signal(string collection, long at, JsonObject fields)
     {
         var o = new JsonObject { ["id"] = "x", ["type"] = "signal", ["at"] = at, ["wall"] = RecordSchema.Iso(Start), ["adapter"] = "a1", ["interfaceIndex"] = 9,
@@ -256,7 +297,7 @@ public sealed class M12SignalSessionTests : IDisposable
             new SignalRun(SignalState.Ok, 70, -60, 0, 69_000, 70),
             new SignalRun(SignalState.Denied, null, null, 70_000, 74_000, 5, true),
             new SignalRun(SignalState.NotConnected, null, null, 75_000, 79_000, 5, true),
-            new SignalRun(SignalState.Ok, 0, -90, 80_000, 130_000, 51, true),
+            new SignalRun(SignalState.Ok, 0, -90, 80_000, 130_000, 51, true, a.Summary!.EndMs),   // 측정 끝의 마지막 체크포인트가 관측 종료
         ], a.Runs);
         Assert.False(a.LastObserved);
         Assert.NotNull(a.Summary);
@@ -355,7 +396,7 @@ public sealed class M12SignalSessionTests : IDisposable
         Assert.Equal(2, change.Length);
         Assert.Equal(("gap", 2000L, 3L), ((string?)change[1]["break"], (long)change[1]["prevLastMs"]!, (long)change[1]["prevSamples"]!));
         var a = Assert.Single(SignalEvidenceBuilder.FromEvents(rec.Events, 1000).Adapters);
-        Assert.Equal([new SignalRun(SignalState.Ok, 70, -60, 0, 2000, 3), new SignalRun(SignalState.Ok, 70, -60, 3000, 4000, 2)], a.Runs);
+        Assert.Equal([new SignalRun(SignalState.Ok, 70, -60, 0, 2000, 3), new SignalRun(SignalState.Ok, 70, -60, 3000, 4000, 2, EndMs: a.Summary!.EndMs)], a.Runs);
         Assert.False(a.Runs[1].Continues);   // 공백을 건너 선을 잇지 않는다
         Assert.Equal(a.Summary, a.Recomputed);
     }
@@ -402,7 +443,7 @@ public sealed class M12SignalSessionTests : IDisposable
         Assert.Equal(15_000L, (long)Signals(rec.Events)[1]["endMs"]!);
         Assert.Null(Signals(rec.Events)[2]["prevLastMs"]);
         var a = Assert.Single(SignalEvidenceBuilder.FromEvents(rec.Events, 1000).Adapters);
-        Assert.Equal([new SignalRun(SignalState.Ok, 70, -60, 5000, 14_000, 10), new SignalRun(SignalState.Ok, 70, -60, 25_000, 30_000, 6)], a.Runs);
+        Assert.Equal([new SignalRun(SignalState.Ok, 70, -60, 5000, 14_000, 10, EndMs: 15_000), new SignalRun(SignalState.Ok, 70, -60, 25_000, 30_000, 6, EndMs: a.Summary!.EndMs)], a.Runs);
         Assert.Equal(15_000, a.Summary!.StateMs.Ok);
         Assert.Equal(a.Summary, a.Recomputed);
     }

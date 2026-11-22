@@ -65,6 +65,9 @@ public sealed class LegalView : Grid
     /// <remarks>마지막 인수는 간격 목록 (ms): 시험이 주사율 계약의 "긴 간격"을 센다 (M12 설계 G2, 33 고정값만 쓰지 않음).</remarks>
     public event Action<int, double, int, int, IReadOnlyList<double>>? Frames;
 
+    /// <summary>펼친 뒤 프레임 측정을 시작한다 (항목 번호): 측정 앞 주사율을 읽게 (G4 M12 1라운드 6).</summary>
+    public event Action<int>? Measuring;
+
     /// <summary>첫 항목 단추 (초점 보낼 곳).</summary>
     public Control? FirstFocus => rows.Count > 0 ? rows[0].Row : null;
 
@@ -84,6 +87,7 @@ public sealed class LegalView : Grid
         Expanded = -1;
         if (open)
         {
+            Measuring?.Invoke(index);
             var watch = System.Diagnostics.Stopwatch.StartNew();
             WatchFrames(index, watch);
             string body = Items[index].Text;

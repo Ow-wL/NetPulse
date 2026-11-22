@@ -80,6 +80,8 @@ public static class Waits
     public static readonly TimeSpan MoveHoldTest = TimeSpan.FromMilliseconds(700);
     /// <summary>시험 주입 <c>--move-fail hold-long</c>: 파일 하나가 닫기의 옮기기 대기 한도(CloseWrites)보다 오래 걸린다 (G4 M9 2라운드 b1)</summary>
     public static readonly TimeSpan MoveHoldLongTest = TimeSpan.FromSeconds(5);
+    /// <summary>다시 붙인 단추에 초점 주기를 미뤄 기다리는 한도 (G4 M12 1라운드 4): 이보다 늦게 붙으면 초점을 옮기지 않는다</summary>
+    public static readonly TimeSpan FocusRestore = TimeSpan.FromSeconds(2);
     /// <summary>시험 주입 <c>--report-fail slow</c>: 내보내기를 이만큼 늦춘다 (M8 "내보내는 중" 장면)</summary>
     public static readonly TimeSpan ReportSlowTest = TimeSpan.FromSeconds(4);
 

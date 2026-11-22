@@ -48,6 +48,21 @@ public sealed class M12StartTraceTests
         Assert.Equal("main", previous.LastStep);
     }
 
+    /// <summary>G4 M12 1라운드 3: 숫자지만 int가 아닌 종료 코드(범위 밖·소수)는 예외 없이 "코드 없음"으로 읽는다.</summary>
+    [Fact]
+    public void OutOfRangeExitCodesAreReadAsNoCode()
+    {
+        string[] lines =
+        [
+            """{"run":"a","step":"main","t":"2026-11-22T09:00:00Z"}""",
+            """{"run":"a","step":"exit","t":"2026-11-22T09:00:01Z","code":2147483648}""",
+            """{"run":"b","step":"exit","t":"2026-11-22T09:00:02Z","code":1.5}""",
+            """{"run":"c","step":"exit","t":"2026-11-22T09:00:03Z","code":-1}""",
+        ];
+        var runs = StartTrace.Runs(lines);
+        Assert.Equal([("a", true, (int?)null), ("b", true, null), ("c", true, -1)], runs.Select(r => (r.Run, r.Exited, r.ExitCode)));
+    }
+
     [Fact]
     public void LinesCarryOnlyRunStepTimeAndCode()
     {

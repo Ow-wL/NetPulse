@@ -42,7 +42,7 @@ public sealed class Lights
     private ThemeKind? grainTheme;
     private byte[]? grainMask;
     private int grainBuild;
-    private bool grainOn;
+    private bool grainOn, grainPending;
 
     public Lights(Motion motion)
     {
@@ -82,7 +82,23 @@ public sealed class Lights
     public bool AuroraOn => auroraOn;
     /// <summary>진단용: 결 층이 켜졌고 이미지가 지금 크기·배율·테마로 만들어졌는지 (M12 설계 E)</summary>
     public bool GrainOn => grainOn;
-    public bool GrainReady => grain.Source is not null && grainTheme == theme && grainMask is not null;
+    public bool GrainReady => !grainPending && grain.Source is not null && grainTheme == theme && grainMask is not null;
+    /// <summary>
+    /// 결 그리기가 예약됐거나 만드는 중 (타이머 → 백그라운드 만들기 → UI 반영). "그리기 끝남"의 예약된 그리기에 넣는다 (G4 M12 1라운드 5):
+    /// 늦게 그려지는 결이 settled 뒤에 화면을 바꾸지 않게.
+    /// </summary>
+    public bool GrainPending => grainPending;
+    /// <summary>결 이미지를 새로 붙일 때마다 오른다 (장면 세대)</summary>
+    public int GrainGeneration { get; private set; }
+    /// <summary>결 예약이 끝났다 (그렸거나 그릴 것이 없음): 진단을 다시 쓰게</summary>
+    public event Action? GrainSettled;
+
+    private void GrainDone()
+    {
+        if (!grainPending) return;
+        grainPending = false;
+        GrainSettled?.Invoke();
+    }
 
     public void Apply(EffectiveMode mode)
     {
@@ -92,6 +108,7 @@ public sealed class Lights
         grainOn = mode.Material == NetPulse.Design.Effects.MaterialMode.Acrylic;
         grain.Visibility = grainOn ? Visibility.Visible : Visibility.Collapsed;
         if (grainOn) ScheduleGrain();
+        else { grainTimer?.Stop(); grainBuild++; GrainDone(); }   // 끈 결은 기다리지 않는다 (진행 중인 만들기는 버림)
         // 그라디언트 정지점의 색만 바꾸면 이미 그려진 원형 그라디언트에 반영되지 않았다 (관측: 테마를 바꿔도 이전 테마의 빛이 남음).
         // 테마가 바뀌면 브러시를 새로 만들어 끼운다 (요소는 그대로, 8+3개라 비용이 작다).
         foreach (var l in lights)
@@ -165,6 +182,7 @@ public sealed class Lights
     private void ScheduleGrain()
     {
         if (!grainOn) return;
+        grainPending = true;
         grainTimer ??= CreateGrainTimer();
         grainTimer.Stop();
         grainTimer.Start();
@@ -181,26 +199,31 @@ public sealed class Lights
 
     private void BuildGrain()
     {
-        if (!grainOn || Root.XamlRoot is not { } xr || Root.ActualWidth <= 0 || Root.ActualHeight <= 0) return;
+        // 그릴 수 없으면(아직 배치 전 등) 기다리지 않는다: 붙은 뒤 Loaded·크기 변경이 다시 예약한다
+        if (!grainOn || Root.XamlRoot is not { } xr || Root.ActualWidth <= 0 || Root.ActualHeight <= 0) { GrainDone(); return; }
         double w = Root.ActualWidth, h = Root.ActualHeight;
         var size = NetPulse.Design.GrainMask.Size(w, h, xr.RasterizationScale);
-        if (size.Width <= 0) return;
+        if (size.Width <= 0) { GrainDone(); return; }
         var forTheme = theme;
         if (size == grainSize && grainMask is not null)
         {
             if (grainTheme != forTheme) Paint(grainMask, size, forTheme, w, h);
+            GrainDone();
             return;
         }
         int build = ++grainBuild;
         _ = Task.Run(() => NetPulse.Design.GrainMask.Build(size.Width, size.Height, size.Scale)).ContinueWith(t =>
         {
-            if (t.IsFaulted) return;
             queue.TryEnqueue(() =>
             {
-                if (build != grainBuild) return;   // 그 사이 크기가 또 바뀌었다
-                grainMask = t.Result;
-                grainSize = size;
-                Paint(t.Result, size, theme, w, h);
+                if (build != grainBuild) return;   // 그 사이 크기가 또 바뀌었거나 결을 껐다 (새 예약이 끝을 알린다)
+                if (!t.IsFaulted)
+                {
+                    grainMask = t.Result;
+                    grainSize = size;
+                    Paint(t.Result, size, theme, w, h);
+                }
+                if (!(grainTimer?.IsRunning ?? false)) GrainDone();   // 만드는 사이 새 예약이 걸렸으면 그것이 끝을 알린다
             });
         }, TaskScheduler.Default);
     }
@@ -214,6 +237,7 @@ public sealed class Lights
         grain.Width = w;
         grain.Height = h;
         grainTheme = forTheme;
+        GrainGeneration++;
     }
 
     private static RadialGradientBrush Radial(NetPulse.Design.Rgba color)

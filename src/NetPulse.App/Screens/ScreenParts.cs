@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using NetPulse.App.Design;
 using NetPulse.App.Design.Controls;
@@ -16,26 +17,45 @@ public static class ScreenParts
     /// <summary>
     /// 다시 붙인 단추에 초점을 준다. 이미 붙어 있고 켜져 있으면 바로, 아니면 붙은 뒤(Loaded)나 켜진 뒤에 한 번.
     /// 느린 PC(M12 노트북 중간 확인)에서는 낮은 우선순위 작업·프레임 콜백이 다시 넣은 단추의 Loaded보다 먼저 와서 초점을 주지 못했다
-    /// (리포트: 내보내는 동안 단추가 빠지며 옮겨 간 가리기 단추에 초점이 남음, 기록: [목록으로] 대신 탐색). <paramref name="still"/>이 거짓이 되면 주지 않는다.
+    /// (리포트: 내보내는 동안 단추가 빠지며 옮겨 간 가리기 단추에 초점이 남음, 기록: [목록으로] 대신 탐색).
+    /// 예약은 이럴 때 버린다 (G4 M12 1라운드 4): <paramref name="still"/>이 거짓, 예약한 뒤 초점이 다른 곳으로 옮겨 감(사용자 조작),
+    /// <see cref="Waits.FocusRestore"/>가 지남. 버리거나 주면 구독을 모두 푼다.
     /// </summary>
-    public static void FocusWhenReady(Control target, Func<bool> still)
+    /// <param name="scope">초점 위치를 읽을 화면 (지금 화면 트리에 붙어 있는 요소)</param>
+    public static void FocusWhenReady(Control target, FrameworkElement scope, Func<bool> still)
     {
+        if (!still()) return;
         if (target.IsLoaded && target.IsEnabled && target.Focus(FocusState.Programmatic)) return;
+        var before = scope.XamlRoot is { } xr ? FocusManager.GetFocusedElement(xr) : null;
         bool done = false;
         RoutedEventHandler? loaded = null;
         DependencyPropertyChangedEventHandler? enabled = null;
-        void Try()
+        var timer = target.DispatcherQueue.CreateTimer();
+        timer.Interval = Waits.FocusRestore;
+        timer.IsRepeating = false;
+        void Stop()
         {
-            if (done || !target.IsLoaded || !target.IsEnabled) return;
             done = true;
             target.Loaded -= loaded;
             target.IsEnabledChanged -= enabled;
-            if (still()) target.Focus(FocusState.Programmatic);
+            timer.Stop();
+        }
+        void Try()
+        {
+            if (done) return;
+            if (!still()) { Stop(); return; }
+            if (!target.IsLoaded || !target.IsEnabled) return;
+            var now = scope.XamlRoot is { } r ? FocusManager.GetFocusedElement(r) : null;
+            bool moved = before is not null && now is not null && !ReferenceEquals(now, before) && !ReferenceEquals(now, target);
+            Stop();
+            if (!moved) target.Focus(FocusState.Programmatic);
         }
         loaded = (_, _) => Try();
         enabled = (_, _) => Try();
+        timer.Tick += (_, _) => { if (!done) Stop(); };
         target.Loaded += loaded;
         target.IsEnabledChanged += enabled;
+        timer.Start();
     }
 
     /// <summary>등급 색 (언제나 글자·등급 이름과 함께 쓴다).</summary>

@@ -179,7 +179,7 @@ public sealed partial class MeasurementSession
     private string EndTrack(SignalTrack t, long endMs, DateTimeOffset wall)
     {
         var fields = CheckpointFields(t, "end", endMs);
-        t.Closed.Add(t.Run!);
+        t.Closed.Add(t.Run! with { EndMs = endMs });   // 다시 관측해도 이 묶음은 여기서 끝난다 (G4 M12 1라운드 2)
         t.ClosedCache = null;
         t.Run = null;
         t.EndedMs = endMs;

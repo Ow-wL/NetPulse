@@ -151,11 +151,17 @@ public sealed class SettingsScreen : Screen
             var view = new NetPulse.App.Legal.LegalView(Ui, "legal", 360);
             legalView = view;
             view.Opened += (i, ms) => Context.Log.Write("legal", new { step = "expanded", index = i, chars = view.Items![i].Text.Length, ms = Math.Round(ms, 1) });
+            // 창이 있는 모니터의 주사율 (M12 설계 G2): 측정 앞뒤로 읽어 구간 중 모니터·주사율이 바뀌었거나 앞에서 읽지 못했으면 hz를 비운다
+            // (FramePacer 구간과 같은 계약, G4 M12 1라운드 6)
+            NetPulse.App.Design.RefreshInfo? before = null;
+            view.Measuring += _ => before = Ui.Pacer.Refresh();
             view.Frames += (i, max, over, samples, gaps) =>
             {
-                var refresh = Ui.Pacer.Refresh();   // 창이 있는 모니터의 주사율 (M12 설계 G2)
+                var refresh = Ui.Pacer.Refresh();
+                bool changed = before is not { Hz: not null } b || b.Hz != refresh.Hz || b.Monitor != refresh.Monitor;
                 Context.Log.Write("legal", new { step = "frames", index = i, maxMs = Math.Round(max, 1), over33 = over, samples,
-                    gaps = gaps.Select(g => Math.Round(g, 2)).ToArray(), hz = refresh.Hz, refreshSource = refresh.Source });
+                    gaps = gaps.Select(g => Math.Round(g, 2)).ToArray(), hz = changed ? null : refresh.Hz, refreshSource = refresh.Source,
+                    refreshChanged = changed, hzBefore = before?.Hz });
             };
             Context.Dialog.OpenContent(legalButton, "라이선스와 고지", view, "닫기", Size.GuideWidth, 520);
             Context.Log.Write("legal", new { step = "opened", items = view.Items?.Count });
