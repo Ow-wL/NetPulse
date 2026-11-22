@@ -13,7 +13,7 @@ public sealed class M10ReleaseExeTests
     {
         var folder = Path.Combine(Path.GetTempPath(), "netpulse-release-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(folder);
-        var exe = Path.Combine(folder, "NetPulse-0.9.0-win-x64.exe");
+        var exe = Path.Combine(folder, "NetPulse-1.0.0-win-x64.exe");
         File.Copy(AppDriver.Executable, exe);
         var extract = Path.Combine(folder, "extract");
         string? oldExe = Environment.GetEnvironmentVariable("NETPULSE_EXE");
@@ -29,12 +29,12 @@ public sealed class M10ReleaseExeTests
             app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "home", "홈");
             app.Select("nav.settings");
             app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "settings", "설정");
-            Assert.Equal("0.9.0", app.Text("settings.about.version.value"));
+            Assert.Equal("1.0.0", app.Text("settings.about.version.value"));
             var startup = app.ReadLog().First(e => e.GetProperty("kind").GetString() == "startup").GetProperty("data").GetProperty("resources");
             Assert.True(startup.GetProperty("fonts").GetBoolean());                         // 글꼴·시나리오가 exe 안에서 풀렸다
             Assert.True(startup.GetProperty("scenarios").GetBoolean());
             Assert.Equal(0, app.Close());
-            Assert.Equal(["NetPulse-0.9.0-win-x64.exe", "extract"], Directory.EnumerateFileSystemEntries(folder).Select(Path.GetFileName).Order(StringComparer.Ordinal).ToArray());   // 순서 비교 (문화권 비교면 extract가 앞에 온다)
+            Assert.Equal(["NetPulse-1.0.0-win-x64.exe", "extract"], Directory.EnumerateFileSystemEntries(folder).Select(Path.GetFileName).Order(StringComparer.Ordinal).ToArray());   // 순서 비교 (문화권 비교면 extract가 앞에 온다)
         }
         finally
         {
