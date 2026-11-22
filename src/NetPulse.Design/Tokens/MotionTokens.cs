@@ -30,7 +30,7 @@ public static class MotionTokens
     public static readonly TimeSpan[] LightDrift = [TimeSpan.FromSeconds(19), TimeSpan.FromSeconds(23), TimeSpan.FromSeconds(27), TimeSpan.FromSeconds(31)];
 }
 
-/// <summary>프레임 기준 (M2 설계 5.2 저성능 대체, 5.9 벤치). 이 PC 한 대의 기준이다.</summary>
+/// <summary>프레임 기준 (M2 설계 5.2 저성능 대체, 5.9 벤치). 데스크톱 한 대의 기준이다. 시험 판정은 M12부터 주사율 보정·성능 프로필을 더한 <see cref="FrameContract"/>를 쓴다.</summary>
 public static class FrameBudget
 {
     /// <summary>나눠 그리기(M8 리포트 미리 보기)가 한 프레임에 쓰는 시간</summary>

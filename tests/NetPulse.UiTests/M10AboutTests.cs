@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using System.Windows.Automation;
+using NetPulse.Design.Tokens;
 
 namespace NetPulse.UiTests;
 
@@ -86,6 +87,13 @@ public sealed class M10AboutTests
             e => e.ValueKind == JsonValueKind.Object, "펼친 뒤 프레임").GetProperty("data");
         double maxGap = frames.GetProperty("maxMs").GetDouble();
         int over33 = frames.GetProperty("over33").GetInt32();
+        // M12 설계 G2: 창 모니터의 주사율로 "긴 간격"을 세고 지금 프로필의 고지 상한을 쓴다 (standard 판정도 남긴다)
+        double? hz = frames.TryGetProperty("hz", out var hzProp) && hzProp.ValueKind == JsonValueKind.Number ? hzProp.GetDouble() : null;
+        Assert.True(hz is > 0, "주사율을 확정하지 못함 (출처 " + (frames.TryGetProperty("refreshSource", out var rs) ? rs.GetString() : "없음") + ")");
+        var gaps = frames.GetProperty("gaps").EnumerateArray().Select(g => g.GetDouble()).ToArray();
+        var limits = FrameContract.For(Perf.Profile, hz!.Value);
+        var standard = FrameContract.For(PerfProfile.Standard, hz.Value);
+        int longGaps = gaps.Count(g => g > limits.LongGapMs);
         // 긴 원문은 문단 목록 (설계 5절): 목록의 ScrollPattern으로 끝까지 내리고 마지막 문단이 만들어졌는지 본다
         var list = app.Find($"legal.text.{index}");
         Assert.Equal(ControlType.List, list.Current.ControlType);
@@ -95,11 +103,18 @@ public sealed class M10AboutTests
         var scroll = (ScrollPattern)list.GetCurrentPattern(ScrollPattern.Pattern);
         scroll.SetScrollPercent(ScrollPattern.NoScroll, 100);
         bool scrolled = AppDriver.WaitFor(() => scroll.Current.VerticalScrollPercent, v => v >= 99.9, "끝까지") >= 99.9;
-        File.WriteAllText(Path.Combine(G5Dir, "bench-legal.json"), JsonSerializer.Serialize(new { index, chars, firstLayoutMs = ms, maxFrameMs = maxGap, over33, samples = frames.GetProperty("samples").GetInt32(), scrolledToEnd = scrolled }));
+        bool standardPass = ms <= standard.NoticeFirstLayout && maxGap <= standard.NoticeMax && gaps.Count(g => g > standard.LongGapMs) <= standard.NoticeLongGaps;
+        File.WriteAllText(Path.Combine(G5Dir, "bench-legal.json"), JsonSerializer.Serialize(new
+        {
+            index, chars, firstLayoutMs = ms, maxFrameMs = maxGap, over33, samples = frames.GetProperty("samples").GetInt32(), scrolledToEnd = scrolled,
+            contract = new { limits.Version, profile = limits.Profile.ToString(), hz, limits.LongGapMs, longGaps, applied = new { limits.NoticeFirstLayout, limits.NoticeMax, limits.NoticeLongGaps }, standardPass },
+        }));
         Assert.True(chars > 300_000, $"원문 {chars}자");
         Assert.True(scrolled, "끝까지 스크롤");
-        Assert.True(ms <= 50, $"펼친 원문 첫 배치 {ms} ms");                                  // 설계 5절 기준
-        Assert.True(over33 <= 2, $"펼친 뒤 1초 33 ms 초과 {over33}회 (최대 {maxGap} ms)");
+        Assert.True(frames.GetProperty("samples").GetInt32() >= 10, $"펼친 뒤 1초 프레임 표본 {frames.GetProperty("samples").GetInt32()}개 (10개 미만, 측정 무효)");
+        Assert.True(ms <= limits.NoticeFirstLayout, $"펼친 원문 첫 배치 {ms} ms > {limits.NoticeFirstLayout} ({limits.Profile})");   // M10 설계 5절 기준, M12 G2 프로필
+        Assert.True(maxGap <= limits.NoticeMax, $"펼친 뒤 1초 최대 간격 {maxGap} ms > {limits.NoticeMax} ({limits.Profile})");
+        Assert.True(longGaps <= limits.NoticeLongGaps, $"펼친 뒤 1초 긴 간격(> {limits.LongGapMs} ms) {longGaps}회 > {limits.NoticeLongGaps} (최대 {maxGap} ms, {limits.Profile})");
         Assert.Equal(0, app.Close());
     }
 

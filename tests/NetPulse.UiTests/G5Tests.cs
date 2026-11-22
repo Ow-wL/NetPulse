@@ -45,15 +45,15 @@ public sealed class G5Tests
         Assert.True(invalid is null, "표본이 모자란 구간 (2회 연속 무효): " + invalid);
 
         var problems = new List<string>();
+        var verdicts = new List<object>();
         foreach (var s in bench.GetProperty("segments").EnumerateArray())
         {
             string name = s.GetProperty("Segment").GetString()!;
-            double p95 = s.GetProperty("P95").GetDouble(), max = s.GetProperty("Max").GetDouble();
-            int over = s.GetProperty("Over33").GetInt32();
-            if (name.StartsWith("idle", StringComparison.Ordinal) && p95 > FrameBudget.IdleP95) problems.Add($"{name} 95백분위 {p95} ms > {FrameBudget.IdleP95}");
-            if (name.StartsWith("transition", StringComparison.Ordinal) && max > FrameBudget.TransitionMax) problems.Add($"{name} 최대 {max} ms > {FrameBudget.TransitionMax}");
-            if (name.StartsWith("transition", StringComparison.Ordinal) && over > FrameBudget.TransitionHitches) problems.Add($"{name} 33 ms 초과 {over}회 > {FrameBudget.TransitionHitches}");
+            // M12 설계 G2: 주사율 보정과 성능 프로필 (Perf)
+            if (name.StartsWith("idle", StringComparison.Ordinal)) verdicts.Add(Perf.Check(s, PerfKind.Idle, problems));
+            if (name.StartsWith("transition", StringComparison.Ordinal)) verdicts.Add(Perf.Check(s, PerfKind.Transition, problems));
         }
+        Perf.Record("showcase", verdicts);
         if (bench.GetProperty("fallbacks").GetInt32() != 0) problems.Add("원형 전환 대체(페이드)가 일어났다");
         if (bench.GetProperty("unclippedNewThemeFrames").GetInt32() != 0) problems.Add("새 테마 색이 클립 없이 그려진 렌더링 콜백이 있다");
         var left = bench.GetProperty("leftovers");

@@ -62,7 +62,8 @@ public sealed class LegalView : Grid
     public event Action<int, double>? Opened;
 
     /// <summary>펼친 뒤 1초 동안의 프레임 간격 (항목 번호, 가장 긴 간격 ms, 33 ms 초과 횟수, 표본 수) — bench (설계 5절: 50 ms, 33 ms 초과 2회 이하).</summary>
-    public event Action<int, double, int, int>? Frames;
+    /// <remarks>마지막 인수는 간격 목록 (ms): 시험이 주사율 계약의 "긴 간격"을 센다 (M12 설계 G2, 33 고정값만 쓰지 않음).</remarks>
+    public event Action<int, double, int, int, IReadOnlyList<double>>? Frames;
 
     /// <summary>첫 항목 단추 (초점 보낼 곳).</summary>
     public Control? FirstFocus => rows.Count > 0 ? rows[0].Row : null;
@@ -176,6 +177,7 @@ public sealed class LegalView : Grid
         StopFrames();   // 앞 항목의 측정은 버린다 (한 번에 하나)
         double last = 0, max = 0;
         int over = 0, samples = 0;
+        var gaps = new List<double>();
         EventHandler<object>? tick = null;
         tick = (_, _) =>
         {
@@ -183,11 +185,12 @@ public sealed class LegalView : Grid
             double gap = now - last;
             last = now;
             samples++;
+            gaps.Add(gap);
             max = Math.Max(max, gap);
-            if (gap > 33) over++;
+            if (gap > NetPulse.Design.Tokens.FrameBudget.Hitch) over++;   // 기존 관측값 (판정은 시험이 주사율 계약으로)
             if (now < 1000) return;
             StopFrames();
-            Frames?.Invoke(index, max, over, samples);
+            Frames?.Invoke(index, max, over, samples, gaps);
         };
         frameTick = tick;
         Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += tick;
