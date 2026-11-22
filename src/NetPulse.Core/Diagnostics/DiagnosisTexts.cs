@@ -135,9 +135,19 @@ public static class DiagnosisTexts
             case "no-known-driver": return "이 어댑터의 링크 기록 형식을 알지 못합니다";
             case "wlan-log-unavailable": return "무선 연결 기록을 읽을 수 없습니다";
             case "lookback-truncated": return "링크 기록이 앞부분만 남아 있습니다";
+            // Wi‑Fi 신호 읽기 (M12 설계 C, Platform WlanSignal)
+            case "no-data": return "신호 값을 받지 못했습니다";
+            case "no-signal-opcode": return "이 Windows·드라이버에서는 신호를 읽을 수 없습니다";
+            case "opcode-unsupported": return "이 Windows·드라이버는 연결 품질 조회를 지원하지 않습니다";
+            case "not-connected": return "무선 연결이 되어 있지 않습니다";
+            case "not-wlan-interface": return "무선 어댑터가 아닙니다";
+            case "realtime-no-value": case "rssi-no-value": return "신호 값이 비어 있습니다";
+            case "realtime-short": case "rssi-short": return "신호 값을 끝까지 읽지 못했습니다";
+            case "wlan-service-off": return "Windows 무선 서비스(WLAN AutoConfig)가 꺼져 있습니다";
         }
         foreach (var (prefix, text) in new[] { ("GetIfEntry2_", "어댑터 상태를 읽지 못했습니다"), ("GetBestRoute_", "경로를 조회하지 못했습니다"),
-            ("GetBestInterface_", "경로의 어댑터를 조회하지 못했습니다"), ("NotifyIpInterfaceChange_", "링크 변화 알림을 받을 수 없습니다") })
+            ("GetBestInterface_", "경로의 어댑터를 조회하지 못했습니다"), ("NotifyIpInterfaceChange_", "링크 변화 알림을 받을 수 없습니다"),
+            ("wlan_", "무선 신호를 읽지 못했습니다") })
             if (code.StartsWith(prefix, StringComparison.Ordinal)) return $"{text} (오류 {code[prefix.Length..]})";
         if (code.StartsWith("dns-", StringComparison.Ordinal)) return $"이름 해석 실패 ({code[4..]})";
         if (code.StartsWith("socket-", StringComparison.Ordinal)) return $"연결 실패 ({code[7..]})";

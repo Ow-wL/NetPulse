@@ -267,7 +267,7 @@ public sealed partial class AppShell : Window
             if (options.TestFinishBeforeLayout)
             {
                 // 시험 (M12 설계 A [2-1]): 측정이 끝난 뒤에야 측정 화면으로 간다. 화면은 그때 처음 트리에 붙고 배치 전에 그린다
-                var limit = DateTime.UtcNow + TimeSpan.FromSeconds(60);
+                var limit = DateTime.UtcNow + BenchTokens.FinishBeforeLayoutLimit;
                 while (host.Snapshot.Finished is null && DateTime.UtcNow < limit && !closing) await Task.Delay(20);
                 log.Write("testFinishBeforeLayout", new { finished = host.Snapshot.Finished is not null });
             }

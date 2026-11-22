@@ -145,7 +145,8 @@ public sealed class DetectionTests
     {
         var r = DetectionPlanner.Plan(Net(null, "GetBestRoute_5", new InterfaceInfo(2, InterfaceKind.Wired, Tristate.No, true)));
         Assert.Equal(DetectionStatus.Unknown, r.Status);
-        Assert.Contains("GetBestRoute_5", r.Notice);
+        Assert.Contains("(오류 5)", r.Notice);   // M12 문구: API 이름 대신 쉬운 말 + 오류 번호 (wording-applied.md)
+        Assert.DoesNotContain("GetBestRoute_", r.Notice);
     }
 
     [Fact]

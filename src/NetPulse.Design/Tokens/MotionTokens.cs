@@ -108,6 +108,9 @@ public static class BenchTokens
     public static readonly TimeSpan RecordsOpenLimit = TimeSpan.FromSeconds(60);
     public static readonly TimeSpan RecordsSettle = TimeSpan.FromSeconds(2);
     public static readonly TimeSpan MemorySample = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>시험 옵션 --test-finish-before-layout (M12 설계 A): --start 측정이 끝나기를 기다리는 상한</summary>
+    public static readonly TimeSpan FinishBeforeLayoutLimit = TimeSpan.FromSeconds(60);
     public const int RecordsReenterCount = 6;
     // 리포트 bench (M8 설계 5절): 미리 보기 스크롤 단계 수
     public const int ReportScrollSteps = 8;

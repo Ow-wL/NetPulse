@@ -246,7 +246,8 @@ public sealed class SessionTests : IDisposable
         Assert.Throws<SessionStartException>(() => MeasurementSession.Start(Options(clock, o => o with { NewId = _ => "x2" })));
         primary.FailCreate = fallback.FailCreate = false;
         var bad = Assert.Throws<SessionStartException>(() => MeasurementSession.Start(Options(clock, o => o with { Profile = OneMinute with { Targets = [] } })));
-        Assert.Contains("no-targets", bad.Message);
+        Assert.Contains("측정할 대상이 없습니다", bad.Message);   // M12 문구: 내부 코드 대신 사유 문장 (wording-applied.md)
+        Assert.DoesNotContain("no-targets", bad.Message);
     }
 
     [Fact]
