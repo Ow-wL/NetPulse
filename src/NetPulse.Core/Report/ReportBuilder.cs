@@ -55,6 +55,64 @@ public static class ReportBuilder
         private long lastRound;
         private IReadOnlyList<SymptomMark> marks = [];
         private int ignoredMarks;
+        private (NetPulse.Core.Evidence.SignalEvidence Evidence, SignalTrace Trace)? signal;
+
+        /// <summary>기록의 Wi‑Fi 신호 근거와 그 표시 (M12 설계 C, 한 번만 구한다). 분석 판정에는 쓰지 않는다.</summary>
+        private (NetPulse.Core.Evidence.SignalEvidence Evidence, SignalTrace Trace) Signal()
+        {
+            if (signal is { } s) return s;
+            var ev = NetPulse.Core.Evidence.SignalEvidenceBuilder.FromEvents(record.Events, header.IntervalMs);
+            signal = (ev, SignalTrace.FromEvidence(ev, header.IntervalMs));
+            return signal.Value;
+        }
+
+        /// <summary>
+        /// 관측 근거의 Wi‑Fi 신호 (M12 설계 C 리포트): 기본 경로 무선 어댑터마다 품질·RSSI 평균과 최저, 상태별 시간. 그 밖의 무선 어댑터는 수만.
+        /// 끊김 동안의 신호는 관측만 적고 판정·가능성이 높은 곳을 바꾸지 않는다. 신호 자료가 없는 기록은 이 부분이 없다.
+        /// </summary>
+        private IEnumerable<ReportBlock> SignalEvidenceBlocks()
+        {
+            var (ev, trace) = Signal();
+            if (!ev.HasData) yield break;
+            yield return new ReportHeading(ReportRun.Gen("Wi‑Fi 신호"));
+            var route = trace.RouteAdapters.Select(ev.For).OfType<NetPulse.Core.Evidence.SignalAdapterEvidence>().ToArray();
+            yield return new ReportTable("무선 어댑터별 신호 (관측)", Cols("어댑터", "품질 평균", "품질 최저", "RSSI 평균", "RSSI 최저", "상태"),
+                route.Select(x => new ReportRow([
+                    new(red.Adapter(x.Alias, x.InterfaceIndex), "signal.adapter"),
+                    new(ReportRun.Gen(ReportTexts.Quality(x.Stats.QualityAvg)), "signal.qualityAvg"),
+                    new(ReportRun.Gen(ReportTexts.Quality(x.Stats.QualityMin)), "signal.qualityMin"),
+                    new(ReportRun.Gen(ReportTexts.Rssi(x.Stats.RssiAvg)), "signal.rssiAvg"),
+                    new(ReportRun.Gen(ReportTexts.Rssi(x.Stats.RssiMin)), "signal.rssiMin"),
+                    new(ReportRun.Gen(ReportTexts.SignalStates(x.Stats.StateMs, x.LastObserved)), "signal.state"),
+                ])).ToArray());
+            if (trace.OtherAdapters > 0)
+                yield return new ReportParagraph(ReportTexts.OtherWirelessAdapters(trace.OtherAdapters), ParagraphKind.Note);
+            if (trace.AdapterChanges.Count > 0)
+                yield return new ReportParagraph($"측정 중에 경로의 무선 어댑터가 {trace.AdapterChanges.Count}번 바뀌었습니다. 그림에서는 그 시각에 선을 끊었습니다.", ParagraphKind.Note);
+            if (DuringEpisodes(trace) is { } during) yield return new ReportParagraph(during);
+            yield return new ReportParagraph(ReportTexts.SignalScope, ParagraphKind.Note);
+        }
+
+        /// <summary>끊김 동안 관측한 신호 (관측만: "끊김 동안 품질 최저 14%", "연결 안 됨 관측"). 끊김이나 신호 묶음이 없으면 null.</summary>
+        private string? DuringEpisodes(SignalTrace trace)
+        {
+            if (a.Episodes.Count == 0 || trace.Runs.Count == 0) return null;
+            var at = rounds.ToDictionary(r => r.Round, r => r.AtMs);
+            int? min = null;
+            var states = new SortedSet<NetPulse.Core.Evidence.SignalState>();
+            foreach (var e in a.Episodes)
+            {
+                if (!at.TryGetValue(e.FirstRound, out var from) || !at.TryGetValue(e.LastRound, out var last)) continue;
+                long to = last + header.IntervalMs;
+                foreach (var r in trace.Runs)
+                {
+                    if (r.ToMs <= from || r.FromMs >= to) continue;
+                    if (r.Quality is int q) min = min is int m ? Math.Min(m, q) : q;
+                    else if (r.State != NetPulse.Core.Evidence.SignalState.Ok) states.Add(r.State);
+                }
+            }
+            return ReportTexts.SignalDuringEpisodes(a.Episodes.Count, min, states);
+        }
 
         private string Clock(DateTimeOffset wall) => ReportTexts.Clock(wall, header.StartedAt, header.UtcOffsetMinutes);
         private string ClockOf(long round) => wallOf.TryGetValue(round, out var w) ? Clock(w) : "알 수 없음";
@@ -149,7 +207,10 @@ public static class ReportBuilder
             long end = Math.Max(record.Summary?.EndMs ?? 0, rounds.Length == 0 ? interval : rounds[^1].DueMs + interval);
             var bands = TimelineModel.Bands(rounds, targets, record.Gaps, interval);
             var downs = a.Links.Downs.Select(d => new LinkDownView(d.Adapter, d.Source, d.FromMs, d.ToMs, false)).ToArray();
-            var frame = TimelineModel.Frame(rounds, targets, record.Gaps, marks, downs, bands, 0, end, TimelineFigure.Columns, interval, "전체");
+            // Wi‑Fi 신호 (M12 설계 C): 품질 선이 있으면 오른쪽 축 여백을 뺀 열 수로 그린다. 신호가 없는 기록은 지금과 같다
+            var signal = Signal().Trace;
+            var frame = TimelineModel.Frame(rounds, targets, record.Gaps, marks, downs, bands, 0, end, TimelineFigure.PlotColumnsFor(signal.Axis), interval, "전체",
+                signal: signal.Display == SignalDisplay.None ? null : signal);
             var figure = TimelineFigure.Build(frame, bands, downs, marks, header.StartedAt, TimeSpan.FromMinutes(header.UtcOffsetMinutes));
             return [new ReportFigure(figure)];
         }
@@ -253,6 +314,7 @@ public static class ReportBuilder
                         new(ReportRun.Gen(ReportTexts.LinkState(s.Display)), "link.state"),
                         new(ReportRun.Gen(ReportTexts.LinkNotes(s)), "link.notes"),
                     ])).ToArray()));
+            blocks.AddRange(SignalEvidenceBlocks());
 
             var ctx = JudgeContext.From(header, rounds, record.Events, a.Links);
             blocks.Add(new ReportTable("경로 유형 (대상마다)", Cols("대상", "시작 시점 경로", "경로 유형이 바뀐 횟수"),

@@ -30,5 +30,6 @@
     <None Include="m9-scenes.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="m10-scenes.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="m11-scenes.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="m12-scenes.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

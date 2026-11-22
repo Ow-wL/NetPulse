@@ -42,7 +42,7 @@ public sealed record Palette(
         Edge: Rgba.White(0.10),
         Highlight: Rgba.White(0.35),
         Scrim: Rgba.Black(0.55),
-        Shadow: Rgba.Black(0.70));
+        Shadow: Rgba.Black(0.70)) { Signal = Rgba.Hex("#a78bfa") };
 
     public static readonly Palette Light = new(
         Name: "light",
@@ -61,7 +61,19 @@ public sealed record Palette(
         Edge: Rgba.Black(0.08),
         Highlight: Rgba.White(1.0),
         Scrim: Rgba.Black(0.25),
-        Shadow: Rgba.Black(0.10));
+        Shadow: Rgba.Black(0.10)) { Signal = Rgba.Hex("#6d28d9") };
 
     public static Palette For(ThemeKind theme) => theme == ThemeKind.Dark ? Dark : Light;
+
+    /// <summary>
+    /// Wi‑Fi 신호 품질 선 (M12 설계 C 표시): 지연 선(Accent 실선·Series2 파선)과 다른 색, 점선으로 그린다. 그래프 바탕과 3:1 이상
+    /// (Design 시험 M12SignalColorTests). 고대비에서는 시스템 색 Hotlight. 리포트 문서 색(<c>ReportPalette.Signal</c>)은 라이트 값과 같다.
+    /// </summary>
+    public Rgba Signal { get; init; }
+
+    /// <summary>비활성 글을 보조 글과 다르게 둘 때만 (고대비: GrayText). 없으면 <see cref="Muted"/>.</summary>
+    public Rgba? DisabledText { get; init; }
+
+    /// <summary>비활성 글 색. 고대비에서는 시스템 GrayText(보조 글은 WindowText), 그 밖에는 보조 글과 같다.</summary>
+    public Rgba Disabled => DisabledText ?? Muted;
 }

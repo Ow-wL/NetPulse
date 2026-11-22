@@ -178,7 +178,9 @@ public sealed class M5MatrixTests
         double width = t.GetProperty("width").GetDouble();
         var fc = t.GetProperty("frameColumns");
         int? frameColumns = fc.ValueKind == JsonValueKind.Number ? fc.GetInt32() : null;
-        if (width > 0 && frameColumns != (int)Math.Round(width)) problems.Add($"타임라인 장면 열 수 {frameColumns} ≠ 폭 {Math.Round(width)}");
+        // M12 설계 C: 신호 축이 있으면 열 수 = 오른쪽 축 여백을 뺀 그래프 폭 (plotWidth). 없으면 전체 폭과 같다
+        double plot = t.TryGetProperty("plotWidth", out var pw) ? pw.GetDouble() : width;
+        if (width > 0 && frameColumns != Math.Max(1, (int)Math.Round(plot))) problems.Add($"타임라인 장면 열 수 {frameColumns} ≠ 그래프 폭 {Math.Round(plot)} (전체 {Math.Round(width)})");
         return problems;
     }
 

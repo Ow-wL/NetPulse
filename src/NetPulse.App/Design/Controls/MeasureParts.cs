@@ -45,9 +45,9 @@ public sealed class GlassTextBox : GroupPanel
             r[key] = ui.Brushes.Transparent;
         foreach (var key in new[] { "TextControlForeground", "TextControlForegroundPointerOver", "TextControlForegroundFocused" })
             r[key] = ui.Brushes.Ink;
-        r["TextControlForegroundDisabled"] = ui.Brushes.Muted;
+        r["TextControlForegroundDisabled"] = ui.Brushes.Disabled;
         foreach (var key in new[] { "TextControlPlaceholderForeground", "TextControlPlaceholderForegroundPointerOver", "TextControlPlaceholderForegroundFocused", "TextControlPlaceholderForegroundDisabled" })
-            r[key] = ui.Brushes.Muted;
+            r[key] = ui.Brushes.Disabled;   // 자리표시는 고대비에서 GrayText 그대로 (보조 글이 WindowText가 되어도 입력한 글과 구별되게, M11 C3)
         r["TextControlBorderBrush"] = ui.Brushes.Edge;
         r["TextControlBorderBrushPointerOver"] = ui.Brushes.Muted;
         r["TextControlBorderBrushDisabled"] = ui.Brushes.Edge;

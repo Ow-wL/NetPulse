@@ -35,7 +35,7 @@ public sealed class GlassButton : Button
 
         var ink = kind == ButtonKind.Primary ? ui.Brushes.AccentInk : ui.Brushes.Ink;
         row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S2, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
-        if (icon is not null) row.Children.Add(Icons.Make(icon, ink, Size.IconM));
+        if (icon is not null) row.Children.Add(IconElement = Icons.Make(icon, ink, Size.IconM));
         if (label is not null && kind != ButtonKind.Icon) row.Children.Add(Fonts.Text(label, Typography.Label, ink));
 
         double height = kind == ButtonKind.Icon ? Size.ControlM : Size.ControlM;
@@ -69,6 +69,9 @@ public sealed class GlassButton : Button
         RegisterPropertyChangedCallback(IsEnabledProperty, (_, _) => Opacity = IsEnabled ? 1 : Emphasis.Disabled);
         ui.Motion.AttachPress(this);
     }
+
+    /// <summary>아이콘 요소 (없으면 null). 펼침 화살표처럼 상태에 따라 돌릴 때 쓴다.</summary>
+    public FrameworkElement? IconElement { get; }
 
     /// <summary>전시 화면 캡처용: 포인터 없이 포인터 올림 모습을 보인다.</summary>
     public void ForceHover(bool value)

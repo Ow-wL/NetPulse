@@ -57,9 +57,33 @@ public sealed class TimelinePanel : UserControl
         {
             KeyDown += OnKey;
             PointerWheelChanged += OnWheel;
-            Tapped += (_, e) => { if (ActualWidth > 0) Picked?.Invoke(e.GetPosition(this).X / ActualWidth); };
+            Tapped += (_, e) => { if (PlotWidth > 0) Picked?.Invoke(Math.Min(1, e.GetPosition(this).X / PlotWidth)); };
         }
     }
+
+    /// <summary>
+    /// Wi‑Fi 신호 오른쪽 축 여백을 뺀다 (M12 설계 C 표시). 화면은 장면을 만들기 전에 정한다: <see cref="Columns"/>가 여백을 뺀 그래프 폭이 된다.
+    /// 신호가 없는 측정은 거짓 (지금과 같음).
+    /// </summary>
+    public bool SignalAxis { get; set; }
+
+    private double? axisMargin;
+
+    /// <summary>오른쪽 축 여백: "100%" 글 폭 + 간격 (처음 쓸 때 한 번 잰다).</summary>
+    private double AxisMargin
+    {
+        get
+        {
+            if (axisMargin is double m) return m;
+            var probe = Fonts.Text(TimelineGeometry.QualityMax.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "%", Typography.Caption, ui.Brushes.Muted);
+            probe.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+            axisMargin = m = Math.Ceiling(probe.DesiredSize.Width) + ChartStyle.SignalAxisGap;
+            return m;
+        }
+    }
+
+    /// <summary>그래프 영역 폭 (시간축·선·띠·끝 시각을 모두 이 안에 둔다).</summary>
+    private double PlotWidth => TimelineGeometry.PlotWidth(ActualWidth, SignalAxis, SignalAxis ? AxisMargin : 0);
 
     /// <summary>조작 요청 (화면이 보기 창을 바꾸고 다시 그린다).</summary>
     public event Action<TimelineCommand>? Command;
@@ -70,8 +94,8 @@ public sealed class TimelinePanel : UserControl
     /// <summary>그래프를 누름: 폭에 대한 가로 위치 비율 (0~1). 기록 화면이 그 자리의 끊김 줄로 간다 (M7 설계 4.1).</summary>
     public event Action<double>? Picked;
 
-    /// <summary>열 수 = 그래프 폭 (픽셀). 화면이 <see cref="TimelineModel.Frame"/>에 넘긴다.</summary>
-    public int Columns => Math.Max(1, (int)Math.Round(ActualWidth));
+    /// <summary>열 수 = 그래프 폭 (픽셀, 신호 축 여백을 뺀 것). 화면이 <see cref="TimelineModel.Frame"/>에 넘긴다.</summary>
+    public int Columns => Math.Max(1, (int)Math.Round(PlotWidth));
 
     /// <summary>마지막으로 받은 장면을 계산할 때 쓴 열 수 (화면은 <see cref="Columns"/>로 장면을 만들고 바로 <see cref="Show"/>한다). 진단·시험용 (M12 설계 A)</summary>
     public int? FrameColumns { get; private set; }
@@ -80,7 +104,13 @@ public sealed class TimelinePanel : UserControl
     public bool HasFrame => frame is not null;
 
     /// <summary>진단 값: 장면 유무, 지금 폭, 장면에 쓴 열 수. 장면이 있으면 열 수가 지금 폭과 같아야 한다 (M12 설계 A)</summary>
-    public object Diag() => new { hasFrame = HasFrame, width = ActualWidth, columns = Columns, frameColumns = FrameColumns, firstFrameColumns = FirstFrameColumns };
+    public object Diag() => new
+    {
+        hasFrame = HasFrame, width = ActualWidth, columns = Columns, frameColumns = FrameColumns, firstFrameColumns = FirstFrameColumns,
+        // M12 설계 C: 신호 축이 있으면 열 수 = 여백을 뺀 그래프 폭 (plotWidth)
+        signalAxis = SignalAxis, plotWidth = PlotWidth, axisMargin = SignalAxis ? AxisMargin : 0,
+        signal = frame?.Signal is { } s ? new { display = s.Display.ToString(), segments = s.Segments.Count, points = s.Segments.Sum(x => x.Count), changes = s.AdapterChanges.Count, s.MinQuality, s.OtherAdapters, legend = s.Legend, state = s.StateText } : null,
+    };
 
     public void Show(TimelineFrame next, Func<long, string> label, bool followingNow, string? range)
     {
@@ -128,7 +158,8 @@ public sealed class TimelinePanel : UserControl
     private void Draw()
     {
         canvas.Children.Clear();
-        double w = ActualWidth, h = ActualHeight;
+        // w = 그래프 영역 (신호 축이 있으면 오른쪽 여백을 뺌, M12 설계 C). 시간축·선·띠·끝 시각은 모두 이 안에
+        double w = PlotWidth, h = ActualHeight;
         if (frame is not { } f || w <= 0 || h <= 0) return;
         double laneH = Size.TimelineLane;
         double top = laneH + Space.S2;                                  // 위쪽 표시 줄 아래부터 그래프
@@ -167,6 +198,37 @@ public sealed class TimelinePanel : UserControl
         // 선 (구간마다 따로: 누락·공백·값 없음을 건너 잇지 않음)
         foreach (var seg in f.Router) canvas.Children.Add(Series(seg, ui.Brushes.Series2, ChartStyle.Line2, dashed: true, X, Y));
         foreach (var seg in f.Internet) canvas.Children.Add(Series(seg, ui.Brushes.Accent, ChartStyle.Line, dashed: false, X, Y));
+
+        // Wi‑Fi 신호 품질 (오른쪽 축 0~100%, 점선): 기본 경로 어댑터 하나의 선, 상태가 정상이 아니거나 끊기거나 어댑터가 바뀌면 끊는다
+        if (SignalAxis && f.Signal.Axis)
+        {
+            double SignalY(double q) => TimelineGeometry.SignalY(q, top, plotH);
+            foreach (var seg in f.Signal.Segments)
+            {
+                var line = Series(seg, ui.Brushes.Signal, ChartStyle.SignalLine, dashed: false, X, SignalY);
+                line.StrokeDashArray = [ChartStyle.SignalDotOn, ChartStyle.SignalDotOff];
+                line.StrokeDashCap = PenLineCap.Round;
+                line.StrokeStartLineCap = PenLineCap.Round;
+                line.StrokeEndLineCap = PenLineCap.Round;
+                canvas.Children.Add(line);
+            }
+            foreach (var (text, q) in new[] { ("100%", TimelineGeometry.QualityMax), ("0%", 0.0) })
+            {
+                var t = Fonts.Text(text, Typography.Caption, ui.Brushes.Muted);
+                t.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+                Canvas.SetLeft(t, w + ChartStyle.SignalAxisGap);
+                Canvas.SetTop(t, Math.Clamp(SignalY(q) - t.DesiredSize.Height / 2, top, top + plotH - t.DesiredSize.Height));
+                canvas.Children.Add(t);   // 축 글은 시각 눈금처럼 배치 검사에 들어간다 (겹침·잘림)
+            }
+            // 무선 어댑터 바뀜: 위쪽 표시 줄의 세로 막대 (증상 점·링크 끊김 막대와 모양이 다름)
+            foreach (var at in f.Signal.AdapterChanges)
+            {
+                var tick = new Rectangle { Width = ChartStyle.SignalChange, Height = laneH, Fill = ui.Brushes.Signal };
+                Canvas.SetLeft(tick, Math.Clamp(X(at) - ChartStyle.SignalChange / 2, 0, Math.Max(0, w - ChartStyle.SignalChange)));
+                Canvas.SetTop(tick, 0);
+                canvas.Children.Add(Decor(tick));
+            }
+        }
 
         // 위쪽 표시 줄: 링크 끊김 막대, 증상 점과 세로 점선
         foreach (var d in f.LinkDowns)

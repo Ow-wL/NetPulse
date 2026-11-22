@@ -30,6 +30,7 @@ public sealed class MeasureScreen : Screen
     private readonly TimelineView view = new();
     private readonly StackPanel timelineStack = new() { Spacing = Space.S3 };
     private readonly TextBlock range;
+    private TimelineLegend? legend;
     private readonly StackPanel content = new() { Spacing = Space.S5 };
     private readonly StackPanel banners = new() { Spacing = Space.S2 };
     private string? bannersKey, cardsKey, marksKey;
@@ -177,26 +178,8 @@ public sealed class MeasureScreen : Screen
     public override IReadOnlyList<UIElement> Parts => [header, timelineCard, cards, marksCard];
     public override FrameworkElement? SharedTarget => timelineCard;
 
-    private UIElement Legend()
-    {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S5 };
-        void Item(Microsoft.UI.Xaml.Media.Brush brush, bool dashed, string text)
-        {
-            var item = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S2 };
-            var line = new Microsoft.UI.Xaml.Shapes.Line { X1 = 0, X2 = Space.S4, Y1 = Space.S2, Y2 = Space.S2, Stroke = brush, StrokeThickness = ChartStyle.Line, VerticalAlignment = VerticalAlignment.Center };
-            if (dashed) line.StrokeDashArray = [ChartStyle.DashOn, ChartStyle.DashOff];
-            AutomationProperties.SetAccessibilityView(line, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
-            item.Children.Add(line);
-            item.Children.Add(Fonts.Text(text, Typography.Caption, Ui.Brushes.Muted));
-            row.Children.Add(item);
-        }
-        Item(Ui.Brushes.Accent, false, "인터넷 지연");
-        Item(Ui.Brushes.Series2, true, "로컬 대상 지연");
-        Item(Ui.Brushes.Bad, false, "응답 없음이 관측된 회차");
-        Item(Ui.Brushes.Muted, true, "관측 공백");
-        Item(Ui.Brushes.Warn, true, "증상 표시");
-        return row;
-    }
+    /// <summary>범례: 줄을 넘기는 공용 범례 (150%에서 잘리지 않게, M11 C3) + Wi‑Fi 신호 항목 (M12 설계 C).</summary>
+    private UIElement Legend() => legend = new TimelineLegend(Ui, "measure.timeline.legend");
 
     // ---------------- 그리기 ----------------
 
@@ -248,6 +231,8 @@ public sealed class MeasureScreen : Screen
             return;
         }
         timelineBody.Set(timelineStack, "normal");
+        // Wi‑Fi 신호 선이 있으면 오른쪽 축 여백을 뺀다: 열 수(timeline.Columns)를 쓰기 전에 정한다 (M12 설계 C)
+        timeline.SignalAxis = s.Signal.Axis;
         long nowMs = Math.Max(1, s.ElapsedMs);
         var (from, to) = view.Window(nowMs);
         var label = ScreenParts.TimeLabel(h.StartedAt, Context.Now);
@@ -257,7 +242,8 @@ public sealed class MeasureScreen : Screen
         long columnMs = (to - from) / Math.Max(1, timeline.Columns);
         var lastBand = s.Bands.Count == 0 ? null : s.Bands[^1];
         var drawKey = $"{s.SessionId}|{view.Label}|{view.Follow}|{view.IsAll}|{ended}|{timeline.Columns}|{s.Bands.Count}|{lastBand?.Kind}|{lastBand?.FromMs}|{lastBand?.OpenEnd}"
-            + $"|{s.Marks.Count}|{(s.Marks.Count == 0 ? null : s.Marks[^1].Mark)}|{s.LinkDowns.Count}|{s.LinkDowns.Count(d => d.Ongoing)}|{s.Gaps.Count}";
+            + $"|{s.Marks.Count}|{(s.Marks.Count == 0 ? null : s.Marks[^1].Mark)}|{s.LinkDowns.Count}|{s.LinkDowns.Count(d => d.Ongoing)}|{s.Gaps.Count}"
+            + $"|{s.Signal.Display}|{s.Signal.Runs.Count}|{s.Signal.AdapterChanges.Count}";
         bool unchanged = columnMs > 2 * h.IntervalMs && drawKey == drawnKey && Math.Abs(from - drawnFrom) < columnMs && Math.Abs(to - drawnTo) < columnMs
             && !NewValuesStandOut(s, h);
         // 배치 전(폭 0)에는 장면을 만들지 않는다: 열 1개 장면이 된다. 배치되면 타임라인이 ColumnsChanged로 다시 부른다 (M12 설계 A)
@@ -267,11 +253,13 @@ public sealed class MeasureScreen : Screen
             var marks = s.Marks.Select(m => new SymptomMark(m.Mark, null, m.AtMs, m.Wall, m.Memo, null, m.Truncated)).ToArray();
             TimelineFrame frame = null!;
             RenderProfile.Time("measure.frame", () => frame = TimelineModel.Frame(s.Rounds, h.Targets, s.Gaps, marks, s.LinkDowns, s.Bands, from, to, timeline.Columns, h.IntervalMs,
-                view.Follow && !view.IsAll ? $"최근 {view.Label}" : $"{label(from)}~{label(to)}", reps));
-            RenderProfile.Time("measure.draw", () => timeline.Show(frame, label, view.Follow && !ended, $"{label(from)}부터 {label(to)}까지 ({view.Label})"));
+                view.Follow && !view.IsAll ? $"최근 {view.Label}" : $"{label(from)}~{label(to)}", reps, s.Signal));
+            RenderProfile.Time("measure.draw", () => timeline.Show(frame, label, view.Follow && !ended, $"{label(from)}부터 {label(to)}까지 ({RangeLength(view, from, to)})"));
+            legend?.SetSignal(frame.Signal);
             (drawnKey, drawnFrom, drawnTo, drawnFrame, drawnRounds) = (drawKey, from, to, frame, s.Rounds.Count);
         }
-        range.Text = $"{label(from)} ~ {(view.Follow && !ended ? "지금" : label(to))} · {view.Label}";
+        // "·" 뒤는 보이는 범위의 실제 길이 (창 단계가 아님: 59초 측정의 2분 창이 "2분"으로 보였다, M11 시각 검토)
+        range.Text = $"{label(from)} ~ {(view.Follow && !ended ? "지금" : label(to))} · {RangeLength(view, from, to)}";
         AutomationProperties.SetName(range, range.Text);
         zoomIn.IsEnabled = view.StepIndex > 0 || view.IsAll;
         zoomOut.IsEnabled = !view.IsAll;
@@ -280,6 +268,10 @@ public sealed class MeasureScreen : Screen
         right.IsEnabled = !view.IsAll && !view.Follow;
         now.IsEnabled = !view.Follow;
     }
+
+    /// <summary>보이는 범위의 길이 문구: 실제 길이 (전체 보기면 "전체 59초"). 기록 화면도 같은 함수를 쓴다.</summary>
+    internal static string RangeLength(TimelineView view, long from, long to) =>
+        (view.IsAll ? "전체 " : "") + TimelineModel.Seconds(Math.Max(0, to - from));
 
     /// <summary>타임라인 조작 (bench·시험도 이 경로).</summary>
     public void Command(TimelineCommand c) => OnTimeline(c);
@@ -600,6 +592,8 @@ public sealed class MeasureScreen : Screen
             timeline = AutomationProperties.GetName(timeline),
             timelineState = timeline.Diag(),
             timelineCheck = new { receivedFinishedBeforeLayout, widthAtReceive, snapshotsAfterLayout },
+            range = range.Text,
+            legendSignal = legend?.SignalKey,
         };
     }
 }

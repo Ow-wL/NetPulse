@@ -47,6 +47,15 @@ public static class Size
     public const double TimelineLane = 10, MarkerDot = 8;
     /// <summary>입력 칸 너비: 짧은 숫자, 보통, 긴 글</summary>
     public const double FieldS = 96, FieldM = 180, FieldL = 260;
+    /// <summary>글 상자의 지우기 단추 너비 (WinUI 기본 템플릿, 초점이 있고 글이 있으면 나온다)</summary>
+    public const double ClearButton = 32;
+
+    /// <summary>
+    /// 숫자 칸 너비: 본문 글자 <paramref name="digits"/>자리 + 지우기 단추 + 안쪽 여백(좌우 S3) + 초점 테두리 + 여유(S2).
+    /// 포트 칸(5자리)이 FieldS면 초점이 있을 때 "70000"이 잘렸다 (M11 C3).
+    /// </summary>
+    public static double NumberField(int digits) =>
+        Math.Ceiling(digits * Typography.Body.Size * Typography.DigitWidth + ClearButton + Space.S3 * 2 + FocusOuter * 2 + Space.S2);
     /// <summary>메모 입력 칸의 최소 높이</summary>
     public const double MemoMinHeight = 64;
     /// <summary>대상 카드 최소 너비 (한 줄에 셋)</summary>
@@ -88,6 +97,11 @@ public static class ChartStyle
     public const double Line = 2, Line2 = 1.5, DashOn = 4, DashOff = 3, Height = 180, AxisGap = 6, MaxMs = 120;
     /// <summary>증상 표시 세로선, 공백 빗금 간격</summary>
     public const double Marker = 1.5, Hatch = 6;
+    /// <summary>
+    /// Wi‑Fi 신호 품질 선 (M12 설계 C): 지연 선과 모양이 다른 점선 (둥근 끝, 대시 길이 0 → 점). 대시 단위는 선 두께의 배수다.
+    /// 축 여백 = 오른쪽 축 글("100%") 폭 + 이 간격. 어댑터 바뀜 표시 막대 두께.
+    /// </summary>
+    public const double SignalLine = 2, SignalDotOn = 0, SignalDotOff = 2, SignalAxisGap = 6, SignalChange = 3;
     public const int GridLines = 4;
 }
 

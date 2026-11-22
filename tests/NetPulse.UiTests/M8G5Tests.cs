@@ -272,6 +272,9 @@ public sealed class M8G5Tests
             {
                 var record = RecordReader.Read(RecordReader.FindSegments(id, roots));
                 var a = MeasurementAnalysis.Analyze(record);
+                // 결론의 끊김 횟수는 요약의 "끊김 N번"과 같은 기준(끊김 전체)이라 그보다 클 수 없다 (M11 C3: 최악 예시 21599번 > 19600번)
+                if (System.Text.RegularExpressions.Regex.Match(a.Grade.Sentence, @"(\d+)번 끊긴") is { Success: true } said && int.Parse(said.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) > a.Episodes.Count)
+                    problems.Add($"{name}: 결론 {said.Groups[1].Value}번 > 끊김 {a.Episodes.Count}번");
                 var doc = ReportBuilder.Build(new ReportInput("k", "s", record, a, RecordLifecycle.Ended, [], new ReportOptions(), M5Fixtures.DemoNow, "edge"));
                 var rendered = ReportExport.Render(doc);
                 Assert.True(rendered.Ok, name + ": 내보낼 HTML을 만들지 못했습니다");

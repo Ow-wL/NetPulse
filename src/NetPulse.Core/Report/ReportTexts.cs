@@ -145,6 +145,53 @@ public static class ReportTexts
 
     public static string AdapterKind(string? kind) => kind switch { "wired" => "유선 어댑터", "wireless" => "무선 어댑터", _ => "기타 어댑터" };
 
+    // ---------------- Wi‑Fi 신호 (M12 설계 C) ----------------
+
+    /// <summary>품질 % (소수 한 자리까지). 값이 없으면 "값 없음".</summary>
+    public static string Quality(double? q) => q is double v ? v.ToString("0.#", CultureInfo.InvariantCulture) + "%" : "값 없음";
+
+    public static string Quality(int? q) => Quality(q is int v ? (double?)v : null);
+
+    /// <summary>RSSI dBm (소수 한 자리까지). 값이 없으면 "값 없음".</summary>
+    public static string Rssi(double? r) => r is double v ? v.ToString("0.#", CultureInfo.InvariantCulture) + " dBm" : "값 없음";
+
+    public static string Rssi(int? r) => Rssi(r is int v ? (double?)v : null);
+
+    public static string SignalStateName(SignalState s) => s switch
+    {
+        Evidence.SignalState.Ok => "읽음",
+        Evidence.SignalState.NotConnected => "연결 안 됨",
+        Evidence.SignalState.Denied => "권한 없음",
+        Evidence.SignalState.Unsupported => "지원 안 함",
+        _ => "읽기 실패",
+    };
+
+    /// <summary>상태별 시간 비율 ("읽음 95% · 연결 안 됨 5%"). 끝 요약이 없는 기록은 "마지막 관측까지"를 붙인다.</summary>
+    public static string SignalStates(SignalStateCounts ms, bool lastObserved)
+    {
+        long total = ms.Total;
+        var parts = Enum.GetValues<SignalState>().Where(s => ms[s] > 0)
+            .Select(s => $"{SignalStateName(s)} {LiveSummary.Percent((double)ms[s] / total)}").ToList();
+        string text = parts.Count == 0 ? "관측 시간 없음" : string.Join(" · ", parts);
+        return lastObserved ? text + " (정상 종료 기록 없음, 마지막 관측까지)" : text;
+    }
+
+    public static string OtherWirelessAdapters(int n) =>
+        $"그 밖의 무선 어댑터 {n}개에서도 신호를 읽었습니다. 경로에 쓰인 어댑터와 시간이 겹쳐 표와 그림에는 넣지 않았습니다.";
+
+    /// <summary>끊김 동안 관측한 신호 (관측만, 끊김이 어디서 생겼는지 말하지 않음).</summary>
+    public static string? SignalDuringEpisodes(int episodes, int? minQuality, IReadOnlyCollection<SignalState> states)
+    {
+        var parts = new List<string>();
+        if (minQuality is int q) parts.Add($"신호 품질 최저 {q}%");
+        foreach (var s in states) parts.Add($"'{SignalStateName(s)}' 상태");
+        if (parts.Count == 0) return null;
+        return $"끊김 {episodes}번 동안 관측된 Wi‑Fi 신호: " + string.Join(", ", parts) + ".";
+    }
+
+    public const string SignalScope =
+        "Wi‑Fi 신호는 관측 근거로만 적습니다. 끊김 판정과 '가능성이 높은 곳'은 신호 값으로 바꾸지 않습니다. 신호 품질은 Windows가 알려 준 0~100% 값입니다.";
+
     // ---------------- 시각 ----------------
 
     public static string Offset(int minutes)

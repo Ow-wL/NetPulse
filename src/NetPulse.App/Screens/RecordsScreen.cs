@@ -55,6 +55,7 @@ public sealed class RecordsScreen : Screen
     private readonly TimelineView view = new(TimelineView.Steps.Length - 1);
     private TimelinePanel? timeline;
     private TextBlock? timelineRange;
+    private TimelineLegend? timelineLegend;
     private IReadOnlyList<(StoredDiagnosis Stored, string File)> diagnoses = [];
     private int diagnosesSkipped;
     private bool diagnosesLoaded;
@@ -269,6 +270,7 @@ public sealed class RecordsScreen : Screen
         timelineData = null;
         timeline = null;
         timelineRange = null;
+        timelineLegend = null;
     }
 
     private void GoBack()
@@ -550,7 +552,8 @@ public sealed class RecordsScreen : Screen
         if (s.DurationMs is long d) title.Add(TimelineModel.Seconds(d));
         if (e.Targets.Count > 0) title.Add(RecordView.TargetsSummary(e.Targets));
         if (item.External) title.Add("다른 위치");
-        texts.Children.Add(Fonts.Text(string.Join(" · ", title), Typography.Label, Ui.Brushes.Ink));
+        // 첫 줄은 줄을 바꾼다: 150%에서 오른쪽 칩이 넓으면 말줄임표 없이 잘렸다 (M11 C3). 말줄임표는 배치 검사의 글자 잘림에 걸려 쓰지 않는다 (GlassButton.AlignStart와 같음)
+        texts.Children.Add(Fonts.Wrapped(string.Join(" · ", title), Typography.Label, Ui.Brushes.Ink));
         string sentence = s.Analyzing ? "분석 중" : s.Sentence ?? s.Error ?? (e.Lifecycle == RecordLifecycle.Running ? "측정 중" : "");
         var sentenceText = Fonts.Text(sentence, Typography.Body, Ui.Brushes.Ink);
         sentenceText.TextTrimming = TextTrimming.CharacterEllipsis;
@@ -956,12 +959,16 @@ public sealed class RecordsScreen : Screen
             timelineData = built;
         }
         var td = timelineData!;
+        // Wi‑Fi 신호 선이 있으면 오른쪽 축 여백을 뺀다: 열 수를 쓰기 전에 정한다 (M12 설계 C)
+        timeline.SignalAxis = td.Signal.Axis;
         TimelineFrame frame = default!;
-        RenderProfile.Time("records.timeline.frame", () => frame = TimelineModel.Frame(r.Rounds, h.Targets, r.Gaps, td.Marks, td.Downs, td.Bands, from, to, timeline.Columns, h.IntervalMs, $"{label(from)}~{label(to)}", td.Reps));
-        RenderProfile.Time("records.timeline.show", () => timeline.Show(frame, label, false, $"{label(from)}부터 {label(to)}까지 ({view.Label})"));
+        RenderProfile.Time("records.timeline.frame", () => frame = TimelineModel.Frame(r.Rounds, h.Targets, r.Gaps, td.Marks, td.Downs, td.Bands, from, to, timeline.Columns, h.IntervalMs, $"{label(from)}~{label(to)}", td.Reps, td.Signal));
+        RenderProfile.Time("records.timeline.show", () => timeline.Show(frame, label, false, $"{label(from)}부터 {label(to)}까지 ({MeasureScreen.RangeLength(view, from, to)})"));
+        timelineLegend?.SetSignal(frame.Signal);
         if (timelineRange is not null)
         {
-            timelineRange.Text = $"{label(from)} ~ {label(to)} · {view.Label}";
+            // "·" 뒤는 보이는 범위의 실제 길이 (M11 시각 검토: 59초 범위가 "2분"으로 보였다)
+            timelineRange.Text = $"{label(from)} ~ {label(to)} · {MeasureScreen.RangeLength(view, from, to)}";
             AutomationProperties.SetName(timelineRange, timelineRange.Text);
         }
     }
@@ -970,13 +977,15 @@ public sealed class RecordsScreen : Screen
     private (OpenedRecord For, RecordDetailView View)? detailView;
 
     /// <summary>한 기록의 타임라인에서 보기 창과 무관한 부분. Warm은 UI 밖에서 불러도 된다 (그 뒤 UI만 읽는다).</summary>
-    private sealed class TimelineData(OpenedRecord record, IReadOnlyList<SymptomMark> marks, LinkDownView[] downs, IReadOnlyList<TimelineBand> bands)
+    private sealed class TimelineData(OpenedRecord record, IReadOnlyList<SymptomMark> marks, LinkDownView[] downs, IReadOnlyList<TimelineBand> bands, SignalTrace signal)
     {
         public OpenedRecord For { get; } = record;
         public IReadOnlyList<SymptomMark> Marks { get; } = marks;
         public LinkDownView[] Downs { get; } = downs;
         public IReadOnlyList<TimelineBand> Bands { get; } = bands;
         public RepresentativeCache Reps { get; } = new();
+        /// <summary>Wi‑Fi 신호 표시 (기록의 신호 근거, M12 설계 C). 신호 이벤트가 없는 옛 기록은 None.</summary>
+        public SignalTrace Signal { get; } = signal;
 
         public static TimelineData Build(OpenedRecord o)
         {
@@ -984,7 +993,8 @@ public sealed class RecordsScreen : Screen
             var h = r.Header!;
             return new TimelineData(o, SymptomMarks.FromEvents(r.Events, r.NoteLines).Marks,
                 o.Analysis.Links.Downs.Select(d => new LinkDownView(d.Adapter, d.Source, d.FromMs, d.ToMs, false)).ToArray(),
-                TimelineModel.Bands(r.Rounds, h.Targets, r.Gaps, h.IntervalMs));
+                TimelineModel.Bands(r.Rounds, h.Targets, r.Gaps, h.IntervalMs),
+                SignalTrace.FromEvidence(NetPulse.Core.Evidence.SignalEvidenceBuilder.FromEvents(r.Events, h.IntervalMs), h.IntervalMs));
         }
 
         public TimelineData Warm()
@@ -994,26 +1004,8 @@ public sealed class RecordsScreen : Screen
         }
     }
 
-    private UIElement Legend()
-    {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S5 };
-        void Item(Microsoft.UI.Xaml.Media.Brush brush, bool dashed, string text)
-        {
-            var item = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S2 };
-            var line = new Microsoft.UI.Xaml.Shapes.Line { X1 = 0, X2 = Space.S4, Y1 = Space.S2, Y2 = Space.S2, Stroke = brush, StrokeThickness = ChartStyle.Line, VerticalAlignment = VerticalAlignment.Center };
-            if (dashed) line.StrokeDashArray = [ChartStyle.DashOn, ChartStyle.DashOff];
-            AutomationProperties.SetAccessibilityView(line, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
-            item.Children.Add(line);
-            item.Children.Add(Fonts.Text(text, Typography.Caption, Ui.Brushes.Muted));
-            row.Children.Add(item);
-        }
-        Item(Ui.Brushes.Accent, false, "인터넷 지연");
-        Item(Ui.Brushes.Series2, true, "로컬 대상 지연");
-        Item(Ui.Brushes.Bad, false, "응답 없음이 관측된 회차");
-        Item(Ui.Brushes.Muted, true, "관측 공백");
-        Item(Ui.Brushes.Warn, true, "증상 표시");
-        return row;
-    }
+    /// <summary>범례: 줄을 넘기는 공용 범례 (150%에서 "증상 표시"가 잘렸다, M11 C3) + Wi‑Fi 신호 항목 (M12 설계 C).</summary>
+    private UIElement Legend() => timelineLegend = new TimelineLegend(Ui, "records.timeline.legend");
 
     // ---------------- 끊김 줄과 구간 상세 ----------------
 
@@ -1483,6 +1475,8 @@ public sealed class RecordsScreen : Screen
         return new
         {
             timelineState = timeline?.Diag(),
+            timelineRange = timelineRange?.Text,
+            legendSignal = timelineLegend?.SignalKey,
             mode = mode.ToString(),
             listed = Context.Records.Listed,
             count = items.Count,

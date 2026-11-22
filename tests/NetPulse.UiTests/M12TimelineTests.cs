@@ -21,7 +21,9 @@ public sealed class M12TimelineTests
     {
         var t = State(d);
         double width = t.GetProperty("width").GetDouble();
-        return t.GetProperty("hasFrame").GetBoolean() && width > 0 && Int(t, "frameColumns") == (int)Math.Round(width);
+        // M12 설계 C: 신호 축이 있으면 열 수 = 오른쪽 여백을 뺀 그래프 폭 (이 시험의 유선 데모에서는 폭과 같다)
+        double plot = t.TryGetProperty("plotWidth", out var pw) ? pw.GetDouble() : width;
+        return t.GetProperty("hasFrame").GetBoolean() && width > 0 && Int(t, "frameColumns") == Math.Max(1, (int)Math.Round(plot));
     }
 
     [Fact]

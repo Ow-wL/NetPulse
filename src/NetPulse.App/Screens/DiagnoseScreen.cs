@@ -524,6 +524,10 @@ public sealed class DiagnoseScreen : Screen
 
     private void RenderSite(DiagnosisSnapshot d)
     {
+        // 초점을 가진 [점검]을 끄면 WinUI가 초점을 다음 요소(보조 도구의 "DNS 캐시 비우기")로 옮기고 화면을 내렸다 (M11 C3).
+        // 끄기 전에 같은 줄의 입력 칸으로 옮겨 둔다. 화면 안의 이동이라 사용자 조작으로 세지 않고, 끝나면 RestoreFocus가 단추로 돌려놓는다
+        if (d.Site.Running && siteRun.IsEnabled && siteRun.FocusState != FocusState.Unfocused)
+            siteInput.Box.Focus(siteRun.FocusState == FocusState.Keyboard ? FocusState.Keyboard : FocusState.Programmatic);
         siteRun.IsEnabled = !d.Site.Running;
         bool siteFinished = siteWasRunning && !d.Site.Running;
         siteWasRunning = d.Site.Running;

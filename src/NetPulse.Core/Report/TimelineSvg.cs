@@ -35,6 +35,39 @@ public sealed record TimelineFigure(
         "인터넷 지연 (응답한 외부 대상의 중앙값)", "로컬 대상 지연", "외부 대상 모두 응답 없음", "일부 대상 응답 없음", "링크 끊김 관측", "관측 공백", "증상 표시",
     ];
 
+    /// <summary>
+    /// 신호 선이 있을 때 오른쪽 축 글("100%"·"0%")을 위해 그래프 영역에서 빼는 폭 (M12 설계 C 표시). 시간축·선·띠·끝 시각은 남은
+    /// <see cref="PlotColumns"/>열에 둔다. 신호가 없는 기록은 지금과 같다.
+    /// </summary>
+    public const int SignalAxisWidth = 44;
+
+    /// <summary>신호 선 범례 (그림의 범례 칸은 좁아 짧게. 어댑터 바뀜·다른 어댑터 수는 설명 글과 관측 근거 절에 적는다).</summary>
+    public const string SignalLegendLine = "Wi‑Fi 신호 품질 (오른쪽 축)";
+
+    /// <summary>신호 축 글 (위에서 아래).</summary>
+    public static readonly string[] SignalAxisLabels = ["100%", "0%"];
+
+    /// <summary>그래프 영역 열 수: 신호 축이 있으면 <see cref="SignalAxisWidth"/>를 뺀다. <see cref="TimelineModel.Frame"/>에 넘기는 열 수.</summary>
+    public static int PlotColumnsFor(bool signalAxis) => signalAxis ? Columns - SignalAxisWidth : Columns;
+
+    /// <summary>이 그림의 그래프 영역 열 수.</summary>
+    public int PlotColumns { get; init; } = Columns;
+
+    /// <summary>Wi‑Fi 신호 품질 선 (값은 품질 %, 열의 최솟값). 신호 선이 없으면 비었다.</summary>
+    public IReadOnlyList<IReadOnlyList<FigurePoint>> Signal { get; init; } = [];
+
+    /// <summary>무선 어댑터가 바뀐 열 (위쪽에 짧은 세로 막대).</summary>
+    public IReadOnlyList<int> SignalChanges { get; init; } = [];
+
+    /// <summary>신호 범례 글 (선이면 견본과 함께, 상태면 견본 없이 글만). 신호가 관측되지 않은 기록은 null.</summary>
+    public string? SignalLegend { get; init; }
+
+    /// <summary>신호 선을 그렸다 (오른쪽 축이 있음).</summary>
+    public bool SignalLine => PlotColumns != Columns;
+
+    /// <summary>범례 글 (고정 일곱 개 + 신호 하나).</summary>
+    public IReadOnlyList<string> Legend => SignalLegend is { } s ? [.. LegendLabels, s] : LegendLabels;
+
     /// <summary>열 가운데의 x.</summary>
     public static double X(int column) => PlotLeft + column + 0.5;
 
@@ -43,27 +76,34 @@ public sealed record TimelineFigure(
     /// <summary>범례 한 줄에 셋 (글이 겹치지 않게).</summary>
     public const int LegendPerRow = 3, LegendStep = 300, LegendRowHeight = 22;
 
-    /// <summary>오른쪽 끝 가까운 시각 눈금은 글 끝을 눈금에 맞춘다 (그림 밖으로 잘리지 않게).</summary>
-    public static bool AtRightEdge(FigureTick t) => t.Column >= Columns - 40;
+    /// <summary>오른쪽 끝 가까운 시각 눈금은 글 끝을 눈금에 맞춘다 (그림 밖으로 잘리지 않게). 신호 축이 있으면 그 그래프 영역의 오른쪽 끝.</summary>
+    public static bool AtRightEdge(FigureTick t, int plotColumns = Columns) => t.Column >= plotColumns - 40;
 
     public double Y(double ms) => PlotTop + PlotHeight * (1 - Math.Clamp(ms / AxisMaxMs, 0, 1));
+
+    /// <summary>품질 % → y (오른쪽 축, 화면과 같은 투영 <see cref="TimelineGeometry.SignalY"/>).</summary>
+    public static double SignalY(double quality) => TimelineGeometry.SignalY(quality, PlotTop, PlotHeight);
+
+    /// <summary>오른쪽 축 글의 왼쪽 x (그래프 영역 오른쪽 끝 + 6).</summary>
+    public double SignalAxisX => PlotLeft + PlotColumns + 6;
 
     public int Column(double ms)
     {
         double span = Math.Max(1, ToMs - FromMs);
-        return Math.Clamp((int)Math.Floor((ms - FromMs) * Columns / span), 0, Columns - 1);
+        return Math.Clamp((int)Math.Floor((ms - FromMs) * PlotColumns / span), 0, PlotColumns - 1);
     }
 
     public static string ValueLabel(double ms) => ms.ToString("0", CultureInfo.InvariantCulture) + " ms";
 
-    /// <summary>보이는 글 순서: 제목, 설명, 값 눈금(위에서 아래), 시각 눈금, 범례. SVG 요소 순서와 같다.</summary>
+    /// <summary>보이는 글 순서: 제목, 설명, 값 눈금(위에서 아래), 신호 축 글, 시각 눈금, 범례. SVG 요소 순서와 같다.</summary>
     public IEnumerable<ReportRun> Texts()
     {
         yield return ReportRun.Gen(Title);
         yield return ReportRun.Gen(Description);
         foreach (var v in ValueTicks) yield return ReportRun.Gen(ValueLabel(v));
+        if (SignalLine) foreach (var s in SignalAxisLabels) yield return ReportRun.Gen(s);
         foreach (var t in TimeTicks) yield return ReportRun.Gen(t.Label);
-        foreach (var l in LegendLabels) yield return ReportRun.Gen(l);
+        foreach (var l in Legend) yield return ReportRun.Gen(l);
     }
 
     /// <summary>
@@ -74,10 +114,11 @@ public sealed record TimelineFigure(
         IReadOnlyList<Records.SymptomMark> marks, DateTimeOffset start, TimeSpan offset)
     {
         long from = frame.FromMs, to = Math.Max(frame.FromMs + 1, frame.ToMs);
-        var shell = new TimelineFigure(from, to, frame.AxisMaxMs, [], [], [], [], [], [], "", "");
+        int plotColumns = PlotColumnsFor(frame.Signal.Axis);
+        var shell = new TimelineFigure(from, to, frame.AxisMaxMs, [], [], [], [], [], [], "", "") { PlotColumns = plotColumns };
 
         // 띠: 열마다 우선순위가 가장 높은 종류 하나
-        var kinds = new int[Columns];
+        var kinds = new int[plotColumns];
         Array.Fill(kinds, -1);
         void Paint(long a, long b, FigureBandKind k)
         {
@@ -94,11 +135,11 @@ public sealed record TimelineFigure(
             });
         foreach (var d in downs) Paint(d.FromMs, Math.Max(d.ToMs, d.FromMs + 1), FigureBandKind.LinkDown);
         var bands = new List<FigureBand>();
-        for (int c = 0; c < Columns;)
+        for (int c = 0; c < plotColumns;)
         {
             if (kinds[c] < 0) { c++; continue; }
             int e = c;
-            while (e + 1 < Columns && kinds[e + 1] == kinds[c]) e++;
+            while (e + 1 < plotColumns && kinds[e + 1] == kinds[c]) e++;
             bands.Add(new FigureBand((FigureBandKind)kinds[c], c, e + 1));
             c = e + 1;
         }
@@ -127,10 +168,21 @@ public sealed record TimelineFigure(
         string description = $"측정 전체 기간의 지연과 응답 없음. 외부 대상 모두 응답 없음 {external}번, 일부 대상 응답 없음 {partial}번, "
             + $"링크 끊김 관측 {downs.Count}번, 증상 표시 {marks.Count}개, 관측 공백 {gaps}번. 띠는 실제 끊김의 시작·끝이 아니라 응답 없음이 관측된 회차 칸입니다.";
 
+        // Wi‑Fi 신호 (M12 설계 C): 품질 선은 열의 최솟값 (약해진 순간이 사라지지 않게), 어댑터 바뀜은 열
+        var s = frame.Signal;
+        if (s.Display == SignalDisplay.Line)
+            description += " Wi‑Fi 신호 품질은 오른쪽 축(0~100%)의 점선입니다" + (s.MinQuality is int q ? $" (관측한 최저 {q}%)." : ".")
+                + (s.AdapterChanges.Count > 0 ? $" 무선 어댑터가 {s.AdapterChanges.Count}번 바뀌었고, 바뀐 시각은 위쪽의 짧은 세로 막대입니다." : "")
+                + (s.OtherAdapters > 0 ? $" 그 밖의 무선 어댑터 {s.OtherAdapters}개는 그리지 않았습니다." : "");
+        else if (s.Display == SignalDisplay.State) description += " " + s.StateText + ".";
+
         return shell with
         {
             Internet = Points(frame.Internet), Router = Points(frame.Router), Bands = bands, Marks = markColumns, TimeTicks = ticks,
             ValueTicks = valueTicks, Title = "측정 전체 타임라인", Description = description,
+            Signal = s.Segments.Select(seg => (IReadOnlyList<FigurePoint>)seg.Select(p => new FigurePoint(shell.Column(p.XMs), p.MinMs)).ToArray()).ToArray(),
+            SignalChanges = s.AdapterChanges.Select(c => shell.Column(c)).Distinct().ToArray(),
+            SignalLegend = s.Display == SignalDisplay.Line ? SignalLegendLine : s.StateText,
         };
     }
 }
@@ -160,13 +212,13 @@ public static class TimelineSvg
 
         // 그래프 면과 값 눈금
         sb.Append("<rect class=\"plot\" x=\"").Append(TimelineFigure.PlotLeft).Append("\" y=\"").Append(TimelineFigure.PlotTop)
-            .Append("\" width=\"").Append(TimelineFigure.Columns).Append("\" height=\"").Append(TimelineFigure.PlotHeight)
+            .Append("\" width=\"").Append(f.PlotColumns).Append("\" height=\"").Append(TimelineFigure.PlotHeight)
             .Append("\" fill=\"").Append(p.Surface).Append("\" stroke=\"").Append(p.Edge).Append("\" />");
         foreach (var v in f.ValueTicks)
         {
             double y = f.Y(v);
             sb.Append("<line class=\"grid\" x1=\"").Append(TimelineFigure.PlotLeft).Append("\" y1=\"").Append(N(y)).Append("\" x2=\"")
-                .Append(TimelineFigure.PlotLeft + TimelineFigure.Columns).Append("\" y2=\"").Append(N(y)).Append("\" stroke=\"").Append(p.Edge).Append("\" />");
+                .Append(TimelineFigure.PlotLeft + f.PlotColumns).Append("\" y2=\"").Append(N(y)).Append("\" stroke=\"").Append(p.Edge).Append("\" />");
         }
 
         // 띠 (그래프 뒤)
@@ -213,6 +265,23 @@ public static class TimelineSvg
         Lines(f.Router, "line-router", p.Muted, "4 3");
         Lines(f.Internet, "line-internet", p.Accent, null);
 
+        // Wi‑Fi 신호 품질 (오른쪽 축, 점선 — 지연 선과 색·모양이 다름) 과 무선 어댑터 바뀜 (위쪽 짧은 막대)
+        foreach (var seg in f.Signal)
+        {
+            if (seg.Count == 0) continue;
+            sb.Append("<polyline class=\"line-signal\" fill=\"none\" stroke=\"").Append(p.Signal).Append("\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-dasharray=\"0.1 4\" points=\"");
+            for (int i = 0; i < seg.Count; i++)
+            {
+                if (i > 0) sb.Append(' ');
+                sb.Append(N(TimelineFigure.X(seg[i].Column))).Append(',').Append(N(TimelineFigure.SignalY(seg[i].ValueMs)));
+            }
+            if (seg.Count == 1) sb.Append(' ').Append(N(TimelineFigure.X(seg[0].Column) + 1)).Append(',').Append(N(TimelineFigure.SignalY(seg[0].ValueMs)));
+            sb.Append("\" />");
+        }
+        foreach (var c in f.SignalChanges)
+            sb.Append("<line class=\"signal-change\" x1=\"").Append(N(TimelineFigure.X(c))).Append("\" y1=\"").Append(TimelineFigure.PlotTop).Append("\" x2=\"")
+                .Append(N(TimelineFigure.X(c))).Append("\" y2=\"").Append(TimelineFigure.PlotTop + 10).Append("\" stroke=\"").Append(p.Signal).Append("\" stroke-width=\"3\" />");
+
         // 증상 표시
         foreach (var m in f.Marks)
         {
@@ -226,20 +295,26 @@ public static class TimelineSvg
         foreach (var v in f.ValueTicks)
             sb.Append("<text class=\"tick\" x=\"").Append(TimelineFigure.PlotLeft - 6).Append("\" y=\"").Append(N(f.Y(v) + 4))
                 .Append("\" text-anchor=\"end\" fill=\"").Append(p.Muted).Append("\">").Append(Markup.Text(TimelineFigure.ValueLabel(v))).Append("</text>");
+        if (f.SignalLine)
+            for (int i = 0; i < TimelineFigure.SignalAxisLabels.Length; i++)
+                sb.Append("<text class=\"tick signal-tick\" x=\"").Append(N(f.SignalAxisX)).Append("\" y=\"").Append(N(TimelineFigure.SignalY(i == 0 ? 100 : 0) + 4))
+                    .Append("\" text-anchor=\"start\" fill=\"").Append(p.Muted).Append("\">").Append(Markup.Text(TimelineFigure.SignalAxisLabels[i])).Append("</text>");
         foreach (var t in f.TimeTicks)
             sb.Append("<text class=\"tick\" x=\"").Append(N(TimelineFigure.X(t.Column))).Append("\" y=\"").Append(TimelineFigure.TickTextY)
-                .Append("\" text-anchor=\"").Append(TimelineFigure.AtRightEdge(t) ? "end" : "middle").Append("\" fill=\"").Append(p.Muted).Append("\">").Append(Markup.Text(t.Label)).Append("</text>");
+                .Append("\" text-anchor=\"").Append(TimelineFigure.AtRightEdge(t, f.PlotColumns) ? "end" : "middle").Append("\" fill=\"").Append(p.Muted).Append("\">").Append(Markup.Text(t.Label)).Append("</text>");
 
-        // 범례: 견본 + 글
-        string[] swatches = [p.Accent, p.Muted, $"url(#{PatternNone})", $"url(#{PatternPartial})", p.Link, $"url(#{PatternGap})", p.Mark];
-        for (int i = 0; i < TimelineFigure.LegendLabels.Length; i++)
+        // 범례: 견본 + 글 (신호 상태 글은 견본 없이)
+        string[] swatches = [p.Accent, p.Muted, $"url(#{PatternNone})", $"url(#{PatternPartial})", p.Link, $"url(#{PatternGap})", p.Mark, p.Signal];
+        var legend = f.Legend;
+        for (int i = 0; i < legend.Count; i++)
         {
             int col = i % TimelineFigure.LegendPerRow, row = i / TimelineFigure.LegendPerRow;
             double x = TimelineFigure.PlotLeft + col * TimelineFigure.LegendStep, y = TimelineFigure.LegendY + row * TimelineFigure.LegendRowHeight;
-            sb.Append("<rect class=\"swatch\" x=\"").Append(N(x)).Append("\" y=\"").Append(N(y - 10)).Append("\" width=\"14\" height=\"12\" fill=\"")
-                .Append(swatches[i]).Append("\" stroke=\"").Append(p.Edge).Append("\" />");
+            if (i < TimelineFigure.LegendLabels.Length || f.SignalLine)
+                sb.Append("<rect class=\"swatch\" x=\"").Append(N(x)).Append("\" y=\"").Append(N(y - 10)).Append("\" width=\"14\" height=\"12\" fill=\"")
+                    .Append(swatches[Math.Min(i, swatches.Length - 1)]).Append("\" stroke=\"").Append(p.Edge).Append("\" />");
             sb.Append("<text class=\"legend\" x=\"").Append(N(x + 20)).Append("\" y=\"").Append(N(y)).Append("\" fill=\"").Append(p.Ink).Append("\">")
-                .Append(Markup.Text(TimelineFigure.LegendLabels[i])).Append("</text>");
+                .Append(Markup.Text(legend[i])).Append("</text>");
         }
         sb.Append("</svg>");
     }

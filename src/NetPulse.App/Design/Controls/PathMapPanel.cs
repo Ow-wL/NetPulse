@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
 using NetPulse.Core.Presentation;
+using NetPulse.Design;
 using NetPulse.Design.Tokens;
 
 namespace NetPulse.App.Design.Controls;
@@ -34,6 +35,17 @@ public sealed class PathMapPanel : GroupPanel
         first = new Link(ui, automationId + ".link1");
         second = new Link(ui, automationId + ".link2");
         Place(row, pc, 0); Place(row, first, 1); Place(row, local, 2); Place(row, second, 3); Place(row, internet, 4);
+        // 선 끝점: 노드 칸이 원보다 넓으면(설명 글이 넓음) 그만큼 선을 칸 안으로 늘여 원 가장자리에 닿게 한다 (M11 C3, 인터넷 노드)
+        void Fit()
+        {
+            var (l1, r1) = PathMapGeometry.LinkMargins(pc.ActualWidth, local.ActualWidth);
+            var (l2, r2) = PathMapGeometry.LinkMargins(local.ActualWidth, internet.ActualWidth);
+            first.Margin = new Thickness(l1, 0, r1, 0);
+            second.Margin = new Thickness(l2, 0, r2, 0);
+        }
+        pc.SizeChanged += (_, _) => Fit();
+        local.SizeChanged += (_, _) => Fit();
+        internet.SizeChanged += (_, _) => Fit();
         stack.Children.Add(row);
         note = Fonts.Wrapped("", Typography.Body, ui.Brushes.Ink);
         AutomationProperties.SetAutomationId(note, automationId + ".note");

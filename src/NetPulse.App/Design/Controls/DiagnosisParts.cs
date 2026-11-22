@@ -80,6 +80,8 @@ public sealed class CheckCard : GroupPanel
             });
         };
         AutomationProperties.SetAutomationId(details, AutomationProperties.GetAutomationId(this) + ".details");
+        // 머리(RowButton 안 내용)와 같은 들여쓰기 (RowButton은 내용에 좌우 S3 여백을 준다): 상세 줄이 머리보다 왼쪽에서 시작했다 (M11 C3)
+        details.Margin = new Thickness(Space.S3, 0, Space.S3, 0);
         var stack = new StackPanel { Spacing = Space.S2 };
         stack.Children.Add(toggle);
         stack.Children.Add(details);

@@ -244,6 +244,8 @@ public sealed class SegmentedChoice : GroupPanel
             Child = row,
         }));
         HorizontalAlignment = HorizontalAlignment.Left;
+        // 알약은 세로로 늘이지 않는다: 가로 줄이 높아지면 반경이 높이를 따라가 큰 원이 됐다 (M11 C3, 프로필 편집)
+        VerticalAlignment = VerticalAlignment.Center;
     }
 
     public event Action<string>? Changed;
