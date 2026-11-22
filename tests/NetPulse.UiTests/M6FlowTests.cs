@@ -147,7 +147,7 @@ public sealed class M6FlowTests
             Assert.Equal(["Tcp", "Dns", "Https"], Sd(first).GetProperty("changes").EnumerateArray().Select(e => e.GetString()));
             app.Invoke("diagnose.start");
             var second = WaitRun(app, S(first, "saved"));
-            Assert.Equal("지난 검사와 같습니다.", S(second, "compare"));
+            Assert.Equal("지난 진단과 같습니다.", S(second, "compare"));
             Assert.Equal(0, Sd(second).GetProperty("changes").GetArrayLength());
             Assert.Equal(0, app.Close());
         }

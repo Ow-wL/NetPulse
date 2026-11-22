@@ -247,7 +247,7 @@ public sealed class HomeScreen : Screen
         }
         var (head, weight) = DiagnosisTexts.Head(x.Conclusion);
         var (icon, brush) = DiagnosisLook.Weight(Ui, weight);
-        diagBody.Set(ScreenParts.Message(Ui, "home.diagnosis.last", icon, brush, head, "마지막 진단 · " + LiveSummary.When(x.At, now)), "normal");
+        diagBody.Set(ScreenParts.Message(Ui, "home.diagnosis.last", icon, brush, head, "지난 진단 · " + LiveSummary.When(x.At, now)), "normal");
     }
 
     private void RenderChips(HostSnapshot s)
@@ -317,7 +317,7 @@ public sealed class HomeScreen : Screen
             SetRing(last.Grade!.Value, null);
             Set(status, "지난 측정 · " + LiveSummary.When(last.Entry.StartedAt ?? now, now));
             Set(headline, last.Sentence ?? "");
-            Set(numbers, last.Outages is int o ? $"끊김 {o}회" + (last.DurationMs is long d ? $" · {TimelineModel.Seconds(d)} 측정" : "") : "");
+            Set(numbers, last.Outages is int o ? $"끊김 {o}번" + (last.DurationMs is long d ? $" · {TimelineModel.Seconds(d)} 측정" : "") : "");
             return;
         }
         SetRing(Grade.Insufficient, "기록 없음");
@@ -330,7 +330,7 @@ public sealed class HomeScreen : Screen
     {
         var b = LiveSummary.Badge(g);
         string name = nameOverride ?? b.Name;
-        ring.Set(b.Letter, name, b.Fill, b.Dashed, ScreenParts.GradeBrush(Ui, nameOverride is null ? g : null), "연결 품질 " + name);
+        ring.Set(b.Letter, name, b.Fill, b.Dashed, ScreenParts.GradeBrush(Ui, nameOverride is null ? g : null), "등급 " + name);
     }
 
     private static void Set(TextBlock t, string text)
@@ -390,7 +390,7 @@ public sealed class HomeScreen : Screen
         Grid.SetColumn(texts, 1);
         grid.Children.Add(texts);
         var right = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
-        string count = item.Analyzing ? "분석 중" : item.Outages is int o ? $"{o}회" : "";
+        string count = item.Analyzing ? "분석 중" : item.Outages is int o ? $"{o}번" : "";
         string longest = item.LongestMinMs is long l ? $"최장 {TimelineModel.AtLeast(l)} 이상" : item.Outages == 0 ? "끊김" : "";
         var c = Fonts.Text(count, Typography.Label, Ui.Brushes.Ink);
         c.HorizontalAlignment = HorizontalAlignment.Right;
@@ -400,7 +400,7 @@ public sealed class HomeScreen : Screen
         right.Children.Add(lt);
         Grid.SetColumn(right, 2);
         grid.Children.Add(right);
-        string name = $"{title}, 등급 {item.Badge?.Name ?? (item.Analyzing ? "분석 중" : "없음")}, 끊김 {item.Outages?.ToString() ?? "모름"}회" + (sub.Count > 0 ? ", " + string.Join(", ", sub) : "");
+        string name = $"{title}, 등급 {item.Badge?.Name ?? (item.Analyzing ? "분석 중" : "없음")}, 끊김 {item.Outages?.ToString() ?? "모름"}번" + (sub.Count > 0 ? ", " + string.Join(", ", sub) : "");
         var row = new RowButton(Ui, $"home.recent.{index}", name, grid);
         row.Click += (_, _) => Context.OpenRecord(key);   // 그 기록 상세 (측정 중이면 기록 화면이 측정 화면으로 보낸다, M7 4.2)
         AutomationProperties.SetItemStatus(row, item.Analyzing ? "analyzing" : item.Error is not null ? "error" : "ready");

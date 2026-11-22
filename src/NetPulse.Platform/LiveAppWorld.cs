@@ -43,7 +43,7 @@ public sealed class LiveAppWorld(string userData) : IAppWorld
         try { return DetectionPlanner.Plan(NetworkInfo.Snapshot(DetectionPlanner.RouteProbeAddress)); }
         catch (Exception ex) when (ex is System.Net.NetworkInformation.NetworkInformationException or DllNotFoundException or EntryPointNotFoundException)
         {
-            return new DetectionResult(DetectionStatus.Unknown, null, "연결 정보를 읽지 못했습니다: " + ex.GetType().Name, null, Tristate.Unknown, 0);
+            return new DetectionResult(DetectionStatus.Unknown, null, "연결 정보를 읽지 못했습니다. 다시 확인하세요.", null, Tristate.Unknown, 0);
         }
     }, cancellationToken);
 

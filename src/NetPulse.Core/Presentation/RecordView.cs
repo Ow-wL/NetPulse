@@ -45,8 +45,8 @@ public static class RecordView
         Verdict.Normal => "정상",
         Verdict.LatencyHigh => "지연 상승",
         Verdict.RouteHold => "판단 불가 (경로가 예상과 다름)",
-        Verdict.LinkDown => "로컬 링크 단절 관측",
-        Verdict.ExternalOutage => "외부 연결 단절 추정",
+        Verdict.LinkDown => "이 PC 연결 끊김 관측",
+        Verdict.ExternalOutage => "외부 연결 끊김 추정",
         Verdict.Insufficient => "판단 불가 (근거 부족)",
         Verdict.TargetFailure => "대상 응답 실패",
         _ => v.ToString(),
@@ -54,17 +54,17 @@ public static class RecordView
 
     public static string CandidateText(Candidate c) => c.Kind switch
     {
-        CandidateKind.PcLink => $"후보: 이 PC의 {PathMapModel.KindText(c.LinkKind)} 링크 (어댑터 다운 관측. 원인이 링크라는 단정은 아님)",
-        CandidateKind.AfterRouter => "후보: 공유기 이후 (인터넷 쪽)",
-        CandidateKind.PcToRouterOrRouter => "후보: PC~공유기 구간 또는 공유기",
-        _ => "후보 없음 — " + PathMapModel.ReasonText(c.Reason),
+        CandidateKind.PcLink => $"가능성이 높은 곳: 이 PC의 {PathMapModel.KindText(c.LinkKind)} 연결 (어댑터 연결 끊김이 관측됨. 원인이라고 단정할 수는 없음)",
+        CandidateKind.AfterRouter => "가능성이 높은 곳: " + PathMapModel.PlaceText(MapCandidate.LocalToInternet),   // 경로 맵과 같은 구간 이름 (M12 문구)
+        CandidateKind.PcToRouterOrRouter => "가능성이 높은 곳: " + PathMapModel.PlaceText(MapCandidate.PcToLocalAndLocalNode),
+        _ => "가능성이 높은 곳 없음 — " + PathMapModel.ReasonText(c.Reason),
     };
 
     /// <summary>끝 사유 (수명과 함께). 저장 상태와 따로 말한다.</summary>
     public static string EndText(RecordLifecycle life, EndReason? end) => life switch
     {
         RecordLifecycle.Running => "측정 중",
-        RecordLifecycle.NoSummary => "끝 기록 없음 (비정상 종료일 수도, 요약을 쓰지 못한 것일 수도 있습니다)",
+        RecordLifecycle.NoSummary => "정상 종료 기록 없음 (비정상 종료일 수도, 요약을 쓰지 못한 것일 수도 있습니다)",
         _ => end switch
         {
             EndReason.Completed => "계획한 시간을 마침",
@@ -83,7 +83,7 @@ public static class RecordView
         long unsaved = s.Pending + s.Dropped + s.Unprocessed;
         if (unsaved > 0) parts.Add($"저장하지 못한 회차 {unsaved}개");
         if (s.EventsDropped is > 0) parts.Add($"저장하지 못한 근거 {s.EventsDropped}개");
-        if (s.SealFailed) parts.Add("마무리 기록을 쓰지 못함");
+        if (s.SealFailed) parts.Add("정상 종료 기록을 쓰지 못함");
         return parts.Count == 0 ? null : string.Join(" · ", parts);
     }
 
@@ -139,7 +139,7 @@ public static class RecordView
 
     public static RecordDetailView Detail(MeasurementRecord record, AnalysisResult a, RecordLifecycle life)
     {
-        var header = record.Header ?? throw new ArgumentException("머리가 없는 기록입니다.", nameof(record));
+        var header = record.Header ?? throw new ArgumentException("기본 정보가 없는 기록입니다.", nameof(record));
         var targets = header.Targets.Where(t => t.Enabled).ToArray();
         var marks = SymptomMarks.FromEvents(record.Events, record.NoteLines);
         var c = a.Coverage;
@@ -165,7 +165,7 @@ public static class RecordView
         return new RecordDetailView(a.Grade.Grade, LiveSummary.Badge(a.Grade.Grade), Sentences.GradeName(a.Grade.Grade), a.Grade.Sentence,
             a.Grade.Notes.Select(NoteText).ToArray(), coverage,
             EndText(life, record.Summary?.EndReason ?? record.EndReason), SaveText(record.Summary), TargetsSummary(header.Targets),
-            $"측정 주기 {header.IntervalMs / 1000.0:0.#}초 · 응답 제한 {header.TimeoutMs / 1000.0:0.#}초 · {ExpectedText(header.Expected)}",
+            $"측정 주기 {header.IntervalMs / 1000.0:0.#}초 · 응답 제한 시간 {header.TimeoutMs / 1000.0:0.#}초 · {ExpectedText(header.Expected)}",
             DamageNotices(record, marks.Ignored), verdicts, countNote, lines, trend, episodes,
             episodes.Length == 0 ? "이 측정에서는 끊김이 관측되지 않았습니다." : null);
     }
@@ -187,7 +187,7 @@ public static class RecordView
         if (s is null) return new TargetStatLine(t.Id, t.Name, t.Role, MethodText(t.Method), "값 없음", "값 없음", "값 없음", "값 없음", "값 없음", "값 없음");
         int valid = s.Success + s.Lost;
         string loss = s.LossRate is double r ? $"{valid}번 중 {s.Lost}번 응답 없음 ({LiveSummary.Percent(r)})" : "값 없음";
-        if (s.Error > 0) loss += $" · 검사 오류 {s.Error}번 (분모에서 뺌)";
+        if (s.Error > 0) loss += $" · 측정 오류 {s.Error}번 (응답 없음 비율 계산에서 뺌)";
         return new TargetStatLine(t.Id, t.Name, t.Role, MethodText(t.Method), loss,
             s.AvgRttMs is double avg ? PathMapModel.Ms(avg) : "값 없음",
             s.MaxRttMs is double max ? PathMapModel.Ms(max) : "값 없음",
@@ -274,7 +274,7 @@ public static class RecordView
     {
         CellKind.Success => c.RttMs is double ms ? PathMapModel.Ms(ms) : "응답",
         CellKind.Lost => "응답 없음",
-        CellKind.Error => "검사 오류",
+        CellKind.Error => "측정 오류",
         _ => "없음",
     };
 
@@ -283,9 +283,9 @@ public static class RecordView
     /// <summary>복사용 후보 종류 (사유 문장은 길어 종류만).</summary>
     private static string CandidateKindText(Candidate c) => c.Kind switch
     {
-        CandidateKind.PcLink => "후보 이 PC 링크",
-        CandidateKind.AfterRouter => "후보 공유기 이후",
-        CandidateKind.PcToRouterOrRouter => "후보 PC~공유기 또는 공유기",
-        _ => "후보 없음",
+        CandidateKind.PcLink => "가능성이 높은 곳: " + PathMapModel.PlaceText(MapCandidate.PcToLocal),
+        CandidateKind.AfterRouter => "가능성이 높은 곳: " + PathMapModel.PlaceText(MapCandidate.LocalToInternet),
+        CandidateKind.PcToRouterOrRouter => "가능성이 높은 곳: " + PathMapModel.PlaceText(MapCandidate.PcToLocalAndLocalNode),
+        _ => "가능성이 높은 곳 없음",
     };
 }

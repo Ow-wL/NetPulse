@@ -68,7 +68,7 @@ public sealed class DiagnoseScreen : Screen
         }
         checksGrid.SizeChanged += (_, e) => ArrangeChecks(e.NewSize.Width);
         AutomationProperties.SetAutomationId(checksGrid, "diagnose.checks");
-        AutomationProperties.SetName(checksGrid, "검사 일곱");
+        AutomationProperties.SetName(checksGrid, "검사 7가지");
         content.Children.Add(checksGrid);
 
         // 사이트 점검
@@ -107,7 +107,7 @@ public sealed class DiagnoseScreen : Screen
         folder = new GlassButton(Ui, ButtonKind.Ghost, "diagnose.folder", "기록 폴더 열기", Icons.Layers);
         folder.Click += (_, _) => OpenFolder();
         var toolsStack = new StackPanel { Spacing = Space.S2 };
-        toolsStack.Children.Add(Fonts.Wrapped("DNS 캐시 비우기만 시스템을 바꾸므로 확인을 묻습니다. 끝나면 빠른 진단을 다시 돌립니다.", Typography.Caption, Ui.Brushes.Muted));
+        toolsStack.Children.Add(Fonts.Wrapped("DNS 캐시 비우기만 시스템을 바꾸므로 확인을 묻습니다. 끝나면 빠른 진단을 다시 실행합니다.", Typography.Caption, Ui.Brushes.Muted));
         toolsStack.Children.Add(flush);
         var settingsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S1 };
         settingsRow.Children.Add(network);
@@ -236,12 +236,12 @@ public sealed class DiagnoseScreen : Screen
             if (opener.XamlRoot is null || !opener.IsLoaded) (FindById("diagnose.conclusion.flush") ?? flush).Focus(FocusState.Programmatic);
             if (!ok) return;
             if (Context.Diagnosis.RequestFlush() == DiagnosisRequest.Queued)
-                Context.Toasts.Show(ToastKind.Info, "진단이 끝나면 DNS 캐시를 비웁니다", "비운 뒤 빠른 진단을 다시 돌립니다.");
+                Context.Toasts.Show(ToastKind.Info, "진단이 끝나면 DNS 캐시를 비웁니다", "비운 뒤 빠른 진단을 다시 실행합니다.");
             Render(Context.Host.Snapshot);
         }
         Context.Dialog.Closed += Closed;
         Context.Dialog.Open(opener, "DNS 캐시를 비울까요?",
-            "Windows가 기억한 이름 해석 결과를 지웁니다. 인터넷 연결이나 설정은 바뀌지 않습니다. 끝나면 빠른 진단을 다시 돌립니다.", "비우기", "취소");
+            "Windows가 기억한 이름 해석 결과를 지웁니다. 인터넷 연결이나 설정은 바뀌지 않습니다. 끝나면 빠른 진단을 다시 실행합니다.", "비우기", "취소");
     }
 
     private void OpenSettings(SettingsPage page)
@@ -303,7 +303,7 @@ public sealed class DiagnoseScreen : Screen
         copyState = verified ? "ok" : wrote ? "unverified" : "failed";
         if (verified) Context.Toasts.Show(ToastKind.Success, "결과를 복사했습니다", "주소·도메인 값은 넣지 않았습니다.");
         else if (wrote) Context.Toasts.Show(ToastKind.Warning, "복사했지만 확인하지 못했습니다", "붙여 넣어 내용을 확인해 주세요.");
-        else Context.Toasts.Show(ToastKind.Error, "복사하지 못했습니다", "다른 프로그램이 클립보드를 쓰고 있을 수 있습니다. 다시 시도해 주세요.");
+        else Context.Toasts.Show(ToastKind.Error, "복사하지 못했습니다", "다른 프로그램이 클립보드를 쓰고 있을 수 있습니다. 다시 시도하세요.");
         Context.QueueDiag();
     }
 
@@ -328,7 +328,7 @@ public sealed class DiagnoseScreen : Screen
         {
             DiagnosisOperation.Diagnosing => $"검사 중 {d.Partial.Count}/7",
             DiagnosisOperation.Flushing => FlushStageText(d.Flush),
-            _ => d.Last is { } l ? "마지막 검사 " + LiveSummary.Clock(l.Result.EndedAt, Context.Now) : null,
+            _ => d.Last is { } l ? "지난 진단 " + LiveSummary.Clock(l.Result.EndedAt, Context.Now) : null,
         });
         RenderConclusion(d);
         RenderChecks(d);

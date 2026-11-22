@@ -97,12 +97,12 @@ public sealed class M5FlowTests
                 Assert.Equal("화상회의 중 끊김", mark.Memo);
                 var analysis = MeasurementAnalysis.Analyze(record);
                 Assert.Equal(Sentences.GradeName(analysis.Grade.Grade), app.Text("measure.result.grade"));
-                Assert.StartsWith($"끊김 {analysis.Episodes.Count}회", app.Text("measure.result.outages"));
+                Assert.StartsWith($"끊김 {analysis.Episodes.Count}번", app.Text("measure.result.outages"));
                 var stats = StatsCalculator.Compute(record.Rounds, record.Header.Targets.Select(t => t.Id).ToArray(), record.Gaps);
                 foreach (var card in LiveSummary.Cards(record.Header.Targets, stats, record.Rounds[^1]))
                 {
-                    Assert.Equal($"손실 {card.LossRate} · {card.LossSentence}", app.Text($"measure.card.{card.TargetId}.loss"));
-                    Assert.Equal($"최대 연속 실패 {card.MaxConsecutiveLoss}회", app.Text($"measure.card.{card.TargetId}.streak"));
+                    Assert.Equal($"응답 없음 {card.LossRate} · {card.LossSentence}", app.Text($"measure.card.{card.TargetId}.loss"));
+                    Assert.Equal($"최대 연속 응답 없음 {card.MaxConsecutiveLoss}번", app.Text($"measure.card.{card.TargetId}.streak"));
                 }
 
                 // 8. 홈: 최근 측정 첫 줄이 이 측정
@@ -111,7 +111,7 @@ public sealed class M5FlowTests
                     && !x.GetProperty("Analyzing").GetBoolean() && M5Fixtures.Str(x, "Id") == session, b => b, "최근 측정 첫 줄");
                 var row = app.Text("home.recent.0");
                 Assert.Contains("등급 " + Sentences.GradeName(analysis.Grade.Grade), row);
-                Assert.Contains($"끊김 {analysis.Episodes.Count}회", row);
+                Assert.Contains($"끊김 {analysis.Episodes.Count}번", row);
                 Record("flow-firstrun-to-stop", new { session, actions, grade = analysis.Grade.Grade.ToString(), outages = analysis.Episodes.Count, timeline });
                 Assert.Equal(0, app.Close());
             }

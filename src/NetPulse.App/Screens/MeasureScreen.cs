@@ -191,7 +191,7 @@ public sealed class MeasureScreen : Screen
             row.Children.Add(item);
         }
         Item(Ui.Brushes.Accent, false, "인터넷 지연");
-        Item(Ui.Brushes.Series2, true, "공유기 지연");
+        Item(Ui.Brushes.Series2, true, "로컬 대상 지연");
         Item(Ui.Brushes.Bad, false, "응답 없음이 관측된 회차");
         Item(Ui.Brushes.Muted, true, "관측 공백");
         Item(Ui.Brushes.Warn, true, "증상 표시");
@@ -323,7 +323,7 @@ public sealed class MeasureScreen : Screen
             {
                 var names = h.Targets.Where(t => a.NoBaselineTargets.Contains(t.Id)).Select(t => t.Name);
                 specs.Add(("measure.banner.nobaseline", BannerKind.Info,
-                    $"응답 기준선이 없는 대상: {string.Join(", ", names)}. 응답을 막는 장비일 수 있어 구간 판단에서 뺍니다."));
+                    $"아직 한 번도 응답하지 않은 대상: {string.Join(", ", names)}. 응답을 막는 장비일 수 있어 구간 판단에서 뺍니다."));
             }
             if (a.Grade.Reason == "undecidable")
                 specs.Add(("measure.banner.routehold", BannerKind.Info, "경로가 예상과 달라진 순간이 있어 그때의 원인은 판단하지 않습니다."));
@@ -353,10 +353,10 @@ public sealed class MeasureScreen : Screen
         {
             if (!cardTexts.TryGetValue(card.TargetId, out var t)) continue;
             Set(t.Latest, card.Latest);
-            Set(t.Loss, $"손실 {card.LossRate} · {card.LossSentence}");
-            Set(t.Avg, $"평균 지연 {card.Average}" + (card.Errors > 0 ? $" · 검사 오류 {card.Errors}회 (손실에서 뺌)" : ""));
-            Set(t.Streak, $"최대 연속 실패 {card.MaxConsecutiveLoss}회");
-            Set(t.Last, $"마지막 성공 {(card.LastSuccess is { } ls ? LiveSummary.Clock(ls, now) : "없음")} · 마지막 실패 {(card.LastLoss is { } ll ? LiveSummary.Clock(ll, now) : "없음")}");
+            Set(t.Loss, $"응답 없음 {card.LossRate} · {card.LossSentence}");
+            Set(t.Avg, $"평균 지연 {card.Average}" + (card.Errors > 0 ? $" · 측정 오류 {card.Errors}번 (응답 없음 비율 계산에서 뺌)" : ""));
+            Set(t.Streak, $"최대 연속 응답 없음 {card.MaxConsecutiveLoss}번");
+            Set(t.Last, $"마지막 성공 {(card.LastSuccess is { } ls ? LiveSummary.Clock(ls, now) : "없음")} · 마지막 응답 없음 {(card.LastLoss is { } ll ? LiveSummary.Clock(ll, now) : "없음")}");
         }
 
         static void Set(TextBlock t, string text)
@@ -468,7 +468,7 @@ public sealed class MeasureScreen : Screen
             AutomationProperties.SetAutomationId(sentence, "measure.result.sentence");
             stack.Children.Add(sentence);
             long longest = a.Episodes.Count == 0 ? 0 : a.Episodes.Max(e => e.MinDurationMs);
-            var counts = Fonts.Text(a.Episodes.Count == 0 ? "끊김 관측 안 됨" : $"끊김 {a.Episodes.Count}회 · 최장 {TimelineModel.AtLeast(longest)} 이상",
+            var counts = Fonts.Text(a.Episodes.Count == 0 ? "끊김 관측 안 됨" : $"끊김 {a.Episodes.Count}번 · 최장 {TimelineModel.AtLeast(longest)} 이상",
                 Typography.Body, Ui.Brushes.Muted);
             AutomationProperties.SetAutomationId(counts, "measure.result.outages");
             stack.Children.Add(counts);
@@ -561,7 +561,7 @@ public sealed class MeasureScreen : Screen
             Context.QueueDiag();
             return;
         }
-        if (result == EventWriteState.Pending) Context.Toasts.Show(ToastKind.Info, "메모를 받았습니다", "저장소가 회복되면 기록에 씁니다.");
+        if (result == EventWriteState.Pending) Context.Toasts.Show(ToastKind.Info, "메모를 받았습니다", "저장할 수 있게 되면 기록에 씁니다.");
         // 끝난 측정의 메모(노트)는 최근 측정의 첫 메모를 바꿀 수 있다: 목록을 다시 읽는다 (캐시 열쇠에 노트 시각, G4 M5 1라운드 A7)
         if (!Context.Host.Snapshot.Measuring) _ = Context.Recent.RefreshAsync(Context.Host.RunningId);
         CloseMemo(skip: false);

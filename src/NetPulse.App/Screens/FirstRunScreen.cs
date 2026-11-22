@@ -166,7 +166,7 @@ public sealed class FirstRunScreen : Screen
             string why = result.Status switch
             {
                 DetectionStatus.NoNetwork => "작동 중인 네트워크 연결이 없습니다. 케이블이나 Wi‑Fi 연결을 확인한 뒤 다시 확인하세요.",
-                _ => result.Notice ?? "연결 정보를 읽지 못했습니다.",
+                _ => result.Notice ?? "연결 정보를 읽지 못했습니다. 다시 확인하세요.",
             };
             stack.Children.Add(ScreenParts.Message(Ui, "firstrun.problem", Icons.Alert, Ui.Brushes.Warn, "측정 대상을 정하지 못했습니다", why));
             body.Set(stack, "error");
@@ -183,14 +183,14 @@ public sealed class FirstRunScreen : Screen
         var externals = proposal.ActiveTargets.Where(t => t.Role == TargetRole.External).ToArray();
         stack.Children.Add(Row("firstrun.external", "외부 대상", externals.Length == 0 ? "없음" : string.Join(", ", externals.Select(t => t.Name))));
         if (Context.Host.CurrentProfile is { } savedProfile)
-            stack.Children.Add(Row("firstrun.saved", "측정 구성", $"저장한 구성 \"{savedProfile.Name}\" · 측정 시간 {NetPulse.Core.Presentation.TimelineModel.Seconds((long)savedProfile.Duration.TotalMilliseconds)}"));
+            stack.Children.Add(Row("firstrun.saved", "측정 구성", $"저장한 측정 구성 \"{savedProfile.Name}\" · 측정 시간 {NetPulse.Core.Presentation.TimelineModel.Seconds((long)savedProfile.Duration.TotalMilliseconds)}"));
         durationRow.Visibility = Context.Host.CurrentProfile is null ? Visibility.Visible : Visibility.Collapsed;
         body.Set(stack, "normal");
         var notes = new StackPanel { Spacing = Space.S2 };
         if (result.Virtual == Tristate.Yes)
             notes.Children.Add(new Banner(Ui, "firstrun.virtual", BannerKind.Warn, "VPN이나 가상 어댑터를 통해 연결된 것 같습니다. 측정 결과가 실제 회선과 다를 수 있습니다."));
         if (result.OtherGateways > 0)
-            notes.Children.Add(new Banner(Ui, "firstrun.gateways", BannerKind.Info, $"다른 연결에도 게이트웨이가 {result.OtherGateways}개 있습니다. Windows가 고른 경로로 측정합니다."));
+            notes.Children.Add(new Banner(Ui, "firstrun.gateways", BannerKind.Info, $"다른 네트워크 연결에도 공유기(게이트웨이)가 {result.OtherGateways}개 더 있습니다. Windows가 고른 경로로 측정합니다."));
         if (result.Status != DetectionStatus.Ok && result.Notice is { } n)
             notes.Children.Add(new Banner(Ui, "firstrun.notice", BannerKind.Warn, n));
         foreach (var w in ProfileValidator.Validate(proposal).Where(i => i.Severity == IssueSeverity.Warning))

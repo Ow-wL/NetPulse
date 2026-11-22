@@ -142,7 +142,7 @@ public sealed partial class MeasurementSession : IAsyncDisposable
     {
         var issues = ProfileValidator.Validate(options.Profile);
         if (ProfileValidator.HasErrors(issues))
-            throw new SessionStartException("프로필 오류: " + string.Join(", ", issues.Where(i => i.Severity == IssueSeverity.Error).Select(i => i.Code)));
+            throw new SessionStartException("측정 구성 오류: " + string.Join(" ", issues.Where(i => i.Severity == IssueSeverity.Error).Select(i => i.Message)));
         var startedAt = options.Clock.Now;
         var id = (options.NewId ?? RecordLocation.NewId)(startedAt);
         Exception? last = null;

@@ -32,7 +32,7 @@ public sealed record TimelineFigure(
 
     public static readonly string[] LegendLabels =
     [
-        "인터넷 지연 (응답한 외부 대상의 중앙값)", "공유기 지연", "외부 대상 모두 응답 없음", "일부 대상 응답 없음", "링크 끊김 관측", "관측 공백", "증상 표시",
+        "인터넷 지연 (응답한 외부 대상의 중앙값)", "로컬 대상 지연", "외부 대상 모두 응답 없음", "일부 대상 응답 없음", "링크 끊김 관측", "관측 공백", "증상 표시",
     ];
 
     /// <summary>열 가운데의 x.</summary>

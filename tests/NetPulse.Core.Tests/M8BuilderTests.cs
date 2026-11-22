@@ -77,7 +77,7 @@ public sealed class M8BuilderTests : IDisposable
         Assert.StartsWith("측정 끝까지 이어짐 (", Field(ended, "episode.duration"));
         var noSummary = Build(Record(rounds, summary: false), life: RecordLifecycle.NoSummary);
         Assert.StartsWith("마지막 관측까지 이어짐, 그 뒤는 알 수 없음 (", Field(noSummary, "episode.duration"));
-        Assert.StartsWith("끝 기록 없음 · 마지막 관측 ", Field(noSummary, "summary.end"));
+        Assert.StartsWith("정상 종료 기록 없음 · 마지막 관측 ", Field(noSummary, "summary.end"));
         foreach (var d in new[] { ended, noSummary })
             Assert.DoesNotContain(d.Texts(), r => r.Text.Contains("이어지는 중", StringComparison.Ordinal));
     }
@@ -121,7 +121,7 @@ public sealed class M8BuilderTests : IDisposable
         var rec = Typical();
         var a = Analyze(rec) with { Links = FourStates() };
         var d = Build(rec, a: a);
-        Assert.Equal(["끊김 관측", "접근 거부", "수집 미지원", "관측했으나 이벤트 없음"], All(d, "link.state"));
+        Assert.Equal(["끊김 관측", "접근 거부", "이 어댑터는 기록을 지원하지 않음", "관측했지만 끊김 기록 없음"], All(d, "link.state"));
         Assert.Equal(["직접 관측", "시스템 기록", "직접 관측", "시스템 기록"], All(d, "link.source"));
         var notes = All(d, "link.notes");
         Assert.Contains("관측 범위 97%", notes[0]);
@@ -175,7 +175,7 @@ public sealed class M8BuilderTests : IDisposable
     {
         var rec = Record(Rounds(Ok(600), Ok(600), Ok(600)), damage: new DamageCounts(3, 0, 0, 0, 0, 0, 0, 0, 2));
         var d = Build(rec);
-        Assert.Equal("알림 2건", Field(d, "condition.damage"));
+        Assert.Equal("기록 문제 2건", Field(d, "condition.damage"));
         var warnings = d.Sections.Single(s => s.Id == "conditions").Blocks.OfType<ReportParagraph>().Where(p => p.Kind == ParagraphKind.Warning).ToArray();
         Assert.Equal(RecordView.DamageNotices(rec, 0), warnings.Select(w => w.Runs[0].Text));
     }
@@ -202,7 +202,7 @@ public sealed class M8BuilderTests : IDisposable
     public void ADiagnosisSectionWithoutDiagnosesSaysSo()
     {
         var d = Build(Typical());
-        Assert.Contains(d.Sections.Single(s => s.Id == "diagnoses").Blocks.OfType<ReportParagraph>(), p => p.Runs[0].Text == "이 측정 중에 한 빠른 진단이 없습니다.");
+        Assert.Contains(d.Sections.Single(s => s.Id == "diagnoses").Blocks.OfType<ReportParagraph>(), p => p.Runs[0].Text == "이 측정 중에 실행한 빠른 진단이 없습니다.");
     }
 
     [Fact]
@@ -223,10 +223,10 @@ public sealed class M8BuilderTests : IDisposable
         foreach (var k in Enum.GetValues<CandidateKind>())
         {
             var text = ReportTexts.Candidate(new Candidate(k, null, "wired"));
-            Assert.StartsWith("후보", text);
+            Assert.StartsWith("가능성이 높은 곳", text);
             foreach (var w in ReportTexts.Forbidden) Assert.DoesNotContain(w, text);
         }
-        Assert.Equal(["로컬 링크 단절 관측", "외부 연결 단절 추정", "판단 불가 (근거 부족)", "대상 응답 실패"],
+        Assert.Equal(["이 PC 연결 끊김 관측", "외부 연결 끊김 추정", "판단 불가 (근거 부족)", "대상 응답 실패"],
             new[] { Verdict.LinkDown, Verdict.ExternalOutage, Verdict.Insufficient, Verdict.TargetFailure }.Select(RecordView.VerdictName));
     }
 }

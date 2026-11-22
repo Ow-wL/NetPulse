@@ -206,7 +206,7 @@ public sealed class M7LibraryTests : IDisposable
         Assert.Null(found.Error);
         Assert.Equal(2, found.Segments.Count);
         Assert.All(found.Segments, s => Assert.StartsWith(usb, s));
-        Assert.Contains(found.Notices, n => n.Contains("머리가 다른 조각 1개"));
+        Assert.Contains(found.Notices, n => n.Contains("기본 정보가 다른 조각 1개"));
         Assert.Contains(found.Notices, n => n.Contains("같은 조각이 여러 곳"));
         Assert.Contains(found.Notices, n => n.Contains("찾은 조각 2개만"));
         Assert.DoesNotContain(found.Notices, n => n.Contains(usb) || n.Contains(p));   // 경로를 문장에 넣지 않는다

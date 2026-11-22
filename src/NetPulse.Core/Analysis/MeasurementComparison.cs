@@ -57,8 +57,8 @@ public static class MeasurementComparison
 
     public static ComparisonResult Compare(CompareSide a, CompareSide b)
     {
-        var ha = a.Record.Header ?? throw new ArgumentException("머리가 없는 기록입니다.", nameof(a));
-        var hb = b.Record.Header ?? throw new ArgumentException("머리가 없는 기록입니다.", nameof(b));
+        var ha = a.Record.Header ?? throw new ArgumentException("기본 정보가 없는 기록입니다.", nameof(a));
+        var hb = b.Record.Header ?? throw new ArgumentException("기본 정보가 없는 기록입니다.", nameof(b));
         if (ReferenceEquals(a.Record, b.Record))
             throw new ArgumentException("같은 기록 둘은 비교하지 않습니다.");
 
@@ -79,7 +79,7 @@ public static class MeasurementComparison
         if (composition) conditions.Add(CompareCondition.CompositionDiffers);
 
         // 손실에 기대는 지표의 공통 억제 (구현 중 결정 1)
-        string? lossBased = timeoutDiffers ? "응답 제한시간이 다릅니다"
+        string? lossBased = timeoutDiffers ? "응답 제한 시간이 다릅니다"
             : roundsDamaged ? "읽지 못한 회차가 있습니다"
             : null;
         string? measureLevel = lossBased ?? (composition ? "대상 구성이 다릅니다" : null);
@@ -138,14 +138,14 @@ public static class MeasurementComparison
 
     private static TargetPair Pair(TargetSide a, TargetSide b, string? lossBased)
     {
-        string? lossOff = lossBased ?? (a.Valid < MinValid || b.Valid < MinValid ? "검사 오류를 뺀 요청이 100번보다 적습니다" : null)
+        string? lossOff = lossBased ?? (a.Valid < MinValid || b.Valid < MinValid ? "측정 오류를 뺀 요청이 100번보다 적습니다" : null)
             ?? (a.LossRate is null || b.LossRate is null ? "값 없음" : null);
         var loss = lossOff is null && Math.Abs(a.LossRate!.Value - b.LossRate!.Value) >= LossThreshold
             ? (a.LossRate < b.LossRate ? Lower.A : Lower.B) : Lower.None;
         // 연속 손실은 경과 시간 범위(최소)로만 비교한다. 주기가 달라도 시간 범위는 비교할 수 있다 (횟수는 값만).
         // 유효한 응답이 적은 쪽은 손실이 없어서가 아니라 관측이 없어서일 수 있다: 손실률과 같은 기준으로 억제한다 (G4 M7 1라운드 a3)
-        string? runOff = lossBased ?? (a.Valid < MinValid || b.Valid < MinValid ? "검사 오류를 뺀 요청이 100번보다 적습니다" : null)
-            ?? (a.LongestRunOpen || b.LongestRunOpen ? "끝을 모르는 연속 손실이 있습니다" : null);
+        string? runOff = lossBased ?? (a.Valid < MinValid || b.Valid < MinValid ? "측정 오류를 뺀 요청이 100번보다 적습니다" : null)
+            ?? (a.LongestRunOpen || b.LongestRunOpen ? "끝을 모르는 연속 응답 없음이 있습니다" : null);
         long ra = a.LongestRunMinMs ?? 0, rb = b.LongestRunMinMs ?? 0;
         var run = runOff is null && Math.Abs(ra - rb) >= LongestThresholdMs ? (ra < rb ? Lower.A : Lower.B) : Lower.None;
         return new TargetPair(a, b, loss, lossOff, run, runOff);

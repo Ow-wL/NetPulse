@@ -13,7 +13,7 @@ public static class DiagnosisTexts
 {
     public static (string Head, ConclusionWeight Weight) Head(int conclusion) => conclusion switch
     {
-        1 => ("어댑터 링크가 내려가 있음", ConclusionWeight.Problem),
+        1 => ("네트워크 어댑터 연결(케이블·Wi‑Fi)이 끊겨 있음", ConclusionWeight.Problem),
         2 => ("웹은 되지만 IPv4 직접 연결이 안 됨", ConclusionWeight.Caution),
         3 => ("이름 해석(DNS)이 되지 않음", ConclusionWeight.Caution),
         4 => ("로그인·프록시에 막혔을 수 있음", ConclusionWeight.Caution),
@@ -21,7 +21,7 @@ public static class DiagnosisTexts
         6 => ("인터넷 쪽에서 응답이 없음", ConclusionWeight.Problem),
         7 => ("웹(HTTPS) 연결 확인이 필요함", ConclusionWeight.Caution),
         8 => ("최근 링크 끊김 기록이 있음", ConclusionWeight.Info),
-        9 => ("인터넷은 되지만 예외가 관측됨", ConclusionWeight.Info),
+        9 => ("인터넷은 되지만 확인할 점이 있음", ConclusionWeight.Info),
         10 => ("일부만 성공", ConclusionWeight.Info),
         11 => ("기본 연결 정상", ConclusionWeight.Normal),
         _ => ("진단 근거 부족", ConclusionWeight.Neutral),
@@ -31,7 +31,7 @@ public static class DiagnosisTexts
     public static string What(CheckId id) => id switch
     {
         CheckId.Adapter => "인터넷으로 나가는 어댑터와 주소·게이트웨이·DNS 설정",
-        CheckId.Gateway => "기본 게이트웨이(공유기)에 Ping 한 번",
+        CheckId.Gateway => "공유기(게이트웨이)에 Ping 한 번",
         CheckId.Tcp => "외부 주소 두 곳에 TCP 443 연결",
         CheckId.Dns => "도메인 두 개의 이름 해석",
         CheckId.Https => "같은 두 도메인에 HTTPS 요청",
@@ -43,7 +43,7 @@ public static class DiagnosisTexts
     public static string Explain(CheckResult c)
     {
         if (c.State == RunState.NotRun) return "검사하지 않았습니다: " + Reason(c.Code);
-        if (c.State == RunState.Timeout && c.Targets.Count == 0) return "제한시간 안에 답이 없었습니다.";
+        if (c.State == RunState.Timeout && c.Targets.Count == 0) return "제한 시간 안에 답이 없었습니다.";
         if (c.State == RunState.Error && c.Targets.Count == 0) return "검사하지 못했습니다: " + Reason(c.Code);
         int ok = c.Targets.Count(t => t.Outcome == TargetOutcome.Ok);
         return (c.Id, c.Judgment) switch
@@ -56,9 +56,9 @@ public static class DiagnosisTexts
             (CheckId.Gateway, CheckJudgment.Check) => "공유기가 Ping에 답하지 않았습니다 (Ping을 막는 장비일 수 있음).",
             (CheckId.Portal, CheckJudgment.Normal) => "가로채는 로그인 페이지가 없습니다.",
             (CheckId.Portal, CheckJudgment.Check) => "예상과 다른 응답을 받았습니다 (로그인 페이지·프록시일 수 있음).",
-            (CheckId.Link, CheckJudgment.Normal) => "링크가 올라가 있고 최근 30분 끊김 기록이 없습니다.",
+            (CheckId.Link, CheckJudgment.Normal) => "연결이 살아 있고 최근 30분 끊긴 기록이 없습니다.",
             (CheckId.Link, CheckJudgment.Check) => "최근 30분 안에 링크가 끊긴 기록이 있습니다.",
-            (CheckId.Link, CheckJudgment.Fail) => "링크가 지금 내려가 있습니다.",
+            (CheckId.Link, CheckJudgment.Fail) => "네트워크 어댑터 연결(케이블·Wi‑Fi)이 지금 끊겨 있습니다.",
             (CheckId.Link, _) => Reason(c.Code) + ".",
             (_, CheckJudgment.Normal) => $"대상 {c.Targets.Count}개 모두 성공했습니다.",
             (_, CheckJudgment.Check) => $"대상 {c.Targets.Count}개 중 {ok}개만 성공했습니다.",
@@ -79,8 +79,8 @@ public static class DiagnosisTexts
             string name = QuickDiagnosis.CheckName(c.Id);
             if (c.Id == CheckId.Gateway)
             {
-                if (c.Judgment == CheckJudgment.Check) lines.Add("게이트웨이: 응답 없음 (Ping을 막는 장비일 수 있음)");
-                else if (c.Judgment == CheckJudgment.Unmeasured) lines.Add("게이트웨이: 확인하지 못함");
+                if (c.Judgment == CheckJudgment.Check) lines.Add("공유기: 응답 없음 (Ping을 막는 장비일 수 있음)");
+                else if (c.Judgment == CheckJudgment.Unmeasured) lines.Add("공유기: 확인하지 못함");
                 continue;
             }
             if (c.Targets.Count > 0)
@@ -106,14 +106,14 @@ public static class DiagnosisTexts
             case "no-ipv4": return "IPv4 주소가 없습니다";
             case "no-gateway": return "기본 게이트웨이가 없습니다";
             case "no-route": return "인터넷 쪽 경로를 찾지 못했습니다";
-            case "adapter-down": return "어댑터가 내려가 있습니다";
+            case "adapter-down": return "어댑터 연결이 끊겨 있습니다";
             case "interface-not-found": return "경로의 어댑터를 찾지 못했습니다";
             case "adapter-unmeasured": return "어댑터 검사가 끝나지 않아 건너뛰었습니다";
-            case "timeout": return "제한시간 안에 답이 없었습니다";
+            case "timeout": return "제한 시간 안에 답이 없었습니다";
             case "cancelled": return "취소했습니다";
             case "not-run": return "실행하지 않았습니다";
             case "now-unknown": return "지금 링크 상태를 읽지 못했습니다";
-            case "log-timeout": return "링크 기록 조회가 제한시간을 넘었습니다";
+            case "log-timeout": return "링크 기록 조회가 제한 시간을 넘었습니다";
             case "log-unsupported": return "이 어댑터는 링크 기록을 남기지 않습니다";
             case "log-denied": return "링크 기록을 읽을 권한이 없습니다";
             case "no-address": return "이름에 해당하는 주소가 없습니다";

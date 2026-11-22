@@ -258,7 +258,7 @@ public static class QuickDiagnosis
         string Partly(CheckResult c) => c.PartlyUnconfirmed ? " (확인하지 못한 대상이 있음)" : "";
         var rules = new List<(int N, bool Match, Func<Conclusion> Make)>
         {
-            (1, Is(CheckId.Link, CheckJudgment.Fail), () => new(1, "어댑터 링크가 지금 내려가 있습니다.",
+            (1, Is(CheckId.Link, CheckJudgment.Fail), () => new(1, "네트워크 어댑터 연결(케이블·Wi‑Fi)이 지금 끊겨 있습니다.",
                 ["케이블이 꽂혀 있는지, 포트 불빛이 켜져 있는지 확인하세요.", "다른 포트나 케이블로 바꿔 보세요.", "Windows 설정에서 어댑터를 껐다가 다시 켜 보세요."])),
             (2, Is(CheckId.Https, CheckJudgment.Normal, CheckJudgment.Check) && Is(CheckId.Tcp, CheckJudgment.Fail), () => new(2,
                 "웹 응답은 확인됐지만 IPv4 직접 연결은 되지 않습니다" + Partly(tcp) + ".", ["IPv6, 프록시, VPN을 쓰고 있는지 확인하세요."])),
@@ -281,10 +281,10 @@ public static class QuickDiagnosis
                 "웹(HTTPS) 연결에 추가 확인이 필요합니다" + (https.Judgment == CheckJudgment.Check ? " (일부만 성공)" : "") + ".",
                 ["프록시·VPN 설정, PC 시계, 보안 프로그램의 인증서 검사를 확인하세요."])),
             (8, Is(CheckId.Link, CheckJudgment.Check), () => new(8, "최근 30분 안에 링크가 끊긴 적이 있습니다 (지금 어댑터 기준).",
-                ["간헐 끊김이면 실시간 측정으로 기록하세요."])),
+                ["가끔 끊긴다면 측정으로 기록하세요."])),
             (9, (Is(CheckId.Tcp, CheckJudgment.Normal, CheckJudgment.Check) || Is(CheckId.Https, CheckJudgment.Normal, CheckJudgment.Check))
                 && (Is(CheckId.Gateway, CheckJudgment.Check) || Is(CheckId.Portal, CheckJudgment.Check)), () => new(9,
-                "인터넷은 되지만 예외가 관측됐습니다 (공유기 무응답 또는 로그인 확인 응답).", [])),
+                "인터넷은 되지만 확인할 점이 있습니다 (공유기가 Ping에 답하지 않았거나 로그인 페이지 같은 응답을 받음).", [])),
             (10, new[] { CheckId.Tcp, CheckId.Dns, CheckId.Https }.Any(id => Is(id, CheckJudgment.Check))
                 && !new[] { CheckId.Tcp, CheckId.Dns, CheckId.Https }.Any(id => Is(id, CheckJudgment.Fail)), () => new(10,
                 // 슬롯 이름(t1) 대신 "대상 n", 조사 "이(가)" 없이 (M6 화면 검토)
@@ -292,7 +292,7 @@ public static class QuickDiagnosis
                     .Select(id => CheckName(id) + " " + string.Join("·", C(id).Targets.Where(t => t.Outcome != TargetOutcome.Ok).Select(t => SlotLabel(t.Slot)))))
                 + ".", ["그 대상만의 문제일 수 있습니다. 다시 검사해 보세요."])),
             (11, Is(CheckId.Adapter, CheckJudgment.Normal) && Is(CheckId.Tcp, CheckJudgment.Normal) && Is(CheckId.Dns, CheckJudgment.Normal)
-                && Is(CheckId.Https, CheckJudgment.Normal), () => new(11, "기본 연결은 정상입니다.", ["간헐적으로 끊긴다면 실시간 측정으로 기록하세요."])),
+                && Is(CheckId.Https, CheckJudgment.Normal), () => new(11, "기본 연결은 정상입니다.", ["가끔 끊긴다면 측정으로 기록하세요."])),
         };
         var matched = rules.Where(r => r.Match).ToArray();
         Conclusion main;
@@ -301,7 +301,7 @@ public static class QuickDiagnosis
         {
             var missing = checks.Where(c => c.Judgment == CheckJudgment.Unmeasured && CoreChecks.Contains(c.Id.ToString())).Select(c => CheckName(c.Id));
             main = new Conclusion(12, "진단 근거가 부족합니다. 확인하지 못한 검사: " + string.Join(", ", missing.DefaultIfEmpty("없음")) + ".",
-                ["잠시 뒤 다시 검사하세요.", "간헐 끊김이면 실시간 측정으로 기록하세요."]);
+                ["잠시 뒤 다시 검사하세요.", "가끔 끊긴다면 측정으로 기록하세요."]);
         }
         var also = matched.Skip(1).Select(r => r.N).ToArray();
         var notes = new List<string>();
@@ -316,7 +316,7 @@ public static class QuickDiagnosis
 
     public static string CheckName(CheckId id) => id switch
     {
-        CheckId.Adapter => "어댑터", CheckId.Gateway => "게이트웨이", CheckId.Tcp => "외부 TCP 443", CheckId.Dns => "DNS",
+        CheckId.Adapter => "어댑터", CheckId.Gateway => "공유기(게이트웨이)", CheckId.Tcp => "외부 연결(TCP 443)", CheckId.Dns => "DNS",
         CheckId.Https => "HTTPS", CheckId.Portal => "네트워크 로그인", _ => "링크 근거",
     };
 

@@ -63,7 +63,7 @@ public sealed class ProfileEditor : Screen
         back.Click += (_, _) => Leave(back);
         cancel.Click += (_, _) => { Load(); Rebuild(); };
         save.Click += (_, _) => Save();
-        header = new PageHeader(Ui, "profile.header", "측정 구성", "대상과 프로필", back, cancel, save);
+        header = new PageHeader(Ui, "profile.header", "측정 구성", "대상과 측정 구성", back, cancel, save);
         Children.Add(header);
         scroll = new ScrollViewer { Content = content, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, Space.S3, Space.S5) };
         AutomationProperties.SetAutomationId(scroll, "profile.scroll");
@@ -127,7 +127,7 @@ public sealed class ProfileEditor : Screen
     private static Dictionary<string, string> FieldErrors(DraftProfile d)
     {
         var e = new Dictionary<string, string>();
-        if (d.Name.Trim().Length == 0) e["profile.name"] = "프로필 이름을 적어 주세요.";
+        if (d.Name.Trim().Length == 0) e["profile.name"] = "측정 구성 이름을 적어 주세요.";
         if (!int.TryParse(d.Minutes.Trim(), out var m) || m < Profile.MinDuration.TotalMinutes || m > Profile.MaxDuration.TotalMinutes) e["profile.minutes"] = "1~720 사이의 분을 적어 주세요.";
         if (!int.TryParse(d.TimeoutMs.Trim(), out var t) || t < Profile.MinTimeout.TotalMilliseconds || t > Profile.MaxTimeout.TotalMilliseconds) e["profile.timeout"] = "200~900 ms 사이로 적어 주세요.";
         for (int i = 0; i < d.Targets.Count; i++)
@@ -211,7 +211,7 @@ public sealed class ProfileEditor : Screen
             };
             row.Children.Add(b);
         }
-        var add = new GlassButton(Ui, ButtonKind.Ghost, "profile.add", "새 프로필", Icons.Plus);
+        var add = new GlassButton(Ui, ButtonKind.Ghost, "profile.add", "새 측정 구성", Icons.Plus);
         add.Click += (_, _) =>
         {
             var copy = ToDraft(Build(Current) ?? new Profile(NewProfileId(), "", [], Profile.DefaultTimeout, Profile.DefaultDuration, ExpectedConnection.Any));
@@ -222,7 +222,7 @@ public sealed class ProfileEditor : Screen
             dirty = true;
             Rebuild();
         };
-        var remove = new GlassButton(Ui, ButtonKind.Ghost, "profile.remove", "이 프로필 삭제", Icons.Trash) { IsEnabled = profiles.Count > 1 && !locked };
+        var remove = new GlassButton(Ui, ButtonKind.Ghost, "profile.remove", "이 측정 구성 삭제", Icons.Trash) { IsEnabled = profiles.Count > 1 && !locked };
         remove.Click += (_, _) =>
         {
             profiles.RemoveAll(p => p.Id == currentId);
@@ -233,7 +233,7 @@ public sealed class ProfileEditor : Screen
         add.IsEnabled = !locked;
         row.Children.Add(add);
         row.Children.Add(remove);
-        var panel = new GroupPanel("profile.list", "프로필");
+        var panel = new GroupPanel("profile.list", "측정 구성");
         panel.Children.Add(row);
         return panel;
     }
@@ -269,7 +269,7 @@ public sealed class ProfileEditor : Screen
     {
         var d = Current;
         var stack = new StackPanel { Spacing = Space.S4 };
-        stack.Children.Add(Field("profile.name", "프로필 이름", d.Name, Size.FieldL, v => d.Name = v));
+        stack.Children.Add(Field("profile.name", "측정 구성 이름", d.Name, Size.FieldL, v => d.Name = v));
         var minutesRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S2 };
         var minutes = Field("profile.minutes", "측정 시간 (분)", d.Minutes, Size.FieldS, v => d.Minutes = v);
         minutesRow.Children.Add(minutes);
@@ -294,7 +294,7 @@ public sealed class ProfileEditor : Screen
         adv.Unchecked += (_, _) => { advanced = false; timeout.Visibility = Visibility.Collapsed; };
         stack.Children.Add(adv);
         stack.Children.Add(timeout);
-        var (card, body) = ScreenParts.Card(Ui, "profile.card", "프로필", null);
+        var (card, body) = ScreenParts.Card(Ui, "profile.card", "측정 구성", null);
         body.Set(stack);
         return card;
     }

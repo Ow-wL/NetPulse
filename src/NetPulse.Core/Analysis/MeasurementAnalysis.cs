@@ -335,6 +335,12 @@ public static class Sentences
             return m % 60 == 0 ? $"{m / 60}시간" : $"{m / 60}시간 {m % 60}분";
         }
         string Pct(double? v) => ((v ?? 0) * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+        // 비율에 쉬운 말 짝: "7.3%(100번 중 약 7번)" (M12 문구)
+        string Per100(double? v)
+        {
+            double n = Math.Round((v ?? 0) * 100);
+            return n < 1 ? "100번 중 1번 미만" : "100번 중 약 " + n.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "번";
+        }
         return reason switch
         {
             "started-disconnected" => "어느 대상도 응답한 적이 없습니다. 끊긴 상태에서 측정을 시작했을 수 있습니다.",
@@ -342,16 +348,16 @@ public static class Sentences
             "too-few-rounds" => "판단할 수 있는 관측이 1분 분량보다 적습니다.",
             "low-coverage" => "측정 시간 중 판단할 수 있는 관측이 80%보다 적습니다.",
             "undecidable" => "경로가 바뀌었거나 근거가 엇갈려 끊김의 원인을 판단할 수 없는 경우가 많습니다.",
-            "link-down" => $"이 PC의 네트워크 연결(링크)이 끊긴 것이 {link.Count}번 관측됐습니다.",
+            "link-down" => $"이 PC의 네트워크 연결(링크)이 끊긴 것이 {link.Count}번 관측되었습니다.",
             "outage-many" => $"인터넷 연결이 {outage.Count}번 끊긴 것으로 보입니다 (최장 {Seconds(outage.LongestMinMs)} 이상).",
             "outage-long" => $"인터넷이 {Seconds(outage.LongestMinMs)} 이상 끊긴 것으로 보입니다.",   // 기록 목록 한 줄에 들어가게 짧게 (노트북 게이트 2차 1.5배 글자 잘림)
-            "external-loss-high" => $"외부 대상의 응답 손실이 {Pct(c.ExternalLossRate)}%로 많습니다.",
+            "external-loss-high" => $"외부 대상의 응답 없음이 {Pct(c.ExternalLossRate)}%({Per100(c.ExternalLossRate)})로 많습니다.",
             "outage" => $"인터넷 연결이 {outage.Count}번 끊긴 것으로 보입니다 (최장 {Seconds(outage.LongestMinMs)} 이상).",
-            "external-loss" => $"외부 대상의 응답 손실이 {Pct(c.ExternalLossRate)}%입니다.",
+            "external-loss" => $"외부 대상의 응답 없음이 {Pct(c.ExternalLossRate)}%({Per100(c.ExternalLossRate)})입니다.",
             "latency-high" => "지연이 평소보다 크게 튄 순간이 많습니다.",
             "target-failure" => "일부 대상만 응답하지 않은 순간이 있습니다. 그 대상의 문제일 수 있습니다.",
             "latency" => "지연이 평소보다 튄 순간이 조금 있습니다.",
-            "external-loss-some" => "외부 대상의 응답 손실이 조금 있었습니다.",
+            "external-loss-some" => "외부 대상의 응답 없음이 조금 있었습니다.",
             _ => "측정하는 동안 끊김이 관측되지 않았습니다.",
         };
     }

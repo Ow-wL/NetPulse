@@ -115,7 +115,7 @@ public sealed class M7ComparisonTests
         var router = r.Targets.Single(p => p.A.Target.Id == "router");
         Assert.Equal(0, router.A.Valid);
         Assert.Equal(Lower.None, router.Consecutive);
-        Assert.Equal("검사 오류를 뺀 요청이 100번보다 적습니다", router.ConsecutiveSuppressed);
+        Assert.Equal("측정 오류를 뺀 요청이 100번보다 적습니다", router.ConsecutiveSuppressed);
         Assert.Equal(Lower.None, router.LossRate);
         // 외부 대상은 그대로 비교한다 (A 손실 없음, B 29초)
         Assert.Equal(Lower.A, r.Targets.Single(p => p.A.Target.Id == "a").Consecutive);

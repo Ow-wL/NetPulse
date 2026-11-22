@@ -426,7 +426,7 @@ public sealed class ReportScreen : Screen
     {
         var when = i.Entry.StartedAt is { } st ? st.ToLocalTime().ToString("M월 d일 tt h:mm", ScreenParts.Ko) : "시작 시각 없음";
         var grade = i.Summary.Grade is { } g ? " · 등급 " + NetPulse.Core.Analysis.Sentences.GradeName(g) : "";
-        var life = i.Entry.Lifecycle == RecordLifecycle.NoSummary ? " · 끝 기록 없음" : "";
+        var life = i.Entry.Lifecycle == RecordLifecycle.NoSummary ? " · 정상 종료 기록 없음" : "";
         return $"측정: {when} · {RecordView.TargetsSummary(i.Entry.Targets)}{grade}{life}";
     }
 

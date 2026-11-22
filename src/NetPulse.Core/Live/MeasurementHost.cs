@@ -240,8 +240,8 @@ public sealed class MeasurementHost : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            // 어떤 시작 실패든 시작 중에 남지 않는다 (G4 M5 1라운드 A3). 예외 글에는 경로가 들어갈 수 있어 종류만 보인다
-            string message = ex is SessionStartException ? ex.Message : "측정을 시작하지 못했습니다 (" + ex.GetType().Name + ")";
+            // 어떤 시작 실패든 시작 중에 남지 않는다 (G4 M5 1라운드 A3). 예외 글에는 경로가 들어갈 수 있고 예외 이름은 사용자 글에 넣지 않는다: 사유만 (화면이 "측정을 시작하지 못했습니다: "를 앞에 붙인다)
+            string message = ex is SessionStartException ? ex.Message : ex is IOException or UnauthorizedAccessException ? "기록 파일을 쓰지 못했습니다." : "예상하지 못한 오류가 났습니다.";
             lock (gate) { state = HostState.Idle; startError = message; }
             Publish();
             return false;

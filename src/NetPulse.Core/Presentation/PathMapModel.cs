@@ -75,14 +75,14 @@ public static class PathMapModel
             var latest = ordered.LastOrDefault();
             string name = LocalName(targets);
             if (analysis?.NoBaselineTargets.Contains(first.Id) == true && !localConfirmed)
-                localNode = new MapNode(name, "응답 기준선 없음", NodeState.NoBaseline);
+                localNode = new MapNode(name, "아직 한 번도 응답하지 않음", NodeState.NoBaseline);
             else if (latest is not null && Outcome(latest, first.Id) == ProbeOutcome.Success && Rtt(latest, first.Id) is double ms)
                 localNode = new MapNode(name, Ms(ms), NodeState.Responding);
             else
             {
                 int lost = ConsecutiveLoss(ordered, first.Id);
-                localNode = lost > 0 ? new MapNode(name, $"응답 없음 {lost}회 연속", NodeState.NotResponding)
-                    : new MapNode(name, latest is null ? "측정 전" : "검사 오류", NodeState.Unknown);
+                localNode = lost > 0 ? new MapNode(name, $"응답 없음 {lost}번 연속", NodeState.NotResponding)
+                    : new MapNode(name, latest is null ? "측정 전" : "측정 오류", NodeState.Unknown);
             }
         }
 
@@ -159,7 +159,7 @@ public static class PathMapModel
     public static string ReasonText(string? reason) => reason switch
     {
         "no-local" => "로컬 대상을 측정하지 않아 구간을 판단하지 않습니다.",
-        "no-local-baseline" => "로컬 대상의 응답 기준선이 없어 구간을 판단하지 않습니다.",
+        "no-local-baseline" => "로컬 대상이 아직 한 번도 응답하지 않아 구간을 판단하지 않습니다.",
         "no-route" or "route-failed" => "경로를 확인하지 못해 구간을 판단하지 않습니다.",
         "different-interface" => "대상들이 서로 다른 연결을 써서 구간을 판단하지 않습니다.",
         "local-mixed" => "로컬 대상 응답이 엇갈려 구간을 판단하지 않습니다.",

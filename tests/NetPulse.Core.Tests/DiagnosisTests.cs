@@ -80,7 +80,7 @@ public sealed class DiagnosisTests
         Assert.Equal(CheckJudgment.Check, tcp.Judgment);
         Assert.Equal([TargetOutcome.Ok, TargetOutcome.Timeout], tcp.Targets.Select(t => t.Outcome));
         Assert.Equal(10, r.Main.Number);   // 일부만 성공 (2-6)
-        Assert.Contains("외부 TCP 443 대상 2", r.Main.Found);   // 슬롯 이름 대신 "대상 n" (M6 화면 검토)
+        Assert.Contains("외부 연결(TCP 443) 대상 2", r.Main.Found);   // 슬롯 이름 대신 "대상 n" (M6 화면 검토)
         Assert.DoesNotContain("t2", r.Main.Found);
     }
 
@@ -102,7 +102,7 @@ public sealed class DiagnosisTests
         var p = new FakeProbes { Tcp = _ => never, Dns = _ => never, Https = _ => never };
         var r = await Run(p);
         Assert.Equal(12, r.Main.Number);
-        Assert.Contains("외부 TCP 443", r.Main.Found);
+        Assert.Contains("외부 연결(TCP 443)", r.Main.Found);
     }
 
     [Fact]

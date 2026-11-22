@@ -510,7 +510,7 @@ public sealed class RecordsScreen : Screen
         int unreadable = items.Count(i => i.Summary.Error is not null);
         if (unreadable > 0)
         {
-            var t = Fonts.Wrapped($"읽지 못한 기록 {unreadable}개 (줄을 열면 폴더를 열어 볼 수 있습니다)", Typography.Caption, Ui.Brushes.Muted);
+            var t = Fonts.Wrapped($"읽지 못한 기록 {unreadable}개 (항목을 열면 폴더를 볼 수 있습니다)", Typography.Caption, Ui.Brushes.Muted);
             AutomationProperties.SetAutomationId(t, "records.unreadable");
             list.Children.Add(t);
         }
@@ -551,7 +551,7 @@ public sealed class RecordsScreen : Screen
         if (e.Targets.Count > 0) title.Add(RecordView.TargetsSummary(e.Targets));
         if (item.External) title.Add("다른 위치");
         texts.Children.Add(Fonts.Text(string.Join(" · ", title), Typography.Label, Ui.Brushes.Ink));
-        string sentence = s.Analyzing ? "분석 중…" : s.Sentence ?? s.Error ?? (e.Lifecycle == RecordLifecycle.Running ? "측정 중" : "");
+        string sentence = s.Analyzing ? "분석 중" : s.Sentence ?? s.Error ?? (e.Lifecycle == RecordLifecycle.Running ? "측정 중" : "");
         var sentenceText = Fonts.Text(sentence, Typography.Body, Ui.Brushes.Ink);
         sentenceText.TextTrimming = TextTrimming.CharacterEllipsis;
         texts.Children.Add(sentenceText);
@@ -567,7 +567,7 @@ public sealed class RecordsScreen : Screen
         grid.Children.Add(texts);
 
         var chips = new StackPanel { Spacing = Space.S1, VerticalAlignment = VerticalAlignment.Center };
-        string end = e.Lifecycle == RecordLifecycle.Running ? "측정 중" : e.Lifecycle == RecordLifecycle.NoSummary ? "끝 기록 없음" : RecordView.EndText(e.Lifecycle, e.EndReason);
+        string end = e.Lifecycle == RecordLifecycle.Running ? "측정 중" : e.Lifecycle == RecordLifecycle.NoSummary ? "정상 종료 기록 없음" : RecordView.EndText(e.Lifecycle, e.EndReason);
         var endChip = new StatusChip(Ui, $"records.row.{index}.end", e.Lifecycle == RecordLifecycle.NoSummary ? Status.Warn : Status.Unknown, end);
         chips.Children.Add(endChip);
         if (s.Error is not null || e.Integrity != RecordIntegrity.Ok || item.Damage.Count > 0)
@@ -617,7 +617,7 @@ public sealed class RecordsScreen : Screen
         {
             var (card, body) = ScreenParts.Card(Ui, "records.detail.error", "기록을 열지 못했습니다");
             var stack = new StackPanel { Spacing = Space.S3 };
-            stack.Children.Add(Fonts.Wrapped(loadError ?? "기록 머리를 읽지 못했습니다.", Typography.Body, Ui.Brushes.Ink));
+            stack.Children.Add(Fonts.Wrapped(loadError ?? "기록의 기본 정보를 읽지 못했습니다.", Typography.Body, Ui.Brushes.Ink));
             stack.Children.Add(FolderButton(item));
             body.Set(stack, "error");
             content.Children.Add(card);
@@ -761,9 +761,9 @@ public sealed class RecordsScreen : Screen
         {
             var box = new StackPanel { Spacing = Space.S0 };
             box.Children.Add(Fonts.Text($"{t.Name} ({(t.Role == TargetRole.Local ? "로컬" : "외부")} · {t.Method})", Typography.Label, Ui.Brushes.Ink));
-            box.Children.Add(Fonts.Wrapped($"{t.Loss} · 평균 {t.Average} · 최대 {t.Max} · 최대 연속 손실 {t.Consecutive} · 마지막 성공 {t.LastSuccess} · 마지막 손실 {t.LastLoss}", Typography.Caption, Ui.Brushes.Muted));
+            box.Children.Add(Fonts.Wrapped($"{t.Loss} · 평균 {t.Average} · 최대 {t.Max} · 최대 연속 응답 없음 {t.Consecutive} · 마지막 성공 {t.LastSuccess} · 마지막 응답 없음 {t.LastLoss}", Typography.Caption, Ui.Brushes.Muted));
             // 이름 붙은 묶음은 GroupPanel이어야 UI 자동화 트리에 나온다 (StackPanel은 peer가 없어 숨는다. M7 UI 시험 1차)
-            var group = new GroupPanel($"records.detail.target.{t.TargetId}", $"{t.Name}, {t.Loss}, 평균 {t.Average}, 최대 {t.Max}, 최대 연속 손실 {t.Consecutive}");
+            var group = new GroupPanel($"records.detail.target.{t.TargetId}", $"{t.Name}, {t.Loss}, 평균 {t.Average}, 최대 {t.Max}, 최대 연속 응답 없음 {t.Consecutive}");
             group.Children.Add(box);
             stats.Children.Add(group);
         }
@@ -792,7 +792,7 @@ public sealed class RecordsScreen : Screen
             episodes.Children.Add(Fonts.Wrapped(v.Coverage, Typography.Caption, Ui.Brushes.Muted));
         }
         RenderProfile.Time("records.detail.episodes", () => { for (int i = 0; i < v.Episodes.Count; i++) episodes.Children.Add(EpisodeRow(v.Episodes[i], a.Episodes[i], i, label)); });
-        var (episodeCard, episodeBody) = ScreenParts.Card(Ui, "records.detail.episodes", "끊김 목록", v.Episodes.Count == 0 ? null : $"{v.Episodes.Count}번 · 줄을 펼치면 주변 회차");
+        var (episodeCard, episodeBody) = ScreenParts.Card(Ui, "records.detail.episodes", "끊김 목록", v.Episodes.Count == 0 ? null : $"{v.Episodes.Count}번 · 줄을 펼치면 주변 회차가 보입니다");
         episodeBody.Set(episodes, v.Episodes.Count == 0 ? "empty" : "normal");
 
         // 증상 표시와 메모
@@ -803,7 +803,7 @@ public sealed class RecordsScreen : Screen
         var during = (diagnosesLoaded ? diagnoses : []).Where(x => x.Stored.MeasurementId == h.Id).ToArray();
         if (!diagnosesLoaded) _ = LoadDiagnosesAsync();
         var diagStack = new StackPanel { Spacing = Space.S2 };
-        if (during.Length == 0) diagStack.Children.Add(Named("records.detail.diagnoses.none", "이 측정 중에 돌린 빠른 진단이 없습니다.", Typography.Body, Ui.Brushes.Muted));
+        if (during.Length == 0) diagStack.Children.Add(Named("records.detail.diagnoses.none", "이 측정 중에 실행한 빠른 진단이 없습니다.", Typography.Body, Ui.Brushes.Muted));
         foreach (var (x, i) in during.Select((x, i) => (x, i)))
         {
             var (head, _, _) = StoredDiagnosisView.Row(x.Stored);
@@ -826,7 +826,7 @@ public sealed class RecordsScreen : Screen
 
     private static string TrendSummary(IReadOnlyList<TrendLine> lines) =>
         "지연 추세. " + string.Join(". ", lines.Select(t => t.NoBaseline ? $"{t.Name} 값이 적어 추세 없음"
-            : $"{t.Name} 처음 {PathMapModel.Ms(t.Segments[0][0].MedianMs)}, 마지막 {PathMapModel.Ms(t.Segments[^1][^1].MedianMs)}, 가장 높은 창 {PathMapModel.Ms(t.Segments.SelectMany(s => s).Max(p => p.MedianMs))}"));
+            : $"{t.Name} 처음 {PathMapModel.Ms(t.Segments[0][0].MedianMs)}, 마지막 {PathMapModel.Ms(t.Segments[^1][^1].MedianMs)}, 5분 구간 중 가장 높은 값 {PathMapModel.Ms(t.Segments.SelectMany(s => s).Max(p => p.MedianMs))}"));
 
     private TextBlock Named(string id, string text, TypeStyle style, Microsoft.UI.Xaml.Media.Brush brush)
     {
@@ -1008,7 +1008,7 @@ public sealed class RecordsScreen : Screen
             row.Children.Add(item);
         }
         Item(Ui.Brushes.Accent, false, "인터넷 지연");
-        Item(Ui.Brushes.Series2, true, "공유기 지연");
+        Item(Ui.Brushes.Series2, true, "로컬 대상 지연");
         Item(Ui.Brushes.Bad, false, "응답 없음이 관측된 회차");
         Item(Ui.Brushes.Muted, true, "관측 공백");
         Item(Ui.Brushes.Warn, true, "증상 표시");
@@ -1055,7 +1055,7 @@ public sealed class RecordsScreen : Screen
                 panel.Children.Add(Fonts.Wrapped($"· {p.Verdict} · {p.Duration} · {p.Candidate}", Typography.Caption, Ui.Brushes.Ink));
         }
         panel.Children.Add(Fonts.Text("주변 회차 (" + string.Join(" | ", names.Values) + ")", Typography.Label, Ui.Brushes.Ink));
-        if (d.NothingBefore) panel.Children.Add(Fonts.Text("앞 회차 없음 (측정 처음)", Typography.Caption, Ui.Brushes.Muted));
+        if (d.NothingBefore) panel.Children.Add(Fonts.Text("앞 회차 없음 (측정 시작)", Typography.Caption, Ui.Brushes.Muted));
         foreach (var row in d.Rows)
         {
             string text = row.Round is null ? "관측 공백 (이 사이 관측 없음)"
@@ -1096,7 +1096,7 @@ public sealed class RecordsScreen : Screen
         lastCopy = verified ? text : null;
         if (verified) Context.Toasts.Show(ToastKind.Success, "끊김 상세를 복사했습니다", "주소·대상 이름·메모는 넣지 않았습니다.");
         else if (wrote) Context.Toasts.Show(ToastKind.Warning, "복사했지만 확인하지 못했습니다", "붙여 넣어 내용을 확인해 주세요.");
-        else Context.Toasts.Show(ToastKind.Error, "복사하지 못했습니다", "다른 프로그램이 클립보드를 쓰고 있을 수 있습니다. 다시 시도해 주세요.");
+        else Context.Toasts.Show(ToastKind.Error, "복사하지 못했습니다", "다른 프로그램이 클립보드를 쓰고 있을 수 있습니다. 다시 시도하세요.");
         Context.QueueDiag();
     }
 
@@ -1337,7 +1337,7 @@ public sealed class RecordsScreen : Screen
         measure.Children.Add(CompareLine("records.compare.perhour", "시간당 끊김", c.PerHour.A is double pa ? $"{pa:0.#}번" : "계산 안 함", c.PerHour.B is double pb ? $"{pb:0.#}번" : "계산 안 함", c.PerHour.Lower, c.PerHour.Suppressed));
         string L((long MinMs, bool Open)? x) => x is { } v ? $"{TimelineModel.AtLeast(v.MinMs)} 이상" + (v.Open ? " (끝을 모름)" : "") : "없음";
         measure.Children.Add(CompareLine("records.compare.longest", "최장 끊김", L(c.Longest.A), L(c.Longest.B), c.Longest.Lower, c.Longest.Suppressed));
-        measure.Children.Add(Fonts.Wrapped("화살표는 표시 임계(시간당 0.5번, 10초, 0.5%p)를 넘은 차이에만 붙습니다. 통계적으로 의미 있는 차이나 회선 개선을 뜻하지 않습니다.", Typography.Caption, Ui.Brushes.Muted));
+        measure.Children.Add(Fonts.Wrapped("화살표는 표시 기준(시간당 0.5번, 10초, 0.5%p)를 넘은 차이에만 붙습니다. 통계적으로 의미 있는 차이나 회선 개선을 뜻하지 않습니다.", Typography.Caption, Ui.Brushes.Muted));
         var (measureCard, measureBody) = ScreenParts.Card(Ui, "records.compare.measure", "측정 전체", $"{na} · {nb}");
         measureBody.Set(measure, "normal");
         content.Children.Add(measureCard);
@@ -1351,10 +1351,10 @@ public sealed class RecordsScreen : Screen
             string Loss(TargetSide s) => s.LossRate is double rr ? $"{s.Valid}번 중 {s.Lost}번 ({LiveSummary.Percent(rr)})" : "값 없음";
             box.Children.Add(CompareLine($"records.compare.target.{i}.loss", "응답 없음", Loss(p.A), Loss(p.B), p.LossRate, p.LossSuppressed));
             string Run(TargetSide s) => s.Valid == 0 ? "값 없음" : $"{s.MaxConsecutive}번" + (s.LongestRunMinMs is long ms ? $" · {TimelineModel.AtLeast(ms)} 이상" : "") + (s.LongestRunOpen ? " (끝을 모름)" : "");
-            box.Children.Add(CompareLine($"records.compare.target.{i}.run", "최대 연속 손실", Run(p.A), Run(p.B), p.Consecutive, p.ConsecutiveSuppressed));
+            box.Children.Add(CompareLine($"records.compare.target.{i}.run", "최대 연속 응답 없음", Run(p.A), Run(p.B), p.Consecutive, p.ConsecutiveSuppressed));
             string Ms(double? x) => x is double v ? PathMapModel.Ms(v) : "값 없음";
             box.Children.Add(CompareLine($"records.compare.target.{i}.latency", "평균 · 최대 지연", $"{Ms(p.A.AvgMs)} · {Ms(p.A.MaxMs)}", $"{Ms(p.B.AvgMs)} · {Ms(p.B.MaxMs)}", Lower.None, "값만"));
-            box.Children.Add(CompareLine($"records.compare.target.{i}.errors", "검사 오류", $"{p.A.Errors}번", $"{p.B.Errors}번", Lower.None, "값만"));
+            box.Children.Add(CompareLine($"records.compare.target.{i}.errors", "측정 오류", $"{p.A.Errors}번", $"{p.B.Errors}번", Lower.None, "값만"));
             targets.Children.Add(box);
         }
         foreach (var u in c.NotCompared)
@@ -1370,10 +1370,10 @@ public sealed class RecordsScreen : Screen
         var b = p.B.Record.Header!;
         return c switch
         {
-            CompareCondition.IntervalDiffers => $"측정 주기가 달라 ({a.IntervalMs / 1000.0:0.#}초 / {b.IntervalMs / 1000.0:0.#}초) 연속 손실 횟수를 그대로 비교할 수 없습니다.",
-            CompareCondition.TimeoutDiffers => $"응답 제한시간이 달라 ({a.TimeoutMs / 1000.0:0.#}초 / {b.TimeoutMs / 1000.0:0.#}초) 손실률의 뜻이 다릅니다.",
+            CompareCondition.IntervalDiffers => $"측정 주기가 달라 ({a.IntervalMs / 1000.0:0.#}초 / {b.IntervalMs / 1000.0:0.#}초) 연속 응답 없음 횟수를 그대로 비교할 수 없습니다.",
+            CompareCondition.TimeoutDiffers => $"응답 제한 시간이 달라 ({a.TimeoutMs / 1000.0:0.#}초 / {b.TimeoutMs / 1000.0:0.#}초) 응답 없음 비율의 뜻이 다릅니다.",
             CompareCondition.LengthDiffers => "측정 길이가 달라 끊김 수는 시간당으로 봅니다.",
-            CompareCondition.LowCoverage => "관측하지 못한 시간이 많아 비교가 부정확합니다.",
+            CompareCondition.LowCoverage => "관측하지 못한 시간이 많아 비교가 부정확할 수 있습니다.",
             CompareCondition.Damaged => "한쪽 기록에 읽지 못한 부분이 있습니다.",
             CompareCondition.ExpectedDiffers => $"예상 연결 유형이 다릅니다 ({RecordView.ExpectedText(a.Expected)} / {RecordView.ExpectedText(b.Expected)}).",
             CompareCondition.CompositionDiffers => "대상 구성이 달라 측정 전체 기준이 다릅니다.",
@@ -1415,7 +1415,7 @@ public sealed class RecordsScreen : Screen
         if (!diagnosesLoaded) { body.Set(GlassCard.Skeleton(Ui), "loading"); content.Children.Add(card); return; }
         var stack = new StackPanel { Spacing = Space.S1 };
         if (diagnoses.Count == 0)
-            stack.Children.Add(ScreenParts.Message(Ui, "records.diagnoses.empty", Icons.Diagnose, Ui.Brushes.Muted, "아직 진단 기록이 없습니다", "빠른 진단을 돌리면 여기에 쌓입니다."));
+            stack.Children.Add(ScreenParts.Message(Ui, "records.diagnoses.empty", Icons.Diagnose, Ui.Brushes.Muted, "아직 진단 기록이 없습니다", "빠른 진단을 실행하면 여기에 쌓입니다."));
         foreach (var (x, i) in diagnoses.Select((x, i) => (x, i)))
         {
             var (head, weight, during) = StoredDiagnosisView.Row(x.Stored);

@@ -50,8 +50,8 @@ public static class DetectionPlanner
 
         if (net.Route is null)
         {
-            if (net.RouteError is not null)
-                return new(DetectionStatus.Unknown, Proposal(null, ExpectedConnection.Any), "경로를 조회하지 못했습니다: " + net.RouteError, null, Tristate.Unknown, CountGateways(up, null));
+            if (net.RouteError is not null)   // API 이름 대신 쉬운 말: "경로를 조회하지 못했습니다 (오류 n). 다시 확인하세요." (M12 문구)
+                return new(DetectionStatus.Unknown, Proposal(null, ExpectedConnection.Any), Diagnostics.DiagnosisTexts.Reason(net.RouteError) + ". 다시 확인하세요.", null, Tristate.Unknown, CountGateways(up, null));
             return new(DetectionStatus.NoIpv4Route, Proposal(null, ExpectedConnection.Any),
                 "IPv4 인터넷 경로가 없습니다. IPv6만 쓰는 망이거나 연결되지 않은 상태일 수 있습니다.", null, Tristate.Unknown, CountGateways(up, null));
         }
@@ -66,7 +66,7 @@ public static class DetectionPlanner
             return new(DetectionStatus.NoGateway, Proposal(null, expected), "게이트웨이를 찾지 못했습니다. VPN이나 터널을 쓰는 중일 수 있습니다.", kind, virt, others);
 
         string? notice = virt == Tristate.Yes ? "기본 경로가 가상 어댑터 또는 터널(VPN일 수 있음)을 지납니다. 첫 측정 전에 확인하세요." : null;
-        if (others > 0) notice = (notice is null ? "" : notice + " ") + $"다른 연결에도 게이트웨이가 {others}개 있습니다.";
+        if (others > 0) notice = (notice is null ? "" : notice + " ") + $"다른 네트워크 연결에도 공유기(게이트웨이)가 {others}개 더 있습니다.";
         return new(DetectionStatus.Ok, Proposal(hop, expected), notice, kind, virt, others);
     }
 

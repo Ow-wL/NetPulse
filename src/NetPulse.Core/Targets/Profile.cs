@@ -68,14 +68,14 @@ public static partial class ProfileValidator
         foreach (var dup in p.Targets.GroupBy(t => t.Id, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
             Error("duplicate-id", $"대상 Id가 겹칩니다: {dup.Key}");
         if (p.Timeout < Profile.MinTimeout || p.Timeout > Profile.MaxTimeout)
-            Error("timeout-range", $"응답 제한시간은 {Profile.MinTimeout.TotalMilliseconds}~{Profile.MaxTimeout.TotalMilliseconds} ms입니다.");
+            Error("timeout-range", $"응답 제한 시간은 {Profile.MinTimeout.TotalMilliseconds}~{Profile.MaxTimeout.TotalMilliseconds} ms입니다.");
         if (p.Duration < Profile.MinDuration || p.Duration > Profile.MaxDuration)
             Error("duration-range", $"측정 시간은 {Profile.MinDuration.TotalMinutes}~{Profile.MaxDuration.TotalMinutes}분입니다.");
 
         var external = active.Where(t => t.Role == TargetRole.External).ToArray();
         var providers = external.Select(t => t.Provider).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct(StringComparer.OrdinalIgnoreCase).Count();
         if (external.Length < 2 || providers < 2)
-            Warn("external-diversity", "서로 다른 사업자의 외부 대상이 둘 이상 있어야 '외부 연결 단절'을 판단할 수 있습니다.");
+            Warn("external-diversity", "서로 다른 사업자의 외부 대상이 둘 이상 있어야 '외부 연결 끊김 추정'을 판정할 수 있습니다.");
         if (!active.Any(t => t.Role == TargetRole.Local))
             Warn("no-local", "로컬 장비(공유기 등) 대상이 없어 문제 구간을 좁히기 어렵습니다.");
         return issues;

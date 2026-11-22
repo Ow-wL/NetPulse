@@ -210,7 +210,7 @@ public sealed class M6DiagnosisTests : IDisposable
         host.StartDiagnosis();
         await EventuallyWithin(() => host.Snapshot.Last!.Previous is not null && host.Snapshot.Operation == DiagnosisOperation.None, "두 번째", TimeSpan.FromSeconds(10));
         Assert.Empty(host.Snapshot.Last!.Changes!);
-        Assert.Equal("지난 검사와 같습니다.", DiagnosisView.Compare(host.Snapshot.Last!, 0)!.Title);
+        Assert.Equal("지난 진단과 같습니다.", DiagnosisView.Compare(host.Snapshot.Last!, 0)!.Title);
         await host.ShutdownAsync();
     }
 
@@ -312,7 +312,7 @@ public sealed class M6DiagnosisTests : IDisposable
         Assert.Equal(3, r.Main.Number);
         var view = DiagnosisView.Conclusion(r);
         Assert.Equal("이름 해석(DNS)이 되지 않음", view.Head);
-        Assert.Contains(view.Scope, l => l.Contains("외부 TCP 443") && l.Contains("일부만 성공"));
+        Assert.Contains(view.Scope, l => l.Contains("외부 연결(TCP 443)") && l.Contains("일부만 성공"));
         Assert.Contains(view.Scope, l => l.Contains("Ping을 막는 장비일 수 있음"));
         var tcp = DiagnosisView.Check(r[CheckId.Tcp], Fast(Load("steady")));
         Assert.Equal("198.51.100.10:443", tcp.Targets[0].Shown);           // 펼친 상세에만 (복사에는 없음)
