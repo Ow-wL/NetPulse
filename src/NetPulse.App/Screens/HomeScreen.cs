@@ -127,6 +127,7 @@ public sealed class HomeScreen : Screen
 
         // 최근 2분
         timeline = new TimelinePanel(Ui, "home.timeline", compact: true);
+        timeline.ColumnsChanged += () => { if (lastSnapshot is { } s) RenderTimeline(s, Context.Now); };   // M12 설계 A
         chartEmpty = ScreenParts.Message(Ui, "home.chart.empty", Icons.Chart, Ui.Brushes.Muted, "측정하지 않는 중", "측정을 시작하면 최근 2분이 여기 그려집니다.");
         (chartCard, chartBody) = ScreenParts.Card(Ui, "home.chart", "최근 2분", "실시간 · 1초 간격");
         Grid.SetRow(chartCard, 1);
@@ -195,18 +196,28 @@ public sealed class HomeScreen : Screen
         RenderProfile.Time("home.chips", () => RenderChips(s));
         RenderProfile.Time("home.hero", () => RenderHero(s, now));
         RenderProfile.Time("home.map", () => map.Show(s.Map));
+        lastSnapshot = s;
+        RenderTimeline(s, now);
+        RenderProfile.Time("home.recent", RenderRecent);
+        RenderDiagnosis();
+    }
+
+    private HostSnapshot? lastSnapshot;
+
+    private void RenderTimeline(HostSnapshot s, DateTimeOffset now)
+    {
         if (s.Measuring && s.Header is { } h)
         {
+            chartBody.Set(timeline, "normal");
+            // 배치 전(폭 0)에는 장면을 만들지 않는다. 배치되면 ColumnsChanged로 다시 온다 (M12 설계 A)
+            if (timeline.ActualWidth <= 0) return;
             long end = Math.Max(s.ElapsedMs, 1);
             long from = Math.Max(0, end - 120_000L);
             var frame = TimelineModel.Frame(s.Rounds, h.Targets, s.Gaps, s.Marks.Select(m => new SymptomMark(m.Mark, null, m.AtMs, m.Wall, m.Memo, null, m.Truncated)).ToArray(),
                 s.LinkDowns, s.Bands, from, end, timeline.Columns, h.IntervalMs, "최근 2분", reps);
             RenderProfile.Time("home.timeline", () => timeline.Show(frame, ScreenParts.TimeLabel(h.StartedAt, now), followingNow: true, null));
-            chartBody.Set(timeline, "normal");
         }
         else chartBody.Set(chartEmpty, "empty");
-        RenderProfile.Time("home.recent", RenderRecent);
-        RenderDiagnosis();
     }
 
     /// <summary>빠른 진단 카드: 이번 실행의 마지막 결과, 아니면 진단 기록의 최근 결과, 없으면 시작 안내.</summary>

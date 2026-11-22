@@ -114,6 +114,7 @@ public sealed class MeasureScreen : Screen
         timeline = new TimelinePanel(Ui, "measure.timeline", compact: false);
         timeline.Command += OnTimeline;
         timeline.SizeChanged += (_, e) => { if (e.NewSize.Width > 0) timelineLaidOut = true; };
+        timeline.ColumnsChanged += () => { if (last is not null) RenderTimeline(last); };   // M12 설계 A: 끝난 측정은 새 스냅숏이 없다
         zoomOut = new GlassButton(Ui, ButtonKind.Icon, "measure.zoomout", "축소", Icons.Minus);
         zoomIn = new GlassButton(Ui, ButtonKind.Icon, "measure.zoomin", "확대", Icons.Plus);
         left = new GlassButton(Ui, ButtonKind.Icon, "measure.left", "과거로", Icons.Back);
@@ -259,7 +260,9 @@ public sealed class MeasureScreen : Screen
             + $"|{s.Marks.Count}|{(s.Marks.Count == 0 ? null : s.Marks[^1].Mark)}|{s.LinkDowns.Count}|{s.LinkDowns.Count(d => d.Ongoing)}|{s.Gaps.Count}";
         bool unchanged = columnMs > 2 * h.IntervalMs && drawKey == drawnKey && Math.Abs(from - drawnFrom) < columnMs && Math.Abs(to - drawnTo) < columnMs
             && !NewValuesStandOut(s, h);
-        if (!unchanged)
+        // 배치 전(폭 0)에는 장면을 만들지 않는다: 열 1개 장면이 된다. 배치되면 타임라인이 ColumnsChanged로 다시 부른다 (M12 설계 A)
+        if (timeline.ActualWidth <= 0) drawnKey = null;
+        else if (!unchanged)
         {
             var marks = s.Marks.Select(m => new SymptomMark(m.Mark, null, m.AtMs, m.Wall, m.Memo, null, m.Truncated)).ToArray();
             TimelineFrame frame = null!;

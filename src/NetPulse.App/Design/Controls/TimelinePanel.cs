@@ -46,7 +46,13 @@ public sealed class TimelinePanel : UserControl
         FocusVisualSecondaryThickness = new Thickness(Size.FocusInner);
         Content = canvas;
         canvas.Background = ui.Brushes.Transparent;   // 휠·포인터를 받기 위해
-        SizeChanged += (_, _) => Draw();
+        // 폭이 바뀌어 장면을 만든 열 수와 달라지면 화면에 다시 계산을 맡긴다 (M12 설계 A: 배치 전 폭 0에서 만든 열 1개 장면이
+        // 끝난 측정에서 새 스냅숏 없이 남았다). 다시 계산할 화면이 없으면 있는 장면을 새 폭으로 다시 그리기만 한다
+        SizeChanged += (_, _) =>
+        {
+            if (ColumnsChanged is { } changed && ActualWidth > 0 && FrameColumns != Columns) changed();
+            else Draw();
+        };
         if (!compact)
         {
             KeyDown += OnKey;
@@ -57,6 +63,9 @@ public sealed class TimelinePanel : UserControl
 
     /// <summary>조작 요청 (화면이 보기 창을 바꾸고 다시 그린다).</summary>
     public event Action<TimelineCommand>? Command;
+
+    /// <summary>폭이 바뀌어 지금 열 수가 장면을 만든 열 수와 다르다 (아직 장면이 없을 때 포함). 화면이 장면을 다시 만들어 <see cref="Show"/>한다.</summary>
+    public event Action? ColumnsChanged;
 
     /// <summary>그래프를 누름: 폭에 대한 가로 위치 비율 (0~1). 기록 화면이 그 자리의 끊김 줄로 간다 (M7 설계 4.1).</summary>
     public event Action<double>? Picked;
