@@ -93,6 +93,17 @@ public abstract class Screen : Grid
     /// <summary>이 화면이 지금 걸어 둔 프레임(CompositionTarget.Rendering) 구독 수 (숨김 계약 확인용 진단).</summary>
     public virtual int FrameHooks => 0;
 
+    // ---- "그리기 끝남" (M12 설계 G1-B [2-4], 기록 docs/loop/m12/capture-wait.md) ----
+
+    /// <summary>이 화면이 예약해 두고 아직 실행이 끝나지 않은 그리기 작업 수 (프레임 목록·낮은 우선순위 큐에 넘긴 것 포함).</summary>
+    public virtual int PendingDraws => 0;
+
+    /// <summary>화면 안에서 스스로 다시 그릴 때 오르는 번호 (셸을 거치지 않는 다시 그리기). 없으면 0.</summary>
+    public virtual int SceneGeneration => 0;
+
+    /// <summary>장면을 가질 수 있는 타임라인 (없으면 null). 장면이 있으면 열 수 일치를 본다.</summary>
+    public virtual TimelinePanel? SettleTimeline => null;
+
     /// <summary>다시 열기 [2-6]: 렌더 캐시를 무효화해 한 번 다시 그린다. 입력 초안·초점·스크롤은 그대로.</summary>
     protected virtual void OnResume() { }
 }
@@ -158,14 +169,17 @@ public sealed class ScreenHost : Grid
         if (!Children.Contains(next)) Children.Add(next);
         next.Visibility = Visibility.Visible;
         Current = next;
+        Generation++;
         next.Render(snapshot);
         next.Entered();
         // 공통 요소 이동은 도착점이 배치된 뒤에만 (줄이기면 모션 도구가 페이드로 바꾼다)
         if (fromRect is { } rect && next.SharedTarget is { } target)
         {
+            sharedPending++;   // 배치를 기다리는 동안도 예약된 그리기 (M12 G1-B)
             void Once(object? s, object e)
             {
                 target.LayoutUpdated -= Once;
+                sharedPending--;
                 ui.Motion.SharedMove(rect, target, this);
             }
             target.LayoutUpdated += Once;
@@ -175,7 +189,27 @@ public sealed class ScreenHost : Grid
     }
 
     /// <summary>보이는 화면만 다시 그린다. 숨은 화면은 돌아올 때 Show가 최신 값으로 한 번 그린다.</summary>
-    public void Render(HostSnapshot snapshot) => Current?.Render(snapshot);
+    public void Render(HostSnapshot snapshot)
+    {
+        Generation++;
+        Current?.Render(snapshot);
+    }
+
+    // ---- "그리기 끝남" (M12 설계 G1-B [2-4]) ----
+
+    private int sharedPending;
+
+    /// <summary>장면 세대: 화면 이동(<see cref="Show"/>)과 셸의 다시 그리기(<see cref="Render"/>)마다 오른다.</summary>
+    public int Generation { get; private set; }
+
+    /// <summary>예약된 그리기: 배치를 기다리는 공통 요소 이동 + 지금 화면의 <see cref="Screen.PendingDraws"/>.</summary>
+    public int PendingDraws => sharedPending + (Current?.PendingDraws ?? 0);
+
+    /// <summary>
+    /// 지금 화면의 필수 요소가 배치됐는가: 화면이 트리에 붙어 크기가 있고, 보이는 <see cref="Screen.Parts"/>(차례로 등장하는 카드)가 모두 크기를 가졌다.
+    /// 화면마다 따로 자동화 ID 목록을 두지 않고 이미 있는 등장 목록을 필수 요소로 쓴다.
+    /// </summary>
+    public bool LaidOut => Current is { } c && DrawSettle.LaidOut(c, c.Parts);
 
     /// <summary>창 숨김: 준비된 모든 화면에 (M9 설계 A1).</summary>
     public void Suspend() { foreach (var s in screens.Values) s.SetSuspended(true); }

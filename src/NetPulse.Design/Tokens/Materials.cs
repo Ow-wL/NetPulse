@@ -66,8 +66,10 @@ public static class Materials
     };
 
     /// <summary>
-    /// 효과 줄이기·저성능 대체·전환 중에 쓰는 불투명 표면색 (M2 설계 4.2).
-    /// 틴트를 배경 범위의 두 경계 중 본문색과 대비가 더 낮아지는 쪽에 합성한 색이다. 그래서 계산 대비가 그대로 성립한다.
+    /// 효과 줄이기·저성능 대체·전환 중에 쓰는 불투명 표면색 (M2 설계 4.2, M12 설계 E).
+    /// 틴트를 배경 범위의 두 경계 중 본문색과 대비가 더 낮아지는 쪽에 합성한 색을 기준으로 한다 (계산 대비가 그대로 성립).
+    /// M12: 경계색은 채널마다 최솟값·최댓값을 모은 색이라 다크는 자줏빛, 라이트는 베이지로 물들었다 (M11 시각 검토 C3).
+    /// 그래서 같은 휘도(본문색과의 대비가 같거나 높은 쪽)의 무채색으로 바꾼다. 대비는 휘도로만 정해지므로 보장은 그대로다.
     /// </summary>
     public static Rgba OpaqueSurface(ThemeKind theme, GlassLevel level)
     {
@@ -76,7 +78,41 @@ public static class Materials
         var tint = Glass(theme, level).TintWithAlpha;
         var low = tint.Over(range.Low);
         var high = tint.Over(range.High);
-        return Contrast.Ratio(p.Ink, low) <= Contrast.Ratio(p.Ink, high) ? low : high;
+        var worst = Contrast.Ratio(p.Ink, low) <= Contrast.Ratio(p.Ink, high) ? low : high;
+        return NeutralLike(worst, p.Ink);
+    }
+
+    /// <summary>색과 휘도가 가장 가까운 회색 가운데 <paramref name="ink"/>와의 대비가 원래 색보다 낮지 않은 것.</summary>
+    public static Rgba NeutralLike(Rgba color, Rgba ink)
+    {
+        double target = Contrast.Luminance(color), floor = Contrast.Ratio(ink, color);
+        Rgba best = color;
+        double bestGap = double.MaxValue;
+        for (int v = 0; v <= 255; v++)
+        {
+            var g = new Rgba((byte)v, (byte)v, (byte)v);
+            if (Contrast.Ratio(ink, g) < floor) continue;
+            double gap = Math.Abs(Contrast.Luminance(g) - target);
+            if (gap < bestGap) { bestGap = gap; best = g; }
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// 흑요석 미세 결 (M2 설계 5.5 "M11 재검토", 사용자 결정 "M12에서 넣기", M12 설계 E). 시안 CSS 그대로:
+    /// 3 DIP 격자, 점 반지름 0.6 DIP, 다크는 흰 점 0.8·라이트는 검은 점 0.7, 층 불투명도 0.06. 투명 효과를 쓸 때만 보인다(불투명·고대비에서는 끈다).
+    /// </summary>
+    public static class Grain
+    {
+        public const double Spacing = 3, Radius = 0.6, LayerOpacity = 0.06;
+        public static Rgba Dot(ThemeKind theme) => theme == ThemeKind.Dark ? new Rgba(255, 255, 255, 0.8) : new Rgba(0, 0, 0, 0.7);
+    }
+
+    /// <summary>결 층 (배경 범위 계산용): 점 색, 불투명도 상한 = 점 불투명도 × 층 불투명도 (점이 다 덮은 화소).</summary>
+    public static LightSource GrainLayer(ThemeKind theme)
+    {
+        var dot = Grain.Dot(theme);
+        return new LightSource("grain", dot.WithAlpha(1), dot.A * Grain.LayerOpacity);
     }
 
     /// <summary>연한 오로라 띠 3개 (켰을 때만). 불투명도는 띠 자체 × 층 불투명도를 합친 상한.</summary>

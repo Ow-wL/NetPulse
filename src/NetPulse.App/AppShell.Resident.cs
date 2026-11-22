@@ -184,7 +184,7 @@ public sealed partial class AppShell
         if (toMeasure && screens.CurrentId != "measure") Navigate("measure", null);
         if (was) toasts.Release();   // 숨긴 동안 쌓인 앱 안 알림
         int during = notifier.TakeHiddenSummary();
-        if (was && during > 0) toasts.Show(ToastKind.Info, "숨긴 동안 끊김이 관측되었습니다", $"관측 {during}번. 측정 화면의 타임라인에서 확인하세요.");
+        if (was && during > 0) toasts.Show(ToastKind.Info, "숨긴 동안 끊김이 관측되었습니다", $"끊김이 {during}번 관측되었습니다. 측정 화면의 타임라인에서 확인하세요.");
         log.Write("resident", new { what = "reopened", by, wasHidden = was, hiddenStarts = during });
         QueueDiag();
     }

@@ -90,7 +90,7 @@ public sealed class M5ModelTests : IDisposable
         Assert.Equal(DetectionStatus.NoNetwork, new DemoWorld(Load("no-network"), new DemoTimeBase(Start, 1)).Detect().Status);
         var vpn = new DemoWorld(Load("vpn"), new DemoTimeBase(Start, 1)).Detect();
         Assert.Contains("가상 어댑터", vpn.Notice);
-        Assert.Contains("게이트웨이가 1개", vpn.Notice);
+        Assert.Contains("공유기(게이트웨이)가 1개 더", vpn.Notice);
         var fail = new DemoWorld(Scenario.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "scenarios", "outage-long.json"))
             .Replace("\"seed\": 23,", "\"seed\": 23, \"faults\": { \"detect\": \"unknown\" },")), new DemoTimeBase(Start, 1)).Detect();
         Assert.Equal(DetectionStatus.Unknown, fail.Status);
@@ -362,7 +362,7 @@ public sealed class M5ModelTests : IDisposable
         Assert.Equal([MapCandidate.PcToLocal, MapCandidate.LocalToInternet], parts);
         Assert.Contains("먼저 이 PC 쪽 링크, 이어서 공유기 너머", note);
         var noBaseline = new Episode(10, 20, [Part(Verdict.ExternalOutage, 10, 20, CandidateKind.None, "no-local-baseline")], 10000, null);
-        Assert.Equal((MapCandidate.None, "로컬 대상의 응답 기준선이 없어 구간을 판단하지 않습니다."),
+        Assert.Equal((MapCandidate.None, "로컬 대상이 아직 한 번도 응답하지 않아 구간을 판단하지 않습니다."),
             (PathMapModel.PickCandidate(Analysis([noBaseline]), ended: true).Candidate, PathMapModel.PickCandidate(Analysis([noBaseline]), ended: true).Note));
     }
 
@@ -372,7 +372,7 @@ public sealed class M5ModelTests : IDisposable
         var rounds = new List<RoundData> { Fine(0), Fine(1), R(2, Lost("r"), Ok("a", 20), Lost("b")), R(3, Lost("r"), Lost("a"), Lost("b")) };
         var view = PathMapModel.From(Three, rounds, "wireless", null, null, ended: false);
         Assert.Equal("우리집 공유기", view.Local.Name);                 // "공유기"라고 단정하지 않는다
-        Assert.Equal(("응답 없음 2회 연속", NodeState.NotResponding), (view.Local.Detail, view.Local.State));
+        Assert.Equal(("응답 없음 2번 연속", NodeState.NotResponding), (view.Local.Detail, view.Local.State));
         Assert.True(view.LocalConfirmed);                             // 최근 5회차 안에 응답 있음
         Assert.Equal("2개 중 0개 응답", view.Internet.Detail);
         Assert.Equal("Wi‑Fi", view.Pc.Detail);

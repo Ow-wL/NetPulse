@@ -127,6 +127,7 @@ public sealed class HomeScreen : Screen
 
         // 최근 2분
         timeline = new TimelinePanel(Ui, "home.timeline", compact: true);
+        timeline.ColumnsChanged += () => { if (lastSnapshot is { } s) RenderTimeline(s, Context.Now); };   // M12 설계 A
         chartEmpty = ScreenParts.Message(Ui, "home.chart.empty", Icons.Chart, Ui.Brushes.Muted, "측정하지 않는 중", "측정을 시작하면 최근 2분이 여기 그려집니다.");
         (chartCard, chartBody) = ScreenParts.Card(Ui, "home.chart", "최근 2분", "실시간 · 1초 간격");
         Grid.SetRow(chartCard, 1);
@@ -154,6 +155,7 @@ public sealed class HomeScreen : Screen
     }
 
     public override IReadOnlyList<UIElement> Parts => [header, heroCard, mapCard, chartCard, diagCard, recentCard];
+    public override TimelinePanel? SettleTimeline => timeline;   // "그리기 끝남" 타임라인 조건 (M12 G1-B)
 
     private bool? twoColumns;
 
@@ -195,18 +197,28 @@ public sealed class HomeScreen : Screen
         RenderProfile.Time("home.chips", () => RenderChips(s));
         RenderProfile.Time("home.hero", () => RenderHero(s, now));
         RenderProfile.Time("home.map", () => map.Show(s.Map));
+        lastSnapshot = s;
+        RenderTimeline(s, now);
+        RenderProfile.Time("home.recent", RenderRecent);
+        RenderDiagnosis();
+    }
+
+    private HostSnapshot? lastSnapshot;
+
+    private void RenderTimeline(HostSnapshot s, DateTimeOffset now)
+    {
         if (s.Measuring && s.Header is { } h)
         {
+            chartBody.Set(timeline, "normal");
+            // 배치 전(폭 0)에는 장면을 만들지 않는다. 배치되면 ColumnsChanged로 다시 온다 (M12 설계 A)
+            if (timeline.ActualWidth <= 0) return;
             long end = Math.Max(s.ElapsedMs, 1);
             long from = Math.Max(0, end - 120_000L);
             var frame = TimelineModel.Frame(s.Rounds, h.Targets, s.Gaps, s.Marks.Select(m => new SymptomMark(m.Mark, null, m.AtMs, m.Wall, m.Memo, null, m.Truncated)).ToArray(),
                 s.LinkDowns, s.Bands, from, end, timeline.Columns, h.IntervalMs, "최근 2분", reps);
             RenderProfile.Time("home.timeline", () => timeline.Show(frame, ScreenParts.TimeLabel(h.StartedAt, now), followingNow: true, null));
-            chartBody.Set(timeline, "normal");
         }
         else chartBody.Set(chartEmpty, "empty");
-        RenderProfile.Time("home.recent", RenderRecent);
-        RenderDiagnosis();
     }
 
     /// <summary>빠른 진단 카드: 이번 실행의 마지막 결과, 아니면 진단 기록의 최근 결과, 없으면 시작 안내.</summary>
@@ -236,7 +248,7 @@ public sealed class HomeScreen : Screen
         }
         var (head, weight) = DiagnosisTexts.Head(x.Conclusion);
         var (icon, brush) = DiagnosisLook.Weight(Ui, weight);
-        diagBody.Set(ScreenParts.Message(Ui, "home.diagnosis.last", icon, brush, head, "마지막 진단 · " + LiveSummary.When(x.At, now)), "normal");
+        diagBody.Set(ScreenParts.Message(Ui, "home.diagnosis.last", icon, brush, head, "지난 진단 · " + LiveSummary.When(x.At, now)), "normal");
     }
 
     private void RenderChips(HostSnapshot s)
@@ -306,7 +318,7 @@ public sealed class HomeScreen : Screen
             SetRing(last.Grade!.Value, null);
             Set(status, "지난 측정 · " + LiveSummary.When(last.Entry.StartedAt ?? now, now));
             Set(headline, last.Sentence ?? "");
-            Set(numbers, last.Outages is int o ? $"끊김 {o}회" + (last.DurationMs is long d ? $" · {TimelineModel.Seconds(d)} 측정" : "") : "");
+            Set(numbers, last.Outages is int o ? $"끊김 {o}번" + (last.DurationMs is long d ? $" · {TimelineModel.Seconds(d)} 측정" : "") : "");
             return;
         }
         SetRing(Grade.Insufficient, "기록 없음");
@@ -319,7 +331,7 @@ public sealed class HomeScreen : Screen
     {
         var b = LiveSummary.Badge(g);
         string name = nameOverride ?? b.Name;
-        ring.Set(b.Letter, name, b.Fill, b.Dashed, ScreenParts.GradeBrush(Ui, nameOverride is null ? g : null), "연결 품질 " + name);
+        ring.Set(b.Letter, name, b.Fill, b.Dashed, ScreenParts.GradeBrush(Ui, nameOverride is null ? g : null), "등급 " + name);
     }
 
     private static void Set(TextBlock t, string text)
@@ -379,7 +391,7 @@ public sealed class HomeScreen : Screen
         Grid.SetColumn(texts, 1);
         grid.Children.Add(texts);
         var right = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
-        string count = item.Analyzing ? "분석 중" : item.Outages is int o ? $"{o}회" : "";
+        string count = item.Analyzing ? "분석 중" : item.Outages is int o ? $"{o}번" : "";
         string longest = item.LongestMinMs is long l ? $"최장 {TimelineModel.AtLeast(l)} 이상" : item.Outages == 0 ? "끊김" : "";
         var c = Fonts.Text(count, Typography.Label, Ui.Brushes.Ink);
         c.HorizontalAlignment = HorizontalAlignment.Right;
@@ -389,12 +401,12 @@ public sealed class HomeScreen : Screen
         right.Children.Add(lt);
         Grid.SetColumn(right, 2);
         grid.Children.Add(right);
-        string name = $"{title}, 등급 {item.Badge?.Name ?? (item.Analyzing ? "분석 중" : "없음")}, 끊김 {item.Outages?.ToString() ?? "모름"}회" + (sub.Count > 0 ? ", " + string.Join(", ", sub) : "");
+        string name = $"{title}, 등급 {item.Badge?.Name ?? (item.Analyzing ? "분석 중" : "없음")}, 끊김 {item.Outages?.ToString() ?? "모름"}번" + (sub.Count > 0 ? ", " + string.Join(", ", sub) : "");
         var row = new RowButton(Ui, $"home.recent.{index}", name, grid);
         row.Click += (_, _) => Context.OpenRecord(key);   // 그 기록 상세 (측정 중이면 기록 화면이 측정 화면으로 보낸다, M7 4.2)
         AutomationProperties.SetItemStatus(row, item.Analyzing ? "analyzing" : item.Error is not null ? "error" : "ready");
         return row;
     }
 
-    public override object? Diag() => new { recent = recentState, recentCount = Context.Recent.Items.Count, mapCandidate = map.Candidate.ToString() };
+    public override object? Diag() => new { recent = recentState, recentCount = Context.Recent.Items.Count, mapCandidate = map.Candidate.ToString(), timelineState = timeline.Diag() };
 }

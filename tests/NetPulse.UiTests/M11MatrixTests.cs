@@ -93,12 +93,14 @@ public sealed class M11MatrixTests
         // 대화상자 장면은 알림 닫기가 대화상자 단추와 겹치지 않게 그대로 둔다 (M9·M10 매트릭스와 같게)
         if (!sceneId.StartsWith("terms", StringComparison.Ordinal) && !sceneId.StartsWith("about-legal", StringComparison.Ordinal)
             && !sceneId.Contains("confirm", StringComparison.Ordinal) && sceneId != "hint-dialog") app.CloseToasts();
-        Thread.Sleep(700);
-        using var shot = app.CaptureBitmap();
+        var (settledShot, shotWait) = app.WaitSettledAndCapture();   // 고정 대기 대신 상태 기반 대기 (M12 G1-B)
+        using var shot = settledShot;
         var path = app.Save(shot, "matrix-" + name);
         var problems = M5MatrixTests.LayoutProblems(app.LayoutNow());
         var privacy = M9MatrixTests.PrivateText(app.Window);
-        Record("matrix-" + name, new { name, sceneFile = file, scene = sceneId, meta, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, layoutProblems = problems, privacy, diag = app.Diag() });
+        var diag = app.Diag();
+        problems.AddRange(M5MatrixTests.TimelineProblems(diag));
+        Record("matrix-" + name, new { name, sceneFile = file, scene = sceneId, meta, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, captureWait = shotWait.Json, layoutProblems = problems, privacy, diag });
         Assert.Equal((Size.WindowWidth, Size.WindowHeight), (shot.Width, shot.Height));
         Assert.True(problems.Count == 0, string.Join("\n", problems));
         Assert.True(privacy.Count == 0, string.Join("\n", privacy));
@@ -133,11 +135,12 @@ public sealed class M11MatrixTests
             app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "home", "홈");
             app.Select("nav.settings");
             app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "settings", "설정 화면");
-            Thread.Sleep(500);
-            using var shot = app.CaptureBitmap();
+            // 고정 대기 대신 상태 기반 대기 (M12 G1-B). 진행도 고정 모션은 앱이 세지 않는다. 최대 대기는 지금까지의 500 ms 그대로
+            var (settledShot, shotWait) = app.WaitSettledAndCapture(TimeSpan.FromMilliseconds(500));
+            using var shot = settledShot;
             string name = $"m11-transition-settings-{progress}";
             var path = app.Save(shot, "matrix-" + name);
-            Record("matrix-" + name, new { name, kind = "crossfade", progress, file = Path.GetFileName(path), diag = app.Diag() });
+            Record("matrix-" + name, new { name, kind = "crossfade", progress, file = Path.GetFileName(path), captureWait = shotWait.Json, diag = app.Diag() });
             Assert.Equal(0, app.Close());
         }
         finally { AppDriver.DeleteUserData(userData); }
@@ -155,11 +158,12 @@ public sealed class M11MatrixTests
         app.Invoke("terms.accept");
         app.FollowNextWindow();
         app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "home", "홈");
-        Thread.Sleep(500);
-        using var shot = app.CaptureBitmap();
+        // 고정 대기 대신 상태 기반 대기 (M12 G1-B). 진행도 고정 모션은 앱이 세지 않는다. 최대 대기는 지금까지의 500 ms 그대로
+        var (settledShot, shotWait) = app.WaitSettledAndCapture(TimeSpan.FromMilliseconds(500));
+        using var shot = settledShot;
         string name = $"m11-transition-consent-{progress}";
         var path = app.Save(shot, "matrix-" + name);
-        Record("matrix-" + name, new { name, kind = "consent", progress, file = Path.GetFileName(path), diag = app.Diag() });
+        Record("matrix-" + name, new { name, kind = "consent", progress, file = Path.GetFileName(path), captureWait = shotWait.Json, diag = app.Diag() });
         Assert.Equal(0, app.Close());
     }
 }

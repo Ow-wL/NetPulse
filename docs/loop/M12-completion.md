@@ -1,0 +1,91 @@
+# M12 완성 정의 점검
+
+M12 설계 A~H (`docs/loop/M12-design.md` 3판 + G2 절 수정). 설계 H대로 `M11-completion.md`는 고치지 않는다. M11 증거를 참조하고, M12에서 바뀐 수용 기준·새 증거·남은 한계만 여기에 적는다.
+
+> **지금 상태: 최종 게이트 통과, 증거 검토 전 (2026-11-23).** 승인 코드 X = `e5658a2a8773cf0d7cfd0ba3158a137491fe8489` (G4는 3라운드 미승인 뒤 사용자 예외로 4라운드 APPROVE(`6ada5f1`), 그 X의 최종 게이트 1회차 실패(944/946) 뒤 한 줄 고침과 사용자 예외 5라운드 APPROVE). 같은 X에서 노트북 최종 게이트 2회차 통과: 빌드 게이트(단위 시험 Core 592·Design 183·Platform 69), UI 946/946(건너뜀 0), G5 누락 0(매트릭스 725·M2 매트릭스 44·M12 장면 6·추가 3, 캡처 814), 성능 `low` 3회 모두 통과. 깨끗한 클론 통과. 증거 검토(Codex) 1라운드 REVISE(문서 차단 2: 재질 설명, standard 초과 목록) → 문서 정정, 2라운드로 확정한다. 시험 장소는 사용자 결정으로 노트북이다 (DECISIONS "M12 시험 장소: 노트북").
+
+상태 표기는 M11과 같다 (**증명됨**, **미검증**, **한계**, **결정**).
+
+## 1. 목표별 점검
+
+| 목표 | 구현 | 증거 (시험·장면·기록) | 최종 (X) |
+| --- | --- | --- | --- |
+| **A** 측정 끝 타임라인 선 빠짐 | `06866e2` 재현 시험 → `9751154` 고침: 배치 뒤 실제 폭으로 열 수를 다시 계산, 폭 0에서는 프레임을 만들지 않음 | `M12TimelineTests.FinishedMeasurementReceivedBeforeLayoutIsRecomputedForTheRealWidth` (`--test-finish-before-layout`). 고침 전 커밋에서 실패하는지 비교 실행은 하지 않음 | **증명됨** (최종 게이트 통과). 고침 전 실패 비교는 **미검증** |
+| **B** 금융 보안 프로그램 충돌 | B2 시작 단계 기록 `862f578` (`Program.Main`, `startup-trace.jsonl`), 손상 줄 방어 `d68a568` | `M12StartTraceTests` 7개, `M12StartTraceUiTests.NormalRunIsTracedToExitAndAKilledRunIsReportedByTheNextRun`. 재현 실패 기록 (DECISIONS "M12 금융 보안 충돌") | **결정**: 1.0.0 조건에서 뺌 (재현 못 함, README 알려진 문제). 시작 단계 기록은 **증명됨** |
+| **C** N11 Wi‑Fi 신호 | 읽기 `WlanSignalReader`(위치 권한·SSID 없는 호출만), 기록 `MeasurementSession.Signal`, 근거 `SignalEvidence`, 표시 `SignalTimeline`·리포트 | 단위: `M12WlanSignalTests` 7개, `M12SignalTests.cs`의 `M12SignalStatisticsTests`·`M12SignalSessionTests`·`M12SignalDemoTests`(통계·기록·복원·시나리오, 10·7·10건), `M12SignalDisplayTests` 11개, `M12SignalColorTests` 4개. 장면 `m12-scenes.txt` 6개(`measure-wifi-*`, `records-detail-wifi`, `report-preview-wifi*`). 노트북 실제 Wi‑Fi 확인 | 해석·기록·표시는 **증명됨** (데모·시나리오) / 실제 Wi‑Fi 하드웨어는 **미검증** → 인수 |
+| **D** 문구 중간·낮음, C3 표시 결함 | `b18c3aa` 문구 56건 중 55건(유지 1건), `86bdfd1` 표시 결함 | `docs/loop/m12/wording-applied.md`(항목별 처리·바뀐 시험), `docs/loop/m12/display-fixes.md`, `M12DisplayTests` 3개. 옛 용어 잔여 검색(2026-11-23): 화면·리포트·README에 없음 | **증명됨** (바뀐 시험 기대 통과). 시각 확인은 증거 검토 |
+| **E** 흑요석 미세 결, 투명 효과 끔 색 | `43b185e`: 시안 CSS 점 격자, Acrylic일 때만. 불투명 표면은 같은 휘도의 무채색 | `M12GrainTests` 7개, 대체 모드 매트릭스 장면 | **증명됨**: 최종 게이트의 M12 기본 장면 24장은 진단 값이 `material: acrylic`·`glassAcrylic: true`·`reasons: []`이고 원본에 점 격자 결이 보인다. 투명 효과 끔 장면에서는 결이 사라지고 면이 무채색이다 (증거 검토 1라운드에서 확인) |
+| **F** 단추·칩·배너·카드 본문 대비 | `0c9e3fe`: 숨김 고리, 비활성 단추 토큰과 점선 테두리 | `M12ContrastTests.PartsAndCardBodyTextAreReadableOnTheScreen`(6장면 × 다크·라이트), `DisabledButtonContrastTests` 4개, `docs/loop/m12/contrast-parts.md` | **증명됨** (6장면 × 다크·라이트 미달 0) / **결정**: 비활성 단추 3:1 이상 (사용자 결정 "예외로 두기") |
+| **G1** 게이트 시간 | C 운영(노트북 확인), B 상태 기반 캡처 대기(`settle`, `WaitSettledAndCapture`), A 병렬은 하지 않음 | `SettleTests` 4개, `docs/loop/m12/capture-wait.md`. 단축 전후 시간은 같은 PC 실측으로만 말한다 (노트북 기준 비교는 아래 3절) | 상태 기반 대기 **증명됨**. 단축 효과는 같은 조건 비교가 없어 **미검증** (노트북 UI 시험 약 77~85분) |
+| **G2** 프레임 기준 | `ae6190d`: 주사율 보정, `standard`·`low` 프로필 (계약 `m12-g2-1`), 고지 측정 앞뒤 주사율 비교 `d68a568` | `M12FrameContractTests` 6개, 성능 시험 5개의 g5 json(계약·프로필·Hz·standard 판정) | **증명됨**: 노트북(60 Hz) `low` 3회 모두 통과 (아래 3절 표). `standard` 초과는 보고만 |
+| **G3** 시간 민감 시험 | `ced0119`: `Rounds`가 회차마다 관측을 기다림 | CI 단위 시험, 노트북 최종 게이트 단위 시험 | 노트북 **증명됨**, CI는 마감 뒤 |
+| **H** 1.0.0 | `0c7d10a`: `Directory.Build.props` 1.0.0, README 기능(Wi‑Fi 신호)·알려진 문제 | `M10AboutTests.AboutCardShowsVersionBuildAndLicense`, `M10ReleaseExeTests`(1.0.0 배포 파일) | **증명됨** (배포 exe UI 시험). 배포 파일 `NetPulse-1.0.0-win-x64.zip` 69,200,057 B, `.exe` 183,577,630 B (게이트 빌드). 게시는 사용자 승인 뒤 |
+
+## 2. M12에서 바뀐 기능의 상태
+
+| 기능 | M11 최종 | M12에서 바뀐 것 | M12 최종 |
+| --- | --- | --- | --- |
+| R2 링크 근거 | 유선 증명됨, Wi‑Fi 해석 증명됨, Wi‑Fi 하드웨어 미검증(인수 8) | 링크 별칭을 신호와 공유(`AliasFor`) | 유선·Wi‑Fi 해석 **증명됨** / Wi‑Fi 하드웨어 **미검증** (인수 8) |
+| N11 Wi‑Fi 신호 (새로 포함) | 범위 밖 | 1절 C | **증명됨** (데모·시나리오) / 실제 Wi‑Fi **미검증** |
+| N1 겹침 타임라인 | 증명됨 | 신호 오른쪽 축, 측정 끝 선 빠짐 고침(A) | **증명됨** |
+| N6 리포트 | 증명됨 | 신호 근거 표·그림, 용어 | **증명됨** |
+| 문구 전반 | 높음 11건 | 중간·낮음 55건 | **증명됨** (시험 기대) |
+
+## 3. 노트북 확인 기록
+
+| 차수 | 커밋 | 결과 | 이어진 고침 |
+| --- | --- | --- | --- |
+| 1차 | `0c7d10a` | 빌드 게이트 단위 시험 4건 실패 | `4d5474d` |
+| 2차 | `4d5474d` | 단위 시험 통과, UI 885 통과·7 실패에서 90분 제한으로 끊김 | `daf08d5` |
+| 3차 | `daf08d5` (성능 3회 요청, 실제 1회: 실패가 있어 반복 안 돎) | 단위 시험 통과, UI 945/946 (사이트 점검 시험 고리 1건, 성능 반복은 실패 때문에 안 돎). report-worst 70.0 ms | 진단 다시 쓰기 (DECISIONS "노트북 중간 확인 3차") |
+| 최종 1회차 | `6ada5f1` (성능 3회 요청) | 단위 시험 통과, UI 944/946 (사이트 점검 시험 고리 1건, 닫기 0xC000027B 1건). 성능 반복은 실패 때문에 안 돎 | `e5658a2` 진단 다시 쓰기, G4 5라운드 |
+| 최종 2회차 | X `e5658a2` (성능 3회) | **통과**: 단위 시험 Core 592·Design 183·Platform 69, UI 946/946, G5 누락 0, 성능 반복 2·3회차 각 5/5 (85분) | — |
+
+**성능 (`low` 계약 `m12-g2-1`, 노트북 60 Hz, 같은 exe 3회)** — 회차별 최대 프레임 간격 ms / 긴 간격(> 41.67 ms) 횟수:
+
+| 구간 | 기준 (low) | 1회 | 2회 | 3회 | `standard` 기준 초과 |
+| --- | --- | --- | --- | --- | --- |
+| report-worst | 100 ms·6회 | 81.9 / 2 | 76.2 / 2 | 73.5 / 2 | 1회차가 80 ms 넘음 |
+| report-worst-scroll | 80 ms·2회 | 51.7 / 1 | 61.6 / 1 | 69.3 / 1 | 없음 |
+| records-open | 100 ms·2회 | 43.6 / 1 | 43.4 / 1 | 58.9 / 2 | 3회차가 50 ms 넘음 |
+| 측정 화면 idle-live (95백분위) | ≤ 20.8 ms (60 Hz) | 17.7 | 18.3 (최대 54.5, 긴 간격 3: idle은 95백분위로만 판정) | 18.4 | 없음 (16.7·1.25T 보정 뒤) |
+| 측정 화면 조작 구간 최대 (확대·이동·진단) | 100 ms·2회 | 34.5 | 52.1 (pan) | 41.8 | 2회차 pan이 50 ms 넘음 |
+| 전환 bench 최대 | 100 ms·2회 | 32.9 | 54.9 | 50.5 | 2·3회차가 50 ms 넘음 |
+| 고지 첫 배치 / 최대 | 100 / 100 ms | 40.3 / 43.8 | 39.9 / 42.7 | 43.4 / 46.6 | 없음 (`standardPass` 참) |
+
+**`standard` 기준 초과 전체** (회차별 `perf-*.json`의 `standardPass: false`, 최대 ms / 긴 간격 횟수. `low` 판정은 모두 통과):
+
+| 구간 | 1회 | 2회 | 3회 |
+| --- | --- | --- | --- |
+| report-scroll | 50.6 / 1 | 56.5 / 1 | 54.1 / 1 |
+| report-worst | 81.9 / 2 | — | — |
+| report-options | — | 50.4 / 1 | — |
+| records-enter | — | — | 53.0 / 2 |
+| records-open | — | — | 58.9 / 2 |
+| pan (측정 화면) | — | 52.1 / 1 | — |
+| transition-2 | — | — | 50.5 / 1 |
+| transition-3 | — | 54.9 / 1 | — |
+
+노트북 환경 (요약): 4코어 저전력 노트북 CPU, 메모리 약 16 GB, 1920×1080, 전원 연결. Windows 절전 모드(Energy Saver) 상태는 `perf-env.json`에 기록하지 않아 **성능 실행 당시 상태는 모른다**. 캡처 장면의 앱 진단 값은 투명 효과(acrylic)였다 (중간 확인 3차의 사이트 점검 시험 한 건에서만 `energy-saver`·불투명이 보였다). 자세한 값은 `artifacts/e5658a2a87/ui/perf-env.json`(공개 안 함).
+
+자세한 원인은 DECISIONS "M12 노트북 중간 확인 1·2차".
+
+**깨끗한 클론** (완성 조건 4, `tools/loop/clean-clone.ps1`, 이 PC, 화면 안 씀): X `e5658a2`에서 2026-11-23 통과 (3.4분). 새 복제본에서 빌드 게이트(빌드·단위 시험·배포 파일)를 돌렸다. 배포 파일 `NetPulse-1.0.0-win-x64.zip` 69,200,054 B, `NetPulse-1.0.0-win-x64.exe` 183,577,630 B, zip 안 5개 파일. 결과는 `.loop/clean-clone-e5658a2a87.json`(공개 안 함). 바이트 재현은 요구하지 않는다.
+
+**시각 검토 (Claude, 바뀐 화면 중심)**: 최종 게이트 캡처 814장을 화면별 접촉 시트 58장으로 묶었다 (`artifacts/e5658a2a87/review/`, 공개 안 함). M12 장면 시트 2장(27장: 기본 24 + 추가 3)은 모두 봤고, 원본 크기로 3장을 열었다: `m12-measure-wifi-weak-done-dark-150`, `m5-measure-done-dark-100`, `m6-diagnose-probe-error-light-150`. 나머지 시트는 Codex 증거 검토가 독립적으로 본다.
+- 확인함:
+  - Wi‑Fi 신호 선·오른쪽 0~100% 축·범례·리포트 근거 표가 다크·라이트·고대비·150%에 나온다.
+  - 측정 끝 타임라인 선이 끊김 앞뒤로 온전히 그려진다 (A).
+  - 비활성 단추(증상 표시·다음·지금으로)에 점선 테두리가 있다 (F).
+  - 진단 카드 제목이 잘리지 않는다.
+- 찾은 사소 결함 (다음 마일스톤):
+  - 150%에서 진단 카드 제목이 괄호 안에서 줄이 갈린다 ("외부 연결(TCP" / "443)") → "TCP 443" 사이에 줄바꿈 없는 공백.
+  - 상세 줄에서 숫자와 단위가 갈린다 ("4509" / "ms"). M12 전에도 있던 것.
+
+## 4. 남은 한계와 이월
+
+- 금융 보안 충돌: 재현하지 못해 원인 미확인 (결정). 오류 보고가 오면 다시 본다.
+- 결론 문장(끊김 수)과 등급 `outage-many`(하위 구간 수)의 단위 차이 (G4 1라운드 사소, 기록만).
+- 비활성 표현이 `GlassButton`과 `SettingToggle`·`RowButton`·`SegmentedChoice` 사이에 다름 (구현 중 결정 (3)).
+- 노트북 한 대의 `low` 통과는 "명시한 노트북에서 계약을 통과했다"이지 대부분의 PC를 대표한다는 증명이 아니다 (설계 G2).
+- README 캡처는 1.0.0에서 0.9.0 화면 그대로 (사용자 결정 "이번엔 그대로", 다음 마일스톤에서 다시 찍음).

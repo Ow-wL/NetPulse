@@ -8,8 +8,17 @@
   - 배포 폴더의 파일 목록과 각 SHA-256이 manifest와 정확히 같음
 
   결과는 artifacts/<SHA>/ui-test.json. 시작할 때 이전 결과를 지운다 (재사용하지 않는다).
+
+  M12 설계 G2: -PerfProfile로 성능 프로필을 고른다 (standard = 데스크톱 기준, low = 노트북 최종 게이트). 하드웨어를 자동 감지하지 않는다.
+  -PerfRepeat n이면 전체 실행 뒤 성능 시험만 n-1번 더 돌려 모두 보존하고, 모두 통과해야 통과다 (최종 후보는 3).
+  실행 환경(CPU·GPU·RAM, OS, 해상도·배율, 전원, 효과 줄이기)은 ui/perf-env.json에 남긴다 (로컬 산출물).
 #>
-param([Parameter(Mandatory)] [string] $Artifacts, [int] $MatrixExpected = 44)
+param(
+    [Parameter(Mandatory)] [string] $Artifacts,
+    [int] $MatrixExpected = 44,
+    [ValidateSet('standard', 'low')] [string] $PerfProfile = 'standard',
+    [ValidateRange(1, 5)] [int] $PerfRepeat = 1
+)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $root = Split-Path $PSScriptRoot -Parent
@@ -44,6 +53,31 @@ Write-Host "산출물 확인: 파일 $($expected.Count)개, 커밋 $($head.Subst
 New-Item -ItemType Directory -Force $uiDir | Out-Null
 $env:NETPULSE_EXE = Join-Path $app 'NetPulse.exe'
 $env:NETPULSE_UITEST_OUT = Join-Path $uiDir 'captures'
+$env:NETPULSE_PERF_PROFILE = $PerfProfile   # 시험이 읽는다 (Perf.Profile, FrameContract)
+
+# 실행 환경 기록 (M12 설계 G2): 성능 결과가 어떤 PC에서 나왔는지. 이름·주소·사용자 정보는 넣지 않는다
+function Get-PerfEnvironment {
+    $read = { param($block) try { & $block } catch { $null } }
+    $cpu = & $read { Get-CimInstance Win32_Processor | Select-Object -First 1 }
+    $os = & $read { Get-CimInstance Win32_OperatingSystem }
+    $battery = & $read { @(Get-CimInstance Win32_Battery) }
+    $personalize = & $read { Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' }
+    $scheme = & $read { (powercfg /getactivescheme) -join ' ' }
+    [ordered]@{
+        cpu         = if ($cpu) { [ordered]@{ name = $cpu.Name.Trim(); cores = $cpu.NumberOfCores; threads = $cpu.NumberOfLogicalProcessors; maxMhz = $cpu.MaxClockSpeed } } else { $null }
+        gpu         = @(& $read { Get-CimInstance Win32_VideoController } | ForEach-Object { $_.Name })
+        ramGb       = if ($os) { [math]::Round($os.TotalVisibleMemorySize / 1MB, 1) } else { $null }
+        os          = if ($os) { "$($os.Caption) $($os.Version)" } else { $null }
+        screens     = @(& $read { Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::AllScreens } | ForEach-Object { [ordered]@{ primary = $_.Primary; width = $_.Bounds.Width; height = $_.Bounds.Height } })
+        power       = [ordered]@{
+            battery = [bool]($battery -and $battery.Count -gt 0)
+            onAc    = if ($battery -and $battery.Count -gt 0) { [bool]($battery[0].BatteryStatus -eq 2) } else { $true }
+            scheme  = if ($scheme -match '\(([^)]+)\)') { $Matches[1] } else { $null }
+        }
+        transparency = if ($personalize) { [bool]$personalize.EnableTransparency } else { $null }
+    }
+}
+Get-PerfEnvironment | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $uiDir 'perf-env.json') -Encoding UTF8
 $commands = @()
 $commands += Invoke-Step 'ui-build' 300 'dotnet' @('build', 'tests/NetPulse.UiTests', '-c', 'Release') $uiDir
 $trxDir = Join-Path $uiDir 'trx'
@@ -58,11 +92,45 @@ try {
     # 실측 시나리오(M5·M6 LiveRunTests)는 이 PC 네트워크를 쓰고 결과를 공개하지 않으므로 게이트에서 빼고 따로 돌린다.
     # 클래스 이름 대신 특성으로 뺀다 (M6 설계 7.5): 새 실측 시험이 클래스 목록에서 빠지는 일이 없게
     # README 캡처(Kind=Docs)도 게이트 밖이다 (M10 설계 C [1-10]): build/readme-shots.ps1로 따로 찍는다
-    $commands += Invoke-Step 'ui-test' 5400 'dotnet' @('test', '--project', 'tests/NetPulse.UiTests', '-c', 'Release', '--no-build', '--report-xunit-trx', '--results-directory', $trxDir, '--filter-not-trait', 'Kind=Live', '--filter-not-trait', 'Kind=Docs') $uiDir
+    # M12: 시험이 1,000개를 넘고 최종 게이트가 노트북이라 90분에 끊겼다 (노트북 중간 확인, 885개째) → 150분
+    $commands += Invoke-Step 'ui-test' 9000 'dotnet' @('test', '--project', 'tests/NetPulse.UiTests', '-c', 'Release', '--no-build', '--report-xunit-trx', '--results-directory', $trxDir, '--filter-not-trait', 'Kind=Live', '--filter-not-trait', 'Kind=Docs') $uiDir
 } catch { $failed = $_.Exception.Message }
 finally {
     Remove-Item Env:DOTNET_BUNDLE_EXTRACT_BASE_DIR -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force $extract -ErrorAction SilentlyContinue
+}
+# 성능 시험 반복 (M12 설계 G2): 같은 exe로 성능 시험만 더 돌려 모두 보존한다. 결과는 ui/perf-run-<n>/ (캡처 폴더와 따로)
+$perfRuns = @()
+$perfTests = @('NetPulse.UiTests.G5Tests.FramesAndResourcesStayWithinBudget', 'NetPulse.UiTests.M5G5Tests.MeasureScreenStaysWithinBudget',
+    'NetPulse.UiTests.M7G5Tests.RecordsScreenStaysWithinBudget', 'NetPulse.UiTests.M8G5Tests.ReportPreviewStaysWithinBudget',
+    'NetPulse.UiTests.M10AboutTests.TheLongestNoticeOpensAndScrollsToTheEnd')
+if ($null -eq $failed) {
+    $mainOut = $env:NETPULSE_UITEST_OUT
+    for ($n = 2; $n -le $PerfRepeat; $n++) {
+        $runDir = Join-Path $uiDir "perf-run-$n"
+        $runTrx = Join-Path $runDir 'trx'
+        New-Item -ItemType Directory -Force $runDir | Out-Null
+        $extract = Join-Path ([IO.Path]::GetTempPath()) ('netpulse-extract-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $runError = $null
+        try {
+            New-Item -ItemType Directory $extract | Out-Null
+            $env:DOTNET_BUNDLE_EXTRACT_BASE_DIR = $extract
+            $env:NETPULSE_UITEST_OUT = Join-Path $runDir 'captures'
+            $filter = @($perfTests | ForEach-Object { '--filter-method'; $_ })
+            $commands += Invoke-Step "perf-run-$n" 2400 'dotnet' (@('test', '--project', 'tests/NetPulse.UiTests', '-c', 'Release', '--no-build', '--report-xunit-trx', '--results-directory', $runTrx) + $filter) $runDir
+        } catch { $runError = $_.Exception.Message }
+        finally {
+            Remove-Item Env:DOTNET_BUNDLE_EXTRACT_BASE_DIR -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $extract -ErrorAction SilentlyContinue
+            $env:NETPULSE_UITEST_OUT = $mainOut
+        }
+        $runSummary = $null
+        $t = Get-ChildItem $runTrx -Filter *.trx -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($t) { $runSummary = Read-TrxSummary $t.FullName }
+        $runPassed = [bool]($null -eq $runError -and (Test-AllPassed $runSummary) -and [int]$runSummary.total -eq $perfTests.Count)
+        $perfRuns += [ordered]@{ run = $n; tests = $runSummary; passed = $runPassed; error = $runError }
+        if (-not $runPassed -and $null -eq $failed) { $failed = "성능 시험 반복 $n 실패: $runError" }
+    }
 }
 $trx = Get-ChildItem $trxDir -Filter *.trx -ErrorAction SilentlyContinue | Select-Object -First 1
 $summary = if ($trx) { $neutral = Join-Path $uiDir 'ui-tests.trx'; Move-Item $trx.FullName $neutral; Read-TrxSummary $neutral } else { $null }
@@ -75,6 +143,9 @@ $result = [ordered]@{
     scenarios      = $scenarios
     executable     = 'app/NetPulse.exe'
     commands       = $commands
+    perfProfile    = $PerfProfile
+    perfRepeat     = $PerfRepeat
+    perfRuns       = $perfRuns
     tests          = $summary
     captures       = @(Get-ChildItem $env:NETPULSE_UITEST_OUT -Filter *.png -ErrorAction SilentlyContinue | ForEach-Object { "ui/captures/$($_.Name)" })
     passed         = [bool]($null -eq $failed -and (Test-AllPassed $summary))
@@ -138,13 +209,23 @@ if (Test-Path $g5Dir) {
     foreach ($n in $m11Extras) { $required += "matrix-$n" }
     foreach ($k in 'settings', 'consent') { foreach ($p in '0', '0.5', '1') { $required += "matrix-m11-transition-$k-$p" } }
     $required += @('flow-first-measurement-with-consent')
+    # M12 (설계 A·G2): 타임라인 조건 시험, 성능 판정 요약(계약 버전·프로필·standard 판정)
+    $required += @('m12-timeline-finish-before-layout', 'perf-showcase', 'perf-measure', 'perf-records', 'perf-report')
+    # M12 (설계 C, N11 Wi‑Fi 신호 표시): 신호 장면 × 테마 × 배율, 추가 장면(고대비 등, 이름은 M12MatrixTests의 Extras에서 읽는다)
+    $m12Ids = @(Get-Content (Join-Path $root 'tests\NetPulse.UiTests\m12-scenes.txt') -Encoding UTF8 | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | ForEach-Object { ($_ -split '\|')[0] })
+    foreach ($id in $m12Ids) { foreach ($t in 'dark', 'light') { foreach ($s in '100', '150') { $required += "matrix-m12-$id-$t-$s" } } }
+    $m12Extras = @([regex]::Matches((Get-Content (Join-Path $root 'tests\NetPulse.UiTests\M12MatrixTests.cs') -Encoding UTF8 -Raw), '\{ "(m12-[a-z0-9-]+)", "m') | ForEach-Object { $_.Groups[1].Value })
+    if ($m12Extras.Count -eq 0) { throw 'M12 추가 장면 목록을 읽지 못했습니다.' }
+    foreach ($n in $m12Extras) { $required += "matrix-$n" }
     foreach ($c in 'measure-live', 'measure-outage', 'firstrun-detected', 'profile-ok', 'settings-normal', 'terms') { foreach ($t in 'dark', 'light') { $required += "contrast-m11-$c-$t" } }   # 설계 C2
+    # M12 설계 F: 부품(단추·칩·배너)과 카드 본문 글의 화면 대비 (장면은 M12ContrastTests.Scenes와 같다)
+    foreach ($c in 'measure-done', 'measure-startfail', 'firstrun-detected', 'profile-locked', 'records-list', 'settings-about') { foreach ($t in 'dark', 'light') { $required += "contrast-m12-$c-$t" } }
     $missing = @($required | Where-Object { -not (Test-Path (Join-Path $g5Dir "$_.json")) })
     $matrix = @(Get-ChildItem $g5Dir -Filter 'matrix-*.json' | Sort-Object Name)
     # M2 회귀 매트릭스는 따로 센다: M5 결과가 합쳐져 M2 캡처 누락을 가리지 않게 (G4 M5 1라운드 C3)
     # M6 결과도 M2 수에 섞이지 않게 뺀다
     # M10 결과도 M2 수에 섞이지 않게 뺀다 ([2-8])
-    $m2Matrix = @($matrix | Where-Object { -not $_.Name.StartsWith('matrix-m5-') -and -not $_.Name.StartsWith('matrix-m6-') -and -not $_.Name.StartsWith('matrix-m7-') -and -not $_.Name.StartsWith('matrix-m8-') -and -not $_.Name.StartsWith('matrix-m9-') -and -not $_.Name.StartsWith('matrix-m10-') -and -not $_.Name.StartsWith('matrix-m11-') })
+    $m2Matrix = @($matrix | Where-Object { -not $_.Name.StartsWith('matrix-m5-') -and -not $_.Name.StartsWith('matrix-m6-') -and -not $_.Name.StartsWith('matrix-m7-') -and -not $_.Name.StartsWith('matrix-m8-') -and -not $_.Name.StartsWith('matrix-m9-') -and -not $_.Name.StartsWith('matrix-m10-') -and -not $_.Name.StartsWith('matrix-m11-') -and -not $_.Name.StartsWith('matrix-m12-') })
     $captures = @(Get-ChildItem $env:NETPULSE_UITEST_OUT -Filter *.png | Sort-Object Name | ForEach-Object { [ordered]@{ file = "ui/captures/$($_.Name)"; sha256 = Get-Sha256Text $_.FullName } })
     $bench = & $read 'bench'
     $g5 = [ordered]@{
@@ -164,6 +245,8 @@ if (Test-Path $g5Dir) {
         m10Scenes      = $m10Ids.Count
         m11Scenes      = $m11Ids.Count
         m11Extras      = $m11Extras.Count
+        m12Scenes      = $m12Ids.Count
+        m12Extras      = $m12Extras.Count
         benchLegal     = & $read 'bench-legal' 
         flowReport     = & $read 'flow-report'
         benchReport    = & $read 'bench-report'
@@ -180,6 +263,12 @@ if (Test-Path $g5Dir) {
         fidelity       = @('dark-overview', 'light-overview', 'dark-toasts', 'light-toasts' | ForEach-Object { [ordered]@{ case = $_; result = & $read "fidelity-$_" } })
         runtimeSwitch  = [ordered]@{ darkToLight = & $read 'switch-dark-to-light'; lightToDark = & $read 'switch-light-to-dark' }
         boundary       = [ordered]@{ darkToLight = & $read 'boundary-dark-to-light'; lightToDark = & $read 'boundary-light-to-dark' }
+        perf           = [ordered]@{
+            profile = $PerfProfile; repeat = $PerfRepeat
+            environment = if (Test-Path (Join-Path $uiDir 'perf-env.json')) { Get-Content (Join-Path $uiDir 'perf-env.json') -Encoding UTF8 -Raw | ConvertFrom-Json } else { $null }
+            showcase = & $read 'perf-showcase'; measure = & $read 'perf-measure'; records = & $read 'perf-records'; report = & $read 'perf-report'
+            runs = $perfRuns
+        }
         captures       = $captures
     }
     $g5 | ConvertTo-Json -Depth 8 | Set-Content $g5Path -Encoding UTF8

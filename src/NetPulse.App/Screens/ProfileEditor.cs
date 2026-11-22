@@ -63,7 +63,7 @@ public sealed class ProfileEditor : Screen
         back.Click += (_, _) => Leave(back);
         cancel.Click += (_, _) => { Load(); Rebuild(); };
         save.Click += (_, _) => Save();
-        header = new PageHeader(Ui, "profile.header", "측정 구성", "대상과 프로필", back, cancel, save);
+        header = new PageHeader(Ui, "profile.header", "측정 구성", "대상과 측정 구성", back, cancel, save);
         Children.Add(header);
         scroll = new ScrollViewer { Content = content, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, Space.S3, Space.S5) };
         AutomationProperties.SetAutomationId(scroll, "profile.scroll");
@@ -127,7 +127,7 @@ public sealed class ProfileEditor : Screen
     private static Dictionary<string, string> FieldErrors(DraftProfile d)
     {
         var e = new Dictionary<string, string>();
-        if (d.Name.Trim().Length == 0) e["profile.name"] = "프로필 이름을 적어 주세요.";
+        if (d.Name.Trim().Length == 0) e["profile.name"] = "측정 구성 이름을 적어 주세요.";
         if (!int.TryParse(d.Minutes.Trim(), out var m) || m < Profile.MinDuration.TotalMinutes || m > Profile.MaxDuration.TotalMinutes) e["profile.minutes"] = "1~720 사이의 분을 적어 주세요.";
         if (!int.TryParse(d.TimeoutMs.Trim(), out var t) || t < Profile.MinTimeout.TotalMilliseconds || t > Profile.MaxTimeout.TotalMilliseconds) e["profile.timeout"] = "200~900 ms 사이로 적어 주세요.";
         for (int i = 0; i < d.Targets.Count; i++)
@@ -211,7 +211,7 @@ public sealed class ProfileEditor : Screen
             };
             row.Children.Add(b);
         }
-        var add = new GlassButton(Ui, ButtonKind.Ghost, "profile.add", "새 프로필", Icons.Plus);
+        var add = new GlassButton(Ui, ButtonKind.Ghost, "profile.add", "새 측정 구성", Icons.Plus);
         add.Click += (_, _) =>
         {
             var copy = ToDraft(Build(Current) ?? new Profile(NewProfileId(), "", [], Profile.DefaultTimeout, Profile.DefaultDuration, ExpectedConnection.Any));
@@ -222,7 +222,7 @@ public sealed class ProfileEditor : Screen
             dirty = true;
             Rebuild();
         };
-        var remove = new GlassButton(Ui, ButtonKind.Ghost, "profile.remove", "이 프로필 삭제", Icons.Trash) { IsEnabled = profiles.Count > 1 && !locked };
+        var remove = new GlassButton(Ui, ButtonKind.Ghost, "profile.remove", "이 측정 구성 삭제", Icons.Trash) { IsEnabled = profiles.Count > 1 && !locked };
         remove.Click += (_, _) =>
         {
             profiles.RemoveAll(p => p.Id == currentId);
@@ -233,7 +233,7 @@ public sealed class ProfileEditor : Screen
         add.IsEnabled = !locked;
         row.Children.Add(add);
         row.Children.Add(remove);
-        var panel = new GroupPanel("profile.list", "프로필");
+        var panel = new GroupPanel("profile.list", "측정 구성");
         panel.Children.Add(row);
         return panel;
     }
@@ -250,7 +250,8 @@ public sealed class ProfileEditor : Screen
 
     private GlassTextBox Field(string id, string label, string value, double width, Action<string> set, string? placeholder = null)
     {
-        var f = new GlassTextBox(Ui, id, label, value, placeholder, width);
+        // 폭이 정해진 칸은 왼쪽에 붙인다 (세로 목록에서 가운데로 가 "측정 구성 이름" 칸이 다른 칸과 어긋났다, M11 C3)
+        var f = new GlassTextBox(Ui, id, label, value, placeholder, width) { HorizontalAlignment = HorizontalAlignment.Left };
         f.Box.IsReadOnly = locked;
         // 글 상자는 처음 그려질 때도 바뀜 알림을 낸다: 값이 실제로 바뀐 때만 초안을 바꾼다 (변경 없이 "저장하지 않은 변경"이 되던 문제)
         string last = value;
@@ -269,7 +270,7 @@ public sealed class ProfileEditor : Screen
     {
         var d = Current;
         var stack = new StackPanel { Spacing = Space.S4 };
-        stack.Children.Add(Field("profile.name", "프로필 이름", d.Name, Size.FieldL, v => d.Name = v));
+        stack.Children.Add(Field("profile.name", "측정 구성 이름", d.Name, Size.FieldL, v => d.Name = v));
         var minutesRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S2 };
         var minutes = Field("profile.minutes", "측정 시간 (분)", d.Minutes, Size.FieldS, v => d.Minutes = v);
         minutesRow.Children.Add(minutes);
@@ -294,7 +295,7 @@ public sealed class ProfileEditor : Screen
         adv.Unchecked += (_, _) => { advanced = false; timeout.Visibility = Visibility.Collapsed; };
         stack.Children.Add(adv);
         stack.Children.Add(timeout);
-        var (card, body) = ScreenParts.Card(Ui, "profile.card", "프로필", null);
+        var (card, body) = ScreenParts.Card(Ui, "profile.card", "측정 구성", null);
         body.Set(stack);
         return card;
     }
@@ -336,29 +337,40 @@ public sealed class ProfileEditor : Screen
         return card;
     }
 
+    /// <summary>
+    /// 이름표 아래 입력 칸과 같은 높이에 놓는다 (위에 붙이고 이름표 한 줄만큼 내림). 칸 아래에 오류 글이 나와 줄이 높아져도
+    /// 선택 컨트롤이 세로로 늘어나 큰 원이 되거나 단추가 오류 글 쪽으로 밀리지 않는다 (M11 C3).
+    /// </summary>
+    private static T AtBoxLine<T>(T e) where T : FrameworkElement
+    {
+        e.VerticalAlignment = VerticalAlignment.Top;
+        e.Margin = new Thickness(0, Typography.Label.Size * Typography.Label.LineHeight + Space.S1, 0, 0);
+        return e;
+    }
+
     private UIElement TargetRow(DraftProfile d, int i)
     {
         var t = d.Targets[i];
         var lines = new StackPanel { Spacing = Space.S2 };
         var first = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S2 };
-        var up = new GlassButton(Ui, ButtonKind.Icon, $"profile.target.{i}.up", "위로", Icons.Up) { IsEnabled = !locked && i > 0, VerticalAlignment = VerticalAlignment.Bottom };
-        var down = new GlassButton(Ui, ButtonKind.Icon, $"profile.target.{i}.down", "아래로", Icons.Down) { IsEnabled = !locked && i < d.Targets.Count - 1, VerticalAlignment = VerticalAlignment.Bottom };
+        var up = new GlassButton(Ui, ButtonKind.Icon, $"profile.target.{i}.up", "위로", Icons.Up) { IsEnabled = !locked && i > 0 };
+        var down = new GlassButton(Ui, ButtonKind.Icon, $"profile.target.{i}.down", "아래로", Icons.Down) { IsEnabled = !locked && i < d.Targets.Count - 1 };
         // 옮긴 줄을 따라 같은 단추로 (끝에 닿으면 반대쪽 단추)
         up.Click += (_, _) => { (d.Targets[i - 1], d.Targets[i]) = (d.Targets[i], d.Targets[i - 1]); Changed(); Rebuild(i - 1 > 0 ? $"profile.target.{i - 1}.up" : $"profile.target.{i - 1}.down"); };
         down.Click += (_, _) => { (d.Targets[i + 1], d.Targets[i]) = (d.Targets[i], d.Targets[i + 1]); Changed(); Rebuild(i + 1 < d.Targets.Count - 1 ? $"profile.target.{i + 1}.down" : $"profile.target.{i + 1}.up"); };
-        first.Children.Add(up);
-        first.Children.Add(down);
+        first.Children.Add(AtBoxLine(up));
+        first.Children.Add(AtBoxLine(down));
         first.Children.Add(Field($"profile.target.{i}.name", "이름", t.Name, Size.FieldM, v => t.Name = v));
         first.Children.Add(Field($"profile.target.{i}.address", "주소 (IPv4)", t.Address, Size.FieldM, v => t.Address = v, "192.0.2.1"));
         lines.Children.Add(first);
         var second = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
-        var enabled = new SettingToggle(Ui, $"profile.target.{i}.enabled", "사용", t.Enabled) { IsEnabled = !locked, VerticalAlignment = VerticalAlignment.Center };
+        var enabled = new SettingToggle(Ui, $"profile.target.{i}.enabled", "사용", t.Enabled) { IsEnabled = !locked };
         enabled.Checked += (_, _) => { t.Enabled = true; Changed(); };
         enabled.Unchecked += (_, _) => { t.Enabled = false; Changed(); };
-        second.Children.Add(enabled);
+        second.Children.Add(AtBoxLine(enabled));
         var role = new SegmentedChoice(Ui, $"profile.target.{i}.role", "역할", [("local", "로컬"), ("external", "외부")], t.Role == TargetRole.Local ? "local" : "external") { ReadOnly = locked };
         role.Changed += v => { if (locked) return; t.Role = v == "local" ? TargetRole.Local : TargetRole.External; Changed(); };
-        second.Children.Add(role);
+        second.Children.Add(AtBoxLine(role));
         second.Children.Add(Field($"profile.target.{i}.provider", "사업자 (선택)", t.Provider, Size.FieldM, v => t.Provider = v));
         var method = new SegmentedChoice(Ui, $"profile.target.{i}.method", "측정 방식", [("icmp", "Ping"), ("tcp", "TCP")],
             t.Method.Kind == ProbeMethodKind.Tcp ? "tcp" : "icmp") { ReadOnly = locked };
@@ -371,12 +383,20 @@ public sealed class ProfileEditor : Screen
         };
         // 측정 방식·포트는 셋째 줄 (150% 배율에서 둘째 줄이 가로로 넘치지 않게)
         var third = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
-        third.Children.Add(method);
+        // 포트 칸이 있으면 칸 높이에 맞추고, 없으면 위에 붙인다 (어느 쪽이든 세로로 늘이지 않는다)
         if (t.Method.Kind == ProbeMethodKind.Tcp)
-            third.Children.Add(Field($"profile.target.{i}.port", "포트", t.Port, Size.FieldS, v => t.Port = v, "443"));
-        var remove = new GlassButton(Ui, ButtonKind.Icon, $"profile.target.{i}.remove", "대상 삭제", Icons.Trash) { IsEnabled = !locked, VerticalAlignment = VerticalAlignment.Bottom };
+        {
+            third.Children.Add(AtBoxLine(method));
+            third.Children.Add(Field($"profile.target.{i}.port", "포트", t.Port, Size.NumberField(5), v => t.Port = v, "443"));
+        }
+        else
+        {
+            method.VerticalAlignment = VerticalAlignment.Top;
+            third.Children.Add(method);
+        }
+        var remove = new GlassButton(Ui, ButtonKind.Icon, $"profile.target.{i}.remove", "대상 삭제", Icons.Trash) { IsEnabled = !locked };
         remove.Click += (_, _) => { d.Targets.RemoveAt(i); Changed(); Rebuild(); };
-        second.Children.Add(remove);
+        second.Children.Add(AtBoxLine(remove));
         lines.Children.Add(second);
         lines.Children.Add(third);
         var panel = new GroupPanel($"profile.target.{i}", t.Name.Length == 0 ? $"대상 {i + 1}" : t.Name);

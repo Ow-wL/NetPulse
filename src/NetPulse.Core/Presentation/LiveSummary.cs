@@ -8,7 +8,7 @@ using NetPulse.Core.Targets;
 namespace NetPulse.Core.Presentation;
 
 /// <summary>대상 카드 값 (M5 설계 3.5). 숫자는 <see cref="StatsCalculator"/> 결과를 그대로 쓴다.</summary>
-/// <param name="Latest">"18 ms" / "응답 없음" / "검사 오류" / "측정 전"</param>
+/// <param name="Latest">"18 ms" / "응답 없음" / "측정 오류" / "측정 전"</param>
 /// <param name="LossSentence">"100번 중 2번 응답이 없었습니다" (검사 오류는 분모에서 뺀다)</param>
 /// <param name="MaxConsecutiveLoss">최대 연속 실패 (회차 수, N9)</param>
 public sealed record TargetCard(string TargetId, string Name, string Role, string Latest, ProbeOutcome? LatestOutcome,
@@ -45,7 +45,7 @@ public static class LiveSummary
             {
                 ProbeOutcome.Success when r.RttMs is double ms => PathMapModel.Ms(ms),
                 ProbeOutcome.Lost => "응답 없음",
-                _ => "검사 오류",
+                _ => "측정 오류",
             };
             int counted = s is null ? 0 : s.Success + s.Lost;
             string rate = s?.LossRate is double lr ? Percent(lr) : "값 없음";
@@ -59,15 +59,15 @@ public static class LiveSummary
     }
 
     /// <summary>
-    /// 숫자 줄: "최근 10분 동안 끊김 1회 · 평균 지연 18 ms · 응답 성공 99.9%".
-    /// 끊김 = 분석의 끊김 구간 수, 평균 지연 = 회차별 인터넷 대표값의 평균, 응답 성공 = 모든 대상의 성공 / (성공 + 손실).
+    /// 숫자 줄: "최근 10분 동안 끊김 1번 · 평균 지연 18 ms · 응답 없음 0.8% (1000번 중 8번)".
+    /// 끊김 = 분석의 끊김 구간 수, 평균 지연 = 회차별 인터넷 대표값의 평균, 응답 없음 = 모든 대상의 손실 / (성공 + 손실).
     /// </summary>
     public static string Numbers(long elapsedMs, AnalysisResult? analysis, IReadOnlyList<RoundData> rounds, IReadOnlyList<Target> targets, MeasurementStats stats,
         RepresentativeCache? cache = null)
     {
         var parts = new List<string>();
         string span = TimelineModel.Seconds(elapsedMs);
-        parts.Add(analysis is null ? $"{span} 측정" : $"{span} 동안 끊김 {analysis.Episodes.Count}회");
+        parts.Add(analysis is null ? $"{span} 측정" : $"{span} 동안 끊김 {analysis.Episodes.Count}번");
         double? average;
         if (cache is not null)
         {
@@ -81,7 +81,7 @@ public static class LiveSummary
         }
         if (average is double avg) parts.Add($"평균 지연 {PathMapModel.Ms(avg)}");
         int success = stats.Targets.Sum(s => s.Success), lost = stats.Targets.Sum(s => s.Lost);
-        if (success + lost > 0) parts.Add($"응답 성공 {Percent((double)success / (success + lost))}");
+        if (success + lost > 0) parts.Add($"응답 없음 {Percent((double)lost / (success + lost))} ({success + lost}번 중 {lost}번)");
         return string.Join(" · ", parts);
     }
 

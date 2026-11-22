@@ -1,0 +1,10 @@
+# M12 캡처 장면 목록 (설계 C 표시 [1-7], N11 Wi‑Fi 신호). 시험(M12MatrixTests)과 build/ui-test.ps1이 같은 파일을 읽는다. 형식은 m5-scenes.txt와 같다.
+# 다크·라이트 × 100%·150%. 축 글(100%·0%)·끝 시각·범례가 겹치거나 잘리지 않는지 배치 검사로 본다. 고대비 장면은 M12MatrixTests.Extras.
+# 준비: profile:시나리오(측정 구성), rec-wifi(신호가 든 기록, M7Fixtures). wifi-denied는 시험 폴더의 시나리오(신호 권한 없음 → 범례 자리에 상태 글, 긴 상태 문구).
+# 빠진 장면: 어댑터 바뀜 — 데모 네트워크는 어댑터가 하나라 장면으로 만들 수 없다. Core 시험(M12SignalDisplayTests)이 끊김·바뀜 표시를 본다.
+measure-wifi-weak-done|profile:wifi-weak-drop|--demo wifi-weak-drop --demo-speed 600 --start|wait:finished
+measure-wifi-strong-done|profile:wifi-strong-outage|--demo wifi-strong-outage --demo-speed 600 --start|wait:finished
+measure-wifi-denied-done|profile:wifi-denied|--demo tests:wifi-denied --demo-speed 600 --start|wait:finished
+records-detail-wifi|rec-wifi|--demo steady --screen records|wait:screen=records;wait:recordsAnalyzed;invoke:records.row.0;wait:detailReady
+report-preview-wifi|rec-wifi|--demo steady --screen report|wait:screen=report;wait:reportReady;scroll:report.scroll=25
+report-preview-wifi-evidence|rec-wifi|--demo steady --screen report|wait:screen=report;wait:reportReady;scroll:report.scroll=55

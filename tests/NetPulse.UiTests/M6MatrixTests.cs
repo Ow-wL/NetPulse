@@ -28,8 +28,8 @@ public sealed class M6MatrixTests
         var scene = M5MatrixTests.Scenes("m6-scenes.txt").Single(s => s.Id == id);
         using var app = M5MatrixTests.Open(scene, "--theme", theme, "--ui-scale", scale);
         if (!id.Contains("confirm", StringComparison.Ordinal)) app.CloseToasts();
-        Thread.Sleep(700);
-        using var shot = app.CaptureBitmap();
+        var (settledShot, shotWait) = app.WaitSettledAndCapture();   // 고정 대기 대신 상태 기반 대기 (M12 G1-B)
+        using var shot = settledShot;
         string name = $"m6-{id}-{theme}-{(scale == "1" ? "100" : "150")}";
         var path = app.Save(shot, "matrix-" + name);
         var problems = M5MatrixTests.LayoutProblems(app.LayoutNow());
@@ -41,7 +41,7 @@ public sealed class M6MatrixTests
         if (id is "diagnose-flush-running") Assert.Equal("Flushing", M5Fixtures.Str(sd, "flush"));
         if (id is "diagnose-site-running") Assert.True(sd.GetProperty("site").GetProperty("Running").GetBoolean());
         File.WriteAllText(Path.Combine(G5Dir, "matrix-" + name + ".json"), JsonSerializer.Serialize(
-            new { name, scene = id, theme, scale, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, layoutProblems = problems, diag },
+            new { name, scene = id, theme, scale, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, captureWait = shotWait.Json, layoutProblems = problems, diag },
             new JsonSerializerOptions { WriteIndented = true }));
         Assert.Equal((Size.WindowWidth, Size.WindowHeight), (shot.Width, shot.Height));
         Assert.True(problems.Count == 0, string.Join("\n", problems));

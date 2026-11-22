@@ -42,12 +42,12 @@ public sealed class M8G5Tests
     {
         using var app = M5MatrixTests.Open(Scene(sceneId), extra.Split(' '));
         app.CloseToasts();
-        Thread.Sleep(700);
-        using var shot = app.CaptureBitmap();
+        var (settledShot, shotWait) = app.WaitSettledAndCapture();   // 고정 대기 대신 상태 기반 대기 (M12 G1-B)
+        using var shot = settledShot;
         var path = app.Save(shot, "matrix-" + name);
         var problems = M5MatrixTests.LayoutProblems(app.LayoutNow());
         var diag = app.Diag();
-        Record("matrix-" + name, new { name, scene = sceneId, extra, file = Path.GetFileName(path), layoutProblems = problems, diag });
+        Record("matrix-" + name, new { name, scene = sceneId, extra, file = Path.GetFileName(path), captureWait = shotWait.Json, layoutProblems = problems, diag });
         Assert.Equal((Size.WindowWidth, Size.WindowHeight), (shot.Width, shot.Height));
         Assert.True(problems.Count == 0, string.Join("\n", problems));
         if (name.Contains("-hc-", StringComparison.Ordinal))
@@ -141,20 +141,16 @@ public sealed class M8G5Tests
             string[] required = ["report-enter", "report-scroll", "report-options", "report-worst", "report-worst-scroll"];
             var seen = bench.GetProperty("segments").EnumerateArray().Select(s => s.GetProperty("Segment").GetString()!).ToArray();
             foreach (var r in required.Except(seen)) problems.Add($"{r} 구간이 없습니다");
+            var verdicts = new List<object>();
             foreach (var s in bench.GetProperty("segments").EnumerateArray())
             {
                 string seg = s.GetProperty("Segment").GetString()!;
                 if (s.GetProperty("Samples").GetInt32() < 10) problems.Add($"{seg} 프레임 표본 {s.GetProperty("Samples").GetInt32()}개 (10개 미만)");
-                double max = s.GetProperty("Max").GetDouble();
-                int over = s.GetProperty("Over33").GetInt32();
-                var (maxLimit, overLimit) = seg switch
-                {
-                    "report-worst" => (WorstOpenMax, WorstOpenHitches),
-                    "report-worst-scroll" => (WorstScrollMax, FrameBudget.TransitionHitches),
-                    _ => (FrameBudget.TransitionMax, FrameBudget.TransitionHitches),
-                };
-                if (max > maxLimit || over > overLimit) problems.Add($"{seg} 최대 {max:0.0} ms, 33 ms 초과 {over}회 (기준 {maxLimit} ms·{overLimit}회)");
+                // M12 설계 G2: 최악 열기·최악 스크롤 상한은 계약(FrameContract)에 있다 (standard 80·6, 80·2 — 사용자 결정 M8 그대로)
+                var kind = seg switch { "report-worst" => PerfKind.WorstOpen, "report-worst-scroll" => PerfKind.WorstScroll, _ => PerfKind.Transition };
+                verdicts.Add(Perf.Check(s, kind, problems));
             }
+            Perf.Record("report", verdicts);
             long peak = bench.GetProperty("peakPrivateMb").GetInt64();
             if (peak > 400) problems.Add($"최고 전용 메모리 {peak} MB > 400 (실측값으로 기준을 다시 정할 것)");
             Assert.True(problems.Count == 0, string.Join("\n", problems));
@@ -162,15 +158,9 @@ public sealed class M8G5Tests
         finally { AppDriver.DeleteUserData(userData); }
     }
 
-    /// <summary>최악 사례 열기 구간의 기준 (사용자 결정 2026-11-16 "최악만 80ms·6회로").</summary>
-    private const double WorstOpenMax = 80;
-    private const int WorstOpenHitches = 6;
-
-    /// <summary>
-    /// 최악 사례를 연 직후 스크롤 구간의 최대 (사용자 결정 2026-11-17 "예외 80ms·2회로"). 33 ms 초과 횟수는 다른 구간과 같은 2회.
-    /// 최악 사례(전용 메모리 약 390 MB)를 연 뒤의 2세대 수집이 이 구간에 들면 한 프레임이 45~62 ms까지 튀었다 (C 이전 커밋에서도 관측). 원인을 확정한 예외가 아니라 받아들이는 범위다.
-    /// </summary>
-    private const double WorstScrollMax = 80;
+    // 최악 사례 열기(사용자 결정 2026-11-16 "최악만 80ms·6회로")와 그 직후 스크롤(2026-11-17 "예외 80ms·2회로")의 기준은
+    // M12부터 FrameContract에 있다 (standard 그대로, low는 열기 100 ms·스크롤 80 ms 유지). 스크롤 예외의 배경: 최악 사례(전용 메모리 약 390 MB)를
+    // 연 뒤의 2세대 수집이 이 구간에 들면 한 프레임이 45~62 ms까지 튀었다 (원인을 확정한 예외가 아니라 받아들이는 범위).
 
     private static long PrivateMb() => Process.GetCurrentProcess().PrivateMemorySize64 / (1024 * 1024);
 
@@ -282,6 +272,9 @@ public sealed class M8G5Tests
             {
                 var record = RecordReader.Read(RecordReader.FindSegments(id, roots));
                 var a = MeasurementAnalysis.Analyze(record);
+                // 결론의 끊김 횟수는 요약의 "끊김 N번"과 같은 기준(끊김 전체)이라 그보다 클 수 없다 (M11 C3: 최악 예시 21599번 > 19600번)
+                if (System.Text.RegularExpressions.Regex.Match(a.Grade.Sentence, @"(\d+)번 끊긴") is { Success: true } said && int.Parse(said.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) > a.Episodes.Count)
+                    problems.Add($"{name}: 결론 {said.Groups[1].Value}번 > 끊김 {a.Episodes.Count}번");
                 var doc = ReportBuilder.Build(new ReportInput("k", "s", record, a, RecordLifecycle.Ended, [], new ReportOptions(), M5Fixtures.DemoNow, "edge"));
                 var rendered = ReportExport.Render(doc);
                 Assert.True(rendered.Ok, name + ": 내보낼 HTML을 만들지 못했습니다");

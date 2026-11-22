@@ -166,6 +166,24 @@ public sealed class M5MatrixTests
     /// <summary>현재 화면의 진단 값 (없으면 null).</summary>
     private static JsonElement? Sd(JsonElement d) => d.TryGetProperty("screenDiag", out var s) && s.ValueKind == JsonValueKind.Object ? s : null;
 
+    /// <summary>
+    /// 타임라인 장면 검사 (M12 설계 A, 안전망): 지금 화면에 장면을 가진 타임라인이 있으면 장면 계산에 쓴 열 수가 지금 폭과 같아야 한다.
+    /// 배치 검사는 Canvas 안의 선 누락을 잡지 못한다 (M11 측정 끝 다크 타임라인).
+    /// </summary>
+    internal static List<string> TimelineProblems(JsonElement diag)
+    {
+        var problems = new List<string>();
+        if (Sd(diag) is not { } sd || !sd.TryGetProperty("timelineState", out var t) || t.ValueKind != JsonValueKind.Object) return problems;
+        if (!t.GetProperty("hasFrame").GetBoolean()) return problems;
+        double width = t.GetProperty("width").GetDouble();
+        var fc = t.GetProperty("frameColumns");
+        int? frameColumns = fc.ValueKind == JsonValueKind.Number ? fc.GetInt32() : null;
+        // M12 설계 C: 신호 축이 있으면 열 수 = 오른쪽 축 여백을 뺀 그래프 폭 (plotWidth). 없으면 전체 폭과 같다
+        double plot = t.TryGetProperty("plotWidth", out var pw) ? pw.GetDouble() : width;
+        if (width > 0 && frameColumns != Math.Max(1, (int)Math.Round(plot))) problems.Add($"타임라인 장면 열 수 {frameColumns} ≠ 그래프 폭 {Math.Round(plot)} (전체 {Math.Round(width)})");
+        return problems;
+    }
+
     /// <summary>배치 검사 판정 (M2 설계 5.8과 같음): 스크롤 밖 잘림 0, 스크롤 안은 보이는 요소의 가로가 보기 안, 글자 잘림 0, 같은 층 상호작용 요소 겹침 0.</summary>
     internal static List<string> LayoutProblems(JsonElement data)
     {
@@ -195,14 +213,15 @@ public sealed class M5MatrixTests
         var scene = Scenes().Single(s => s.Id == id);
         using var app = Open(scene, "--theme", theme, "--ui-scale", scale);
         if (!id.StartsWith("dialog", StringComparison.Ordinal)) app.CloseToasts();
-        Thread.Sleep(700);
-        using var shot = app.CaptureBitmap();
+        var (settledShot, shotWait) = app.WaitSettledAndCapture();   // 고정 대기 대신 상태 기반 대기 (M12 G1-B)
+        using var shot = settledShot;
         string name = $"m5-{id}-{theme}-{(scale == "1" ? "100" : "150")}";
         var path = app.Save(shot, "matrix-" + name);
         var layout = app.LayoutNow();
         var problems = LayoutProblems(layout);
         var diag = app.Diag();
-        Record("matrix-" + name, new { name, scene = id, theme, scale, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, layoutProblems = problems, diag });
+        problems.AddRange(TimelineProblems(diag));
+        Record("matrix-" + name, new { name, scene = id, theme, scale, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, captureWait = shotWait.Json, layoutProblems = problems, diag });
         Assert.Equal((Size.WindowWidth, Size.WindowHeight), (shot.Width, shot.Height));
         Assert.True(problems.Count == 0, string.Join("\n", problems));
         Assert.True(app.ReadLog().All(e => e.GetProperty("kind").GetString() is not ("unhandled" or "renderFailed" or "diagFailed")), "앱 기록에 오류");
@@ -229,12 +248,12 @@ public sealed class M5MatrixTests
         var scene = Scenes().Single(s => s.Id == sceneId);
         using var app = Open(scene, extra.Split(' '));
         app.CloseToasts();
-        Thread.Sleep(700);
-        using var shot = app.CaptureBitmap();
+        var (settledShot, shotWait) = app.WaitSettledAndCapture();   // 고정 대기 대신 상태 기반 대기 (M12 G1-B)
+        using var shot = settledShot;
         var path = app.Save(shot, "matrix-" + name);
         // 추가 장면도 같은 배치 검사 (G4 M5 1라운드 C4)
         var problems = LayoutProblems(app.LayoutNow());
-        Record("matrix-" + name, new { name, scene = sceneId, extra, file = Path.GetFileName(path), layoutProblems = problems, diag = app.Diag() });
+        Record("matrix-" + name, new { name, scene = sceneId, extra, file = Path.GetFileName(path), captureWait = shotWait.Json, layoutProblems = problems, diag = app.Diag() });
         Assert.Equal((Size.WindowWidth, Size.WindowHeight), (shot.Width, shot.Height));
         Assert.True(problems.Count == 0, string.Join("\n", problems));
         Assert.True(app.ReadLog().All(e => e.GetProperty("kind").GetString() is not ("unhandled" or "renderFailed" or "diagFailed")), "앱 기록에 오류");
@@ -269,11 +288,12 @@ public sealed class M5MatrixTests
         if (kind == "crossfade") held.Select("nav.measure");
         else held.Invoke("home.start");
         held.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "measure", "측정 화면");
-        Thread.Sleep(500);
-        using var shot = held.CaptureBitmap();
+        // 고정 대기 대신 상태 기반 대기 (M12 G1-B). 진행도 고정 모션은 앱이 세지 않는다. 최대 대기는 지금까지의 500 ms 그대로
+        var (settledShot, shotWait) = held.WaitSettledAndCapture(TimeSpan.FromMilliseconds(500));
+        using var shot = settledShot;
         string name = $"m5-transition-{kind}-{progress}";
         var path = held.Save(shot, "matrix-" + name);
-        Record("matrix-" + name, new { name, kind, progress, file = Path.GetFileName(path), diag = held.Diag() });
+        Record("matrix-" + name, new { name, kind, progress, file = Path.GetFileName(path), captureWait = shotWait.Json, diag = held.Diag() });
         held.Close();
         AppDriver.DeleteUserData(userData);
     }

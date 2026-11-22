@@ -81,8 +81,13 @@ public sealed class StatusChip : GroupPanel
             _ => (Icons.Question, ui.Brushes.Muted),
         };
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S2, VerticalAlignment = VerticalAlignment.Center };
+        var ink = ui.Brushes.Ink;
+        // 실측 대비 시험 (M12 설계 F): 아이콘과 글만 투명하게 그려 칩 바탕을 찍는다 (공유 브러시는 바꾸지 않는다)
+        if (ui.Options.HideMeasuredText) brush = ink = ui.Brushes.Transparent;
         row.Children.Add(Icons.Make(icon, brush, Size.IconS));
-        row.Children.Add(Fonts.Text(label, Typography.Label, ui.Brushes.Ink));
+        var text = Fonts.Text(label, Typography.Label, ink);
+        AutomationProperties.SetAutomationId(text, automationId + ".label");
+        row.Children.Add(text);
         HorizontalAlignment = HorizontalAlignment.Left;
         Children.Add(Pill.Apply(new Border
         {

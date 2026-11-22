@@ -138,6 +138,8 @@ internal static class M7Fixtures
                 return true;
             }
             case "profile-short": M5Fixtures.SaveProfile(userData, "steady", TimeSpan.FromMinutes(1)); return true;
+            // M12 설계 C: Wi‑Fi 신호가 든 기록 (약해졌다 끊김, 3분 = 시나리오 180회차)
+            case "rec-wifi": M5Fixtures.SaveProfile(userData, "wifi-weak-drop"); M5Fixtures.MakeRecord(userData, "wifi-weak-drop", Kst.AddHours(-1), 3); return true;
             case "profile-outage": M5Fixtures.SaveProfile(userData, "outage-long", TimeSpan.FromMinutes(3)); return true;
             case "rec-notrecord": Ok(userData); Directory.CreateDirectory(Path.Combine(userData, "photos")); return true;
             default: return false;

@@ -248,7 +248,7 @@ public sealed class RecordLibrary(Func<IReadOnlyList<string>> roots, bool holdAn
         var memo = marks.Marks.Select(m => m.Memo).FirstOrDefault(m => m is not null);
         long? duration = record.Summary?.EndMs ?? record.Rounds.LastOrDefault()?.AtMs;
         var damage = RecordView.DamageNotices(record, marks.Ignored);
-        string? notice = e.Lifecycle == RecordLifecycle.NoSummary ? "끝 기록 없음" : damage.Count > 0 ? "읽지 못한 부분 있음" : null;
+        string? notice = e.Lifecycle == RecordLifecycle.NoSummary ? "정상 종료 기록 없음" : damage.Count > 0 ? "읽지 못한 부분 있음" : null;
         return (new RecentItem(e, false, LiveSummary.Badge(a.Grade.Grade), a.Episodes.Count,
             a.Episodes.Count == 0 ? null : a.Episodes.Max(x => x.MinDurationMs), PathMapModel.ConnectionKind(record.Events), memo, duration, notice, null,
             a.Grade.Sentence, a.Grade.Grade), damage);

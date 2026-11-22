@@ -117,7 +117,7 @@ public sealed class M7RecordViewTests
         var d = EpisodeDetail.For(rec, a, Assert.Single(a.Episodes));
         Assert.Single(d.Marks);   // 화면에는 겹친 증상 표시가 있다
         var text = RecordView.Copy(rec.Header!, d);
-        // "공유기"는 후보 문구의 일반 단어라 이름 검사는 사용자 이름에만 있는 글로 한다
+        // "공유기"는 '가능성이 높은 곳' 문구의 일반 단어라 이름 검사는 사용자 이름에만 있는 글로 한다
         foreach (var forbidden in new[] { "192.0.2", "198.51.100", "203.0.113", "내 라우터", "집 회선", "B 서버", "Ethernet", "회의 중", "A사", "B사" })
             Assert.DoesNotContain(forbidden, text);
         Assert.Contains("로컬 대상 1", text);
@@ -156,10 +156,10 @@ public sealed class M7RecordViewTests
     public void EndReasonAndSaveStateAreSeparate()
     {
         Assert.Equal("측정 중", RecordView.EndText(RecordLifecycle.Running, null));
-        Assert.StartsWith("끝 기록 없음", RecordView.EndText(RecordLifecycle.NoSummary, null));
+        Assert.StartsWith("정상 종료 기록 없음", RecordView.EndText(RecordLifecycle.NoSummary, null));
         Assert.Equal("사용자가 멈춤", RecordView.EndText(RecordLifecycle.Ended, EndReason.Stopped));
         var s = new RecordSummary("m", EndReason.Stopped, W0, 10, 8, 1, 1, 0, 7, true, null, 0);
-        Assert.Equal("저장하지 못한 회차 2개 · 마무리 기록을 쓰지 못함", RecordView.SaveText(s));
+        Assert.Equal("저장하지 못한 회차 2개 · 정상 종료 기록을 쓰지 못함", RecordView.SaveText(s));
         Assert.Null(RecordView.SaveText(s with { Pending = 0, Dropped = 0, SealFailed = false }));
     }
 

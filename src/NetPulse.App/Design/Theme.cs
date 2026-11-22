@@ -50,6 +50,8 @@ public sealed class Theme
     public int Fallbacks { get; private set; }
     public int UnclippedNewThemeFrames { get; private set; }
     public bool InTransition => transition is not null;
+    /// <summary>원형 전환이 시험 진행도 고정(<see cref="HoldAt"/>)으로 멈춰 있다 (M12 G1-B: 일부러 멈춘 모션은 "그리기 끝남"에서 세지 않는다).</summary>
+    public bool TransitionHeld { get; private set; }
     public int SnapshotLayersInTree => host?.Children.Count(c => ReferenceEquals(c, snapshotLayer) && snapshotLayer.Visibility == Visibility.Visible) ?? 0;
     public double LastSnapshotMs { get; private set; }
 
@@ -193,6 +195,8 @@ public sealed class Theme
             {
                 controller.Pause();
                 controller.Progress = (float)p;
+                TransitionHeld = true;
+                TransitionChanged?.Invoke();   // 진단이 고정 여부를 다시 쓰게
                 ui.Log.Write("themeHold", new { progress = p });
             }
             using (cts.Token.Register(() => animated.TrySetResult())) await animated.Task;
@@ -211,6 +215,7 @@ public sealed class Theme
             cleanup?.Invoke();
             cleanup = null;
             transition = null;
+            TransitionHeld = false;
             cts.Dispose();
             TransitionChanged?.Invoke();
             ui.Log.Write("themeSwitch", new { theme = next.Theme.ToString().ToLowerInvariant(), ms = Math.Round(started.Elapsed.TotalMilliseconds), snapshotMs = Math.Round(LastSnapshotMs, 1) });

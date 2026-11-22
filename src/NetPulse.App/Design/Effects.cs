@@ -118,6 +118,7 @@ public sealed class Effects
         theme = m.Theme.ToString().ToLowerInvariant(),
         material = m.Material.ToString().ToLowerInvariant(),
         lights = m.LightsVisible, moving = m.LightsMoving, aurora = m.AuroraVisible, reduceMotion = m.ReduceMotion,
+        grain = m.Material == MaterialMode.Acrylic,   // 흑요석 미세 결 (M12 설계 E)
         reasons = m.Reasons, simulated = options.AnySimulation,
     };
 

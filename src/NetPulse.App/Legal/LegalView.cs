@@ -62,7 +62,11 @@ public sealed class LegalView : Grid
     public event Action<int, double>? Opened;
 
     /// <summary>펼친 뒤 1초 동안의 프레임 간격 (항목 번호, 가장 긴 간격 ms, 33 ms 초과 횟수, 표본 수) — bench (설계 5절: 50 ms, 33 ms 초과 2회 이하).</summary>
-    public event Action<int, double, int, int>? Frames;
+    /// <remarks>마지막 인수는 간격 목록 (ms): 시험이 주사율 계약의 "긴 간격"을 센다 (M12 설계 G2, 33 고정값만 쓰지 않음).</remarks>
+    public event Action<int, double, int, int, IReadOnlyList<double>>? Frames;
+
+    /// <summary>펼친 뒤 프레임 측정을 시작한다 (항목 번호): 측정 앞 주사율을 읽게 (G4 M12 1라운드 6).</summary>
+    public event Action<int>? Measuring;
 
     /// <summary>첫 항목 단추 (초점 보낼 곳).</summary>
     public Control? FirstFocus => rows.Count > 0 ? rows[0].Row : null;
@@ -77,11 +81,13 @@ public sealed class LegalView : Grid
             rows[Expanded].Holder.Child = null;
             rows[Expanded].Holder.Visibility = Visibility.Collapsed;
             AutomationProperties.SetItemStatus(rows[Expanded].Row, "접힘");
+            PointArrow(rows[Expanded].Row, false);
             openText = null;
         }
         Expanded = -1;
         if (open)
         {
+            Measuring?.Invoke(index);
             var watch = System.Diagnostics.Stopwatch.StartNew();
             WatchFrames(index, watch);
             string body = Items[index].Text;
@@ -131,9 +137,39 @@ public sealed class LegalView : Grid
             rows[index].Holder.Child = shown;
             rows[index].Holder.Visibility = Visibility.Visible;
             AutomationProperties.SetItemStatus(rows[index].Row, "펼침");
+            PointArrow(rows[index].Row, true);
             Expanded = index;
+            BringOpenIntoView(index);
         }
         Changed?.Invoke();
+    }
+
+    /// <summary>펼침 화살표: 접힘이면 오른쪽(>), 펼침이면 아래(v). 펼쳐도 방향이 그대로였다 (M11 C3).</summary>
+    private static void PointArrow(GlassButton row, bool open)
+    {
+        if (row.IconElement is not { } icon) return;
+        icon.RenderTransform = open ? new Microsoft.UI.Xaml.Media.RotateTransform { Angle = 90, CenterX = Size.IconM / 2, CenterY = Size.IconM / 2 } : null;
+    }
+
+    /// <summary>
+    /// 펼친 항목(머리 줄부터 원문·[전문 복사]까지)을 보이게 한다. 머리 줄을 위에 맞추므로 다 들어가면 전부 보이고, 넘치면 머리 줄과 원문 앞부분이 보인다.
+    /// 그대로 두면 100%에서 [전문 복사] 단추의 위 테두리만 보기 아래 끝에 걸려 "남은 한 줄"처럼 보였다 (M11 C3).
+    /// </summary>
+    private void BringOpenIntoView(int index)
+    {
+        var (row, holder) = rows[index];
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (Expanded != index || !row.IsLoaded) return;
+            row.UpdateLayout();
+            double height = holder.TransformToVisual(row).TransformPoint(default).Y + holder.ActualHeight;
+            row.StartBringIntoView(new BringIntoViewOptions
+            {
+                AnimationDesired = false,
+                VerticalAlignmentRatio = 0,
+                TargetRect = new Windows.Foundation.Rect(0, 0, row.ActualWidth, Math.Max(row.ActualHeight, height)),
+            });
+        });
     }
 
     /// <summary>펼친 원문 (글 상자 또는 문단 목록).</summary>
@@ -176,6 +212,7 @@ public sealed class LegalView : Grid
         StopFrames();   // 앞 항목의 측정은 버린다 (한 번에 하나)
         double last = 0, max = 0;
         int over = 0, samples = 0;
+        var gaps = new List<double>();
         EventHandler<object>? tick = null;
         tick = (_, _) =>
         {
@@ -183,11 +220,12 @@ public sealed class LegalView : Grid
             double gap = now - last;
             last = now;
             samples++;
+            gaps.Add(gap);
             max = Math.Max(max, gap);
-            if (gap > 33) over++;
+            if (gap > NetPulse.Design.Tokens.FrameBudget.Hitch) over++;   // 기존 관측값 (판정은 시험이 주사율 계약으로)
             if (now < 1000) return;
             StopFrames();
-            Frames?.Invoke(index, max, over, samples);
+            Frames?.Invoke(index, max, over, samples, gaps);
         };
         frameTick = tick;
         Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += tick;

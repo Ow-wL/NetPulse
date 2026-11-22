@@ -7,8 +7,9 @@ namespace NetPulse.Core.Demo;
 /// <summary>
 /// 데모 경로·링크 관측 (M4 설계 10절). 모든 대상이 인터페이스 7(유선)을 쓰고, 시나리오의 links 구간에는
 /// 그 어댑터가 내려가고 경로 조회도 실패한다. 실제 Windows를 조회하지 않는다.
+/// 무선 시나리오면 신호도 낸다 (M12 설계 C 데모): 시나리오 signal 구간 값, 없으면 끊긴 동안 연결 안 됨·그 밖 품질 80%·−55 dBm.
 /// </summary>
-public sealed class DemoNetwork(Scenario scenario) : IRouteObserver, ILinkObserver
+public sealed class DemoNetwork(Scenario scenario) : IRouteObserver, ILinkObserver, ISignalSource
 {
     public const int InterfaceIndex = 7;
     public static readonly AdapterInfo Adapter = new("{DEMO-ADAPTER}", InterfaceIndex, "wired", false);
@@ -44,6 +45,12 @@ public sealed class DemoNetwork(Scenario scenario) : IRouteObserver, ILinkObserv
     }
 
     public IReadOnlyList<AdapterInfo> Adapters => watching ? [adapter] : [];
+
+    /// <summary>지금 회차(경로 관측이 적어 둔 것)의 시나리오 신호. 데모 어댑터가 아니거나 무선 시나리오가 아니면 무선 인터페이스가 아니다.</summary>
+    public SignalReading Read(AdapterInfo adapter) =>
+        adapter.Key == this.adapter.Key && scenario.SignalAt(Volatile.Read(ref round)) is { } reading
+            ? reading
+            : new SignalReading(SignalState.Unsupported, null, null, "not-wlan-interface", null);
 
     public void Dispose() { }
 }

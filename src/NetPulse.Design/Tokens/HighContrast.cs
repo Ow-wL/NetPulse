@@ -28,12 +28,14 @@ public sealed record SystemColorSet(
 
     /// <summary>
     /// 고대비 팔레트로 옮긴다. 상태색은 쓰지 않고 본문색으로 (아이콘·글자로 구분). 초점은 강조(Highlight) 바깥 + 바탕 안쪽.
+    /// 보조 글(사이드바 메뉴 포함)은 WindowText다: GrayText는 Windows에서 비활성 글의 색이라, 보조 글에 쓰면 켜진 메뉴가 꺼진 것처럼 보였다 (M11 C3).
+    /// GrayText는 비활성 글(<see cref="Palette.Disabled"/>)에만 쓴다.
     /// </summary>
     public Palette ToPalette() => new(
         Name: "high-contrast-" + Name,
         Bg: Window,
         Ink: WindowText,
-        Muted: GrayText,
+        Muted: WindowText,
         Faint: Window,
         Accent: Highlight,
         AccentInk: HighlightText,
@@ -46,5 +48,5 @@ public sealed record SystemColorSet(
         Edge: WindowText,
         Highlight: Window.WithAlpha(0),
         Scrim: Window.WithAlpha(0.85),
-        Shadow: Window.WithAlpha(0));
+        Shadow: Window.WithAlpha(0)) { DisabledText = GrayText, Signal = Hotlight };
 }

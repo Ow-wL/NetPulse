@@ -29,7 +29,11 @@ public readonly record struct LiveCursor(string SessionId, long Seq);
 /// 커서 뒤의 게시 항목. <see cref="Resync"/>면 커서가 이미 버린 범위를 가리킨다:
 /// 부르는 쪽은 <see cref="LiveFeed.AnalysisInputs"/>로 화면 모델을 다시 만들고 그 <c>At</c>부터 읽는다.
 /// </summary>
-public sealed record LiveDelta(LiveCursor Next, bool Resync, IReadOnlyList<LiveItem> Items, IReadOnlyList<GapSpan> Gaps, LinkLive Links, SessionStatus Status);
+public sealed record LiveDelta(LiveCursor Next, bool Resync, IReadOnlyList<LiveItem> Items, IReadOnlyList<GapSpan> Gaps, LinkLive Links, SessionStatus Status)
+{
+    /// <summary>Wi‑Fi 신호 관측의 지금 상태 (M12 설계 C [1-4]: 실시간 화면은 이벤트가 아니라 이 사본으로 마지막 표본까지 그린다).</summary>
+    public SignalLive Signal { get; init; } = SignalLive.None;
+}
 
 /// <summary>어댑터 하나의 지금까지 직접 관측 (M5 설계 3.2 실시간 링크 근거).</summary>
 /// <param name="FirstMs">지금 상태의 첫 관측</param>
@@ -105,7 +109,11 @@ public static class DirectSummary
 /// <see cref="At"/>·<see cref="ElapsedMs"/>로 그 시점을 식별한다 (같은 범위로 기록을 다시 분석해 비교할 때).
 /// </summary>
 public sealed record AnalysisInputs(RecordHeader Header, IReadOnlyList<RoundData> Rounds, IReadOnlyList<GapSpan> Gaps, IReadOnlyList<JsonObject> Events,
-    LinkLive Links, long ElapsedMs, DateTimeOffset Wall, LiveCursor At, IReadOnlyList<EventRef> EventStates);
+    LinkLive Links, long ElapsedMs, DateTimeOffset Wall, LiveCursor At, IReadOnlyList<EventRef> EventStates)
+{
+    /// <summary>Wi‑Fi 신호 관측의 같은 시점 사본 (M12 설계 C). 이벤트와 같은 잠금 안에서 찍는다. 분석 판정에는 쓰지 않는다 (근거 표시용).</summary>
+    public SignalLive Signal { get; init; } = SignalLive.None;
+}
 
 /// <summary>사본의 이벤트 하나의 ID와 그 커서까지 게시된 쓰기 상태 (<see cref="AnalysisInputs.Events"/>와 같은 순서).</summary>
 public readonly record struct EventRef(string EventId, EventWriteState State);

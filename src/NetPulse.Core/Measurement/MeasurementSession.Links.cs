@@ -53,8 +53,12 @@ public sealed partial class MeasurementSession
     private LinkCapability directCapability = LinkCapability.Unsupported;
     private string? directCode = "not-configured";
 
-    /// <summary>엔진 회차에서: 경로를 보고, 경로가 쓰는 인터페이스를 감시에 넣고, 감시 어댑터를 읽는다.</summary>
-    private sealed class RoutesWithLinks(IRouteObserver? routes, ILinkObserver links, Func<bool> enabled) : IRouteObserver
+    /// <summary>
+    /// 엔진 회차에서: 경로를 보고, 경로가 쓰는 인터페이스를 감시에 넣고, 감시 어댑터를 읽는다.
+    /// 그 다음 <paramref name="signal"/>로 무선 어댑터의 신호를 읽는다 (M12 설계 C [1-4]: 링크 수집과 같은 쪽, 측정 엔진 쓰기 경로 밖).
+    /// </summary>
+    private sealed class RoutesWithLinks(IRouteObserver? routes, ILinkObserver links, Func<bool> enabled,
+        Action<IReadOnlyCollection<int>, IReadOnlyList<AdapterInfo>, long>? signal = null) : IRouteObserver
     {
         public IReadOnlyList<RouteSample> Observe(IReadOnlyList<ProbeTarget> targets, long round)
         {
@@ -65,6 +69,7 @@ public sealed partial class MeasurementSession
                 var used = samples.Where(s => s.Ok && s.InterfaceIndex is not null).Select(s => s.InterfaceIndex!.Value).Distinct().ToArray();
                 if (used.Length > 0) links.Watch(used);
                 links.Poll();
+                signal?.Invoke(used, links.Adapters, round);
             }
             catch (Exception) { /* 관측기 오류가 측정을 멈추지 않게 한다 (그 회차는 관측 범위에서 빠짐) */ }
             return samples;
@@ -146,7 +151,7 @@ public sealed partial class MeasurementSession
         {
             if (!adapterTracks.TryGetValue(item.Sample.Adapter.Key, out track!))
             {
-                track = new AdapterTrack { Alias = "a" + (adapterTracks.Count + 1), Info = item.Sample.Adapter };
+                track = new AdapterTrack { Alias = AliasFor(item.Sample.Adapter), Info = item.Sample.Adapter };   // 신호 트랙과 같은 별칭 (M12 설계 C)
                 adapterTracks[item.Sample.Adapter.Key] = track;
             }
             bool reindexed = track.Info.InterfaceIndex != item.Sample.Adapter.InterfaceIndex;

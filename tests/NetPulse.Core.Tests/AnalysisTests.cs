@@ -326,6 +326,22 @@ public sealed class AnalysisTests
     }
 
     [Fact]
+    public void ConclusionCountsEpisodesLikeTheEpisodeList()
+    {
+        // 외부 단절 → 대상 응답 실패 → 외부 단절이 한 끊김: 외부 단절 하위 구간은 2개지만 결론은 끊김 수(1번)로 센다
+        // (M11 C3: 리포트 최악 예시의 결론 21599번이 요약의 "끊김 19600번"보다 컸다)
+        string router = Ok(100);
+        string a = Ok(10) + "xxxx" + Ok(86);
+        string b = Ok(10) + "x" + Ok(2) + "x" + Ok(86);
+        var r = Analyze(Build(P(router, a, b)));
+        var ep = Assert.Single(r.Episodes);
+        Assert.Equal([Verdict.ExternalOutage, Verdict.TargetFailure, Verdict.ExternalOutage], ep.Parts.Select(p => p.Verdict));
+        Assert.Equal(2, r.Stats.Single(s => s.Verdict == Verdict.ExternalOutage).Count);
+        Assert.Equal("outage", r.Grade.Reason);
+        Assert.StartsWith("인터넷 연결이 1번 끊긴 것으로 보입니다", r.Grade.Sentence);
+    }
+
+    [Fact]
     public void EpisodesBreakOnGapAndHaveOpenEnds()
     {
         var rounds = Build(P("oooooo", "oxxxxo", "oxxxxo"), gapRounds: new HashSet<long> { 3 });

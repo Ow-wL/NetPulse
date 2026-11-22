@@ -115,6 +115,12 @@ public static class Icons
         return box;
     }
 
+    /// <summary><see cref="Make"/>로 만든 아이콘의 선 색을 바꾼다 (비활성 단추·실측 대비 시험의 숨김, M12 설계 F).</summary>
+    public static void SetStroke(FrameworkElement icon, Brush stroke)
+    {
+        if (icon is Viewbox { Child: Canvas canvas } && canvas.Children.Count > 0 && canvas.Children[0] is Path path) path.Stroke = stroke;
+    }
+
     /// <summary>아이콘 경로의 좌표 단위 (24×24 격자)</summary>
     private static double IconCanvas => Space.S6;
 }

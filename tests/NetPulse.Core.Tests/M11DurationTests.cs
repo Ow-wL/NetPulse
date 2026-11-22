@@ -30,4 +30,14 @@ public sealed class M11DurationTests
         var coverage = new Coverage(100, 100, 100, 0, 0, 0, 0, 0);
         Assert.Equal(expected, Sentences.For(Grade.Bad, reason, stats, coverage));
     }
+
+    [Fact]
+    public void ConclusionCountUsesEpisodesWhenGiven()
+    {
+        // 하위 구간 21599개, 그것이 든 끊김 19599번: 결론은 끊김 기준 (M11 C3)
+        VerdictStats[] stats = [new(Verdict.ExternalOutage, 21_599, 1_000, 1_000, 1), new(Verdict.LinkDown, 0, 0, 0, 0)];
+        var coverage = new Coverage(43_200, 43_200, 43_200, 0.5, 0, 0, 0, 0);
+        Assert.Equal("인터넷 연결이 19599번 끊긴 것으로 보입니다 (최장 1초 이상).", Sentences.For(Grade.VeryBad, "outage-many", stats, coverage, 19_599));
+        Assert.Equal("인터넷 연결이 21599번 끊긴 것으로 보입니다 (최장 1초 이상).", Sentences.For(Grade.VeryBad, "outage-many", stats, coverage));
+    }
 }

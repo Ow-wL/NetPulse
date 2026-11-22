@@ -201,6 +201,56 @@ public sealed class AppDriver : IDisposable
         return full.Clone(rect, PixelFormat.Format32bppArgb);
     }
 
+    /// <summary>
+    /// 매트릭스 캡처 전 상태 기반 대기 (M12 설계 G1-B [1-1], 고정 대기 700 ms를 바꿈). 장면의 기대 상태(<c>wait:</c>)는 호출 전에 끝나 있어야 한다.
+    /// 그다음 (2) 앱이 알린 "그리기 끝남"(진단 <c>settle.settled</c>) → (3) 창 캡처 두 번이 같고 그 사이 진단의 settle 값(장면 세대 포함)이 그대로.
+    /// <paramref name="max"/>(기본 700 ms)를 넘으면 그때 찍는다. 돌려준 그림은 호출한 쪽이 버린다.
+    /// </summary>
+    public (Bitmap Shot, SettleResult Wait) WaitSettledAndCapture(TimeSpan? max = null)
+    {
+        var limit = max ?? Settle.MaxWait;
+        var watch = Stopwatch.StartNew();
+        int captures = 0;
+        bool reported = false;
+        Bitmap? previous = null;
+        string? previousKey = null;
+        (bool Present, bool Settled, string Key) Read()
+        {
+            try { return Settle.Read(Diag()); }
+            catch (Exception ex) when (ex is JsonException or ElementNotAvailableException or InvalidOperationException or TimeoutException) { return (false, false, ""); }
+        }
+        try
+        {
+            while (true)
+            {
+                var now = Read();
+                reported |= now.Present;
+                if (!now.Settled) { previous?.Dispose(); previous = null; previousKey = null; }
+                else if (previous is null || now.Key != previousKey)
+                {
+                    previous?.Dispose();
+                    previous = CaptureBitmap(); captures++;
+                    previousKey = now.Key;
+                }
+                else
+                {
+                    var next = CaptureBitmap(); captures++;
+                    var after = Read();
+                    if (after.Settled && after.Key == previousKey && Settle.SameImage(previous, next))
+                        return (next, new SettleResult(true, false, watch.ElapsedMilliseconds, captures, true));
+                    previous.Dispose();
+                    previous = next;
+                    previousKey = after.Settled ? after.Key : null;
+                }
+                if (watch.Elapsed >= limit) break;
+                Thread.Sleep(now.Settled ? Settle.CaptureGap : Settle.Poll);
+            }
+        }
+        finally { previous?.Dispose(); }
+        var shot = CaptureBitmap(); captures++;
+        return (shot, new SettleResult(false, true, watch.ElapsedMilliseconds, captures, reported));
+    }
+
     /// <summary>앱 프로세스의 다른 창 하나(트레이 팝업 메뉴 등)를 그 창만 캡처한다 (PrintWindow, 화면 영역 캡처 아님).</summary>
     public static Bitmap CaptureWindow(IntPtr hwnd, uint flags = 2)
     {
@@ -449,6 +499,13 @@ public sealed class AppDriver : IDisposable
     /// <summary>창이 화면에 보이는가 (Win32 기준, 숨김이면 거짓).</summary>
     public bool WindowVisible => Native.IsWindowVisible(windowHandle);
 
+    /// <summary>창 바깥 크기를 바꾼다 (위치는 그대로, 활성화하지 않음). 끝난 측정의 타임라인이 새 폭을 따라가는지 (M12 설계 A)</summary>
+    public void ResizeWindow(int width, int height)
+    {
+        if (!Native.SetWindowPos(windowHandle, IntPtr.Zero, 0, 0, width, height, 0x0002 | 0x0004 | 0x0010))   // NOMOVE | NOZORDER | NOACTIVATE
+            throw new InvalidOperationException("창 크기를 바꾸지 못했습니다");
+    }
+
     /// <summary>
     /// UI 자동화를 거치지 않고 창에 <c>WM_CLOSE</c>를 보내 닫는다 (M7 이월 4: 닫기 요청 방식 비교). 기다림·판정은 <see cref="Close"/>와 같다.
     /// </summary>
@@ -557,6 +614,7 @@ public sealed class AppDriver : IDisposable
         [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
         [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
         [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+        [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
         [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
         [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
         [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);

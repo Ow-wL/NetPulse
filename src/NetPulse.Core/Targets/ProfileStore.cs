@@ -59,7 +59,7 @@ public static class ProfileStore
         foreach (var p in set.Profiles)
         {
             var errors = ProfileValidator.Validate(p).Where(i => i.Severity == IssueSeverity.Error).Select(i => i.Code).ToArray();
-            if (errors.Length > 0) throw new ArgumentException($"프로필 '{p.Id}' 오류: {string.Join(", ", errors)}", nameof(set));
+            if (errors.Length > 0) throw new ArgumentException($"측정 구성 '{p.Id}' 오류: {string.Join(", ", errors)}", nameof(set));
         }
         Directory.CreateDirectory(folder);
         var path = Path.Combine(folder, FileName);

@@ -52,9 +52,9 @@ public static class RecordLocator
         }
 
         var notices = new List<string>();
-        if (differing > 0) notices.Add($"머리가 다른 조각 {differing}개를 뺐습니다.");
+        if (differing > 0) notices.Add($"기본 정보가 다른 조각 {differing}개를 뺐습니다.");
         if (duplicates > 0) notices.Add($"같은 조각이 여러 곳에 있어 고른 위치에 가까운 쪽을 읽었습니다 ({duplicates}개).");
-        notices.Add($"찾은 조각 {bySegment.Count}개만 읽었습니다 (끝 기록이 없으면 뒤쪽 조각이 더 있을 수 있습니다).");
+        notices.Add($"찾은 조각 {bySegment.Count}개만 읽었습니다 (정상 종료 기록이 없으면 뒤쪽 조각이 더 있을 수 있습니다).");
         return new ExternalFind(header.Id, bySegment.Values.ToArray(), notices, null);
     }
 
@@ -69,7 +69,7 @@ public static class RecordLocator
         try
         {
             var path = Path.Combine(folder, "measurement.json");
-            if (!File.Exists(path)) return (null, "NetPulse 기록 형식이 아닙니다 (측정 머리 파일이 없음).");
+            if (!File.Exists(path)) return (null, "NetPulse 기록 형식이 아닙니다 (기록의 기본 정보 파일이 없음).");
             var (h, unsupported) = RecordSchema.ParseHeader(RecordReader.ReadShared(path));
             if (unsupported) return (null, "이 앱이 모르는 기록 형식 버전입니다.");
             return h is null ? (null, "NetPulse 기록 형식이 아닙니다.") : (h, null);

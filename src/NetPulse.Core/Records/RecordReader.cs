@@ -72,7 +72,7 @@ public static class RecordReader
         }
         if (headers.Count == 0)
             return unsupported ? Fail(RecordStatus.Unsupported, "지원하지 않는 기록 형식입니다.", empty)
-                : Fail(RecordStatus.Unreadable, "measurement.json이 없거나 읽을 수 없습니다.", empty);
+                : Fail(RecordStatus.Unreadable, "기록의 기본 정보 파일이 없거나 읽을 수 없습니다.", empty);
         if (headers.Select(h => h.Header.Id).Distinct().Count() > 1) return Fail(RecordStatus.Unreadable, "서로 다른 측정의 조각이 섞여 있습니다.", empty);
         // 같은 조각 번호가 둘이면 앞의 것만 쓴다
         var ordered = headers.GroupBy(h => h.Header.Segment).Select(g => g.First()).OrderBy(h => h.Header.Segment).ToArray();

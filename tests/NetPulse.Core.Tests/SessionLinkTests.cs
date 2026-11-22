@@ -75,7 +75,14 @@ public sealed class SessionLinkTests : IDisposable
 
     private static async Task Rounds(ManualClock clock, MeasurementSession s, int count)
     {
-        for (int i = 0; i < count; i++) await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));
+        // 넘길 때마다 관측이 따라오기를 기다린다 (M12 설계 G3): 80회차를 한꺼번에 넘기고 끝에서 5초 기다리면 느린 CI 실행기에서
+        // 관측이 밀려 시간 초과가 났다 (M11 병합 뒤 main CI, LiveLinkStateCarriesAnOngoingDownIntoTheProvisionalAnalysis). 밀림을 한 회차로 묶는다
+        for (int i = 0; i < count; i++)
+        {
+            await AdvanceWhenWaiting(clock, TimeSpan.FromSeconds(1));
+            long due = (long)clock.Elapsed.TotalSeconds;
+            await Eventually(() => s.Status.Observed >= due, $"관측 따라옴 {due}");
+        }
         long target = (long)clock.Elapsed.TotalSeconds;
         await Eventually(() => s.Engine.State.Latest?.Tick.Index >= target, $"엔진 회차 {target}");
         await Eventually(() => s.Status.Observed >= target + 1, "관측");

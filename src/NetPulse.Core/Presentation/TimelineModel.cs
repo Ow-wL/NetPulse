@@ -33,7 +33,11 @@ public sealed record TimelineFrame(
     long FromMs, long ToMs, double AxisMaxMs,
     IReadOnlyList<IReadOnlyList<TimelinePoint>> Router, IReadOnlyList<IReadOnlyList<TimelinePoint>> Internet,
     IReadOnlyList<TimelineBand> Bands, IReadOnlyList<SymptomMark> Marks, IReadOnlyList<LinkDownView> LinkDowns,
-    string Summary);
+    string Summary)
+{
+    /// <summary>Wi‑Fi 신호 장면 (M12 설계 C 표시). 신호가 관측되지 않은 측정은 <see cref="SignalFrame.None"/>.</summary>
+    public SignalFrame Signal { get; init; } = SignalFrame.None;
+}
 
 /// <summary>
 /// 겹침 타임라인의 값 (M5 설계 3.5, N1). 순수 계산: 화면은 이것을 그리기만 한다.
@@ -154,10 +158,13 @@ public static class TimelineModel
         return false;
     }
 
-    /// <summary>보기 창 하나의 장면. <paramref name="columns"/>는 그래프 폭(픽셀). 점은 계열마다 열 수의 두 배를 넘지 않는다.</summary>
+    /// <summary>
+    /// 보기 창 하나의 장면. <paramref name="columns"/>는 그래프 폭(픽셀, 신호 축 여백을 뺀 것). 점은 계열마다 열 수의 두 배를 넘지 않는다.
+    /// <paramref name="signal"/>이 있으면 같은 창·열 수로 신호 장면을 붙이고 요약에 관측을 더한다 (M12 설계 C).
+    /// </summary>
     public static TimelineFrame Frame(IReadOnlyList<RoundData> rounds, IReadOnlyList<Target> targets, IReadOnlyList<GapSpan> gaps,
         IReadOnlyList<SymptomMark> marks, IReadOnlyList<LinkDownView> linkDowns, IReadOnlyList<TimelineBand> bands,
-        long fromMs, long toMs, int columns, long intervalMs, string windowLabel, RepresentativeCache? cache = null)
+        long fromMs, long toMs, int columns, long intervalMs, string windowLabel, RepresentativeCache? cache = null, SignalTrace? signal = null)
     {
         if (toMs <= fromMs) toMs = fromMs + 1;
         columns = Math.Max(1, columns);
@@ -189,8 +196,9 @@ public static class TimelineModel
         var visibleBands = bands.Where(b => b.ToMs > fromMs && b.FromMs < toMs).ToArray();
         var visibleMarks = marks.Where(m => m.AtMs >= fromMs && m.AtMs <= toMs).ToArray();
         var visibleDowns = linkDowns.Where(d => d.ToMs >= fromMs && d.FromMs <= toMs).ToArray();
+        var signalFrame = signal is null ? SignalFrame.None : SignalTimeline.Frame(signal, fromMs, toMs, columns);
         return new TimelineFrame(fromMs, toMs, axis, router, internet, visibleBands, visibleMarks, visibleDowns,
-            Summarize(windowLabel, visibleBands, visibleMarks.Length, visibleDowns));
+            Summarize(windowLabel, visibleBands, visibleMarks.Length, visibleDowns) + SignalTimeline.Describe(signalFrame)) { Signal = signalFrame };
     }
 
     /// <summary>

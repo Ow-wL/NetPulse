@@ -28,11 +28,12 @@ public sealed record BackgroundRange(Rgba Low, Rgba High, int VertexCount)
         return new BackgroundRange(new Rgba(rMin, gMin, bMin), new Rgba(rMax, gMax, bMax), count);
     }
 
-    /// <summary>테마·상태·오로라에 따른 배경 범위.</summary>
+    /// <summary>테마·상태·오로라에 따른 배경 범위. 흑요석 결(맨 위 층, M12 설계 E)은 늘 넣는다 (보이지 않는 불투명 모드에서도 보수적으로).</summary>
     public static BackgroundRange For(ThemeKind theme, bool problem, bool aurora)
     {
         var layers = new List<LightSource>(Materials.Lights(theme, problem));
         if (aurora) layers.AddRange(Materials.Aurora(theme));
+        layers.Add(Materials.GrainLayer(theme));
         return From(Palette.For(theme).Bg, layers);
     }
 

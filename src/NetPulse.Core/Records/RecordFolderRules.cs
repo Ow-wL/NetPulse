@@ -28,7 +28,7 @@ public static partial class RecordFolderRules
         try { full = Trim(Path.GetFullPath(destination)); }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return "폴더 경로를 읽지 못했습니다."; }
         if (!Directory.Exists(full)) return "폴더를 찾을 수 없습니다.";
-        if (HasReparsePoint(full)) return "바로 가기 연결(정션·심볼릭 링크)이 걸린 폴더는 쓸 수 없습니다.";
+        if (HasReparsePoint(full)) return "연결 폴더(정션·심볼릭 링크)가 걸린 폴더는 쓸 수 없습니다.";
         string real = Trim(resolve(full) ?? full);
         string R(string p) => Trim(resolve(p) ?? SafeFull(p));
         string current = R(known.Current), def = R(known.Default), fallback = R(known.Fallback), userData = R(known.UserData);
@@ -53,9 +53,9 @@ public static partial class RecordFolderRules
             // 기본 위치는 사용자 폴더 안이 정상: 기본 위치로 되돌리기와, 기본 위치로 되돌리다 끊긴 뒤의 다시 옮기기 (G4 M9 1라운드 a5)
             if ((kind is MoveKind.Default or MoveKind.Retry) && isDefault && Same(p, userData)) continue;
             if (kind == MoveKind.Retry && isCurrent && Same(p, current)) continue;
-            if (Same(real, p)) return $"{name}와(과) 같은 폴더입니다.";
+            if (Same(real, p)) return $"{name}와 같은 폴더입니다.";   // 이름이 모두 받침 없는 말(위치·폴더)로 끝난다
             if (Inside(real, p)) return $"{name} 안의 폴더는 쓸 수 없습니다.";
-            if (Inside(p, real)) return $"{name}를 품은 폴더는 쓸 수 없습니다.";
+            if (Inside(p, real)) return $"{name}를 포함하는 폴더는 쓸 수 없습니다.";
         }
         if (real.Length + 1 + longestRelative >= PathLimit) return "경로가 너무 깁니다. 더 짧은 위치를 고르세요.";
         if (!Writable(real)) return "이 폴더에 쓸 수 없습니다.";

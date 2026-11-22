@@ -15,6 +15,10 @@ public sealed class MotionHandle
     private readonly Action stop;
     internal MotionHandle(MotionKind kind, Action stop) { Kind = kind; this.stop = stop; }
     public MotionKind Kind { get; }
+    /// <summary>끝나는 모션 (한 번 돌거나 횟수가 정해진 반복). 끝없는 반복은 거짓 (M12 G1-B "그리기 끝남").</summary>
+    internal bool Finite { get; init; }
+    /// <summary>시험 진행도 고정(<see cref="Motion.HoldAt"/>)으로 멈춘 모션. 일부러 멈춘 것이라 "그리기 끝남"에서 세지 않는다.</summary>
+    internal bool Held { get; set; }
     internal void Stop() => stop();
 }
 
@@ -54,6 +58,16 @@ public sealed class Motion
         Enum.GetValues<MotionKind>().ToDictionary(k => k, k => active.Count(h => h.Kind == k));
 
     public IReadOnlyDictionary<MotionKind, int> CreatedByKind => created;
+
+    /// <summary>
+    /// 지금 도는 끝나는 모션 수 (M12 설계 G1-B [2-4]): 종류가 아니라 유한/무한·고정 여부로 센다.
+    /// 횟수가 정해진 깜빡임(<see cref="MotionKind.Repeat"/>)은 세고, 끝없는 반복과 진행도 고정으로 멈춘 모션은 세지 않는다.
+    /// 등록(<c>Run</c>)할 때 늘고 끝·취소·화면 이탈(<c>Finish</c>)로 핸들이 빠질 때 준다.
+    /// </summary>
+    public int FiniteRunning => active.Count(h => h.Finite && !h.Held);
+
+    /// <summary>진행도 고정으로 멈춰 있는 모션 수 (진단, "그리기 끝남"에서 빼는 것).</summary>
+    public int HeldRunning => active.Count(h => h.Held);
 
     /// <summary>움직임 줄이기 켜고 끄기. 켜는 순간 활성 모션을 모두 멈춘다. 끄면 반복형은 소유자가 다시 시작한다 (ReduceChanged).</summary>
     public void SetReduced(bool value)
@@ -301,7 +315,7 @@ public sealed class Motion
             final();
             if (handle is not null && active.Remove(handle)) ActiveChanged?.Invoke();
         }
-        handle = new MotionHandle(kind, Finish);
+        handle = new MotionHandle(kind, Finish) { Finite = !forever };
         active.Add(handle);
         ActiveChanged?.Invoke();
         var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
@@ -312,7 +326,7 @@ public sealed class Motion
         {
             // 캡처용: 화면 전환 등 한 번 도는 모션을 이 진행도에서 멈춘다 (M5 G5 전환 장면)
             foreach (var prop in second is { } s2 ? new[] { first.Property, s2.Property } : [first.Property])
-                if (visual.TryGetAnimationController(prop) is { } controller) { controller.Pause(); controller.Progress = (float)p; }
+                if (visual.TryGetAnimationController(prop) is { } controller) { controller.Pause(); controller.Progress = (float)p; handle.Held = true; }
         }
         // 끝없는 반복은 끝나지 않는다. 한 번 돌거나 횟수가 정해진 것은 끝나면 최종 상태로 정리하고 해제한다.
         batch.Completed += (_, _) => owner.DispatcherQueue?.TryEnqueue(() => { if (!forever) Finish(); });

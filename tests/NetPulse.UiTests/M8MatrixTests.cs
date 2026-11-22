@@ -28,14 +28,14 @@ public sealed class M8MatrixTests
         var scene = M5MatrixTests.Scenes("m8-scenes.txt").Single(s => s.Id == id);
         using var app = M5MatrixTests.Open(scene, "--theme", theme, "--ui-scale", scale);
         if (!id.Contains("confirm", StringComparison.Ordinal)) app.CloseToasts();
-        Thread.Sleep(700);
-        using var shot = app.CaptureBitmap();
+        var (settledShot, shotWait) = app.WaitSettledAndCapture();   // 고정 대기 대신 상태 기반 대기 (M12 G1-B)
+        using var shot = settledShot;
         string name = $"m8-{id}-{theme}-{(scale == "1" ? "100" : "150")}";
         var path = app.Save(shot, "matrix-" + name);
         var problems = M5MatrixTests.LayoutProblems(app.LayoutNow());
         var diag = app.Diag();
         File.WriteAllText(Path.Combine(G5Dir, "matrix-" + name + ".json"), JsonSerializer.Serialize(
-            new { name, scene = id, theme, scale, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, layoutProblems = problems, diag },
+            new { name, scene = id, theme, scale, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, captureWait = shotWait.Json, layoutProblems = problems, diag },
             new JsonSerializerOptions { WriteIndented = true }));
         Assert.Equal((Size.WindowWidth, Size.WindowHeight), (shot.Width, shot.Height));
         Assert.True(problems.Count == 0, string.Join("\n", problems));

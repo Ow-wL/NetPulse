@@ -26,6 +26,8 @@ public sealed class ReportScreen : Screen
     private readonly TextBlock pickedText, statusText;
     private readonly GroupPanel optionsCard, previewCard;
     private readonly StackPanel statusArea = new() { Spacing = Space.S3 };
+    /// <summary>내보냄·내보내기 실패·만들기 실패 안내: 옵션 카드 위, 머리의 [내보내기] 단추 바로 아래 (150%에서 첫 화면 아래로 밀렸다, M11 C3).</summary>
+    private readonly StackPanel noticeArea = new() { Spacing = Space.S3 };
     private StackPanel paperStack = new() { Spacing = Space.S6 };
     private readonly Grid paperHost = new();
     private readonly StackPanel messageHost = new() { Spacing = Space.S5 };
@@ -119,6 +121,7 @@ public sealed class ReportScreen : Screen
         previewStack.Children.Add(paperGroup);
         previewCard.Children.Add(previewStack);
 
+        content.Children.Add(noticeArea);
         content.Children.Add(optionsCard);
         content.Children.Add(statusArea);
         content.Children.Add(body);
@@ -185,6 +188,12 @@ public sealed class ReportScreen : Screen
     }
 
     public override int FrameHooks => (drawing is null ? 0 : 1) + (clearing is null ? 0 : 1);
+
+    /// <summary>"그리기 끝남" (M12 설계 G1-B): 종이 면 그리기·지난 종이 면 떼기가 프레임에 걸려 있는 동안 (숨김으로 멈춘 그리기는 보이지 않으니 뺀다).</summary>
+    public override int PendingDraws => FrameHooks;
+
+    /// <summary>종이 면을 새로 그릴 때마다 오른다.</summary>
+    public override int SceneGeneration => drawGen;
 
     private EventHandler<object>? drawing, clearing;
     private Panel? clearingOld;
@@ -349,6 +358,7 @@ public sealed class ReportScreen : Screen
         // 옵션 카드는 빼지 않는다: 빼고 다시 넣으면 그 안의 초점(가리기 단추 등)이 탐색 막대로 튀었다 (M8 G5 캡처)
         messageHost.Children.Clear();
         statusArea.Children.Clear();
+        noticeArea.Children.Clear();
         var list = Candidates();
         bool listed = Context.Records.Listed;
         if (listed && list.Count == 0)
@@ -390,17 +400,17 @@ public sealed class ReportScreen : Screen
         AutomationProperties.SetName(statusText, statusText.Text);
 
         if (!options.Masked) statusArea.Children.Add(new Banner(Ui, "report.unmasked", BannerKind.Warn, ReportTexts.UnmaskedNote));
-        if (lastExport is { } done) statusArea.Children.Add(ExportBanner(done));
+        if (lastExport is { } done) noticeArea.Children.Add(ExportBanner(done));
 
         if (state == ReportState.Failed)
         {
-            messageHost.Children.Add(ErrorCard("report.failed", "리포트를 만들지 못했습니다", FailureText(requests.Failure), records: true));
+            noticeArea.Children.Add(ErrorCard("report.failed", "리포트를 만들지 못했습니다", FailureText(requests.Failure), records: true));
             previewCard.Visibility = Visibility.Collapsed;
             ClearPaper();
         }
         else if (leakKinds.Count > 0)
         {
-            messageHost.Children.Add(ErrorCard("report.redaction", "식별 정보가 남아 있어 내보내지 않았습니다",
+            noticeArea.Children.Add(ErrorCard("report.redaction", "식별 정보가 남아 있어 내보내지 않았습니다",
                 $"가린 리포트에서 원본 값이 발견됐습니다 ({string.Join(", ", leakKinds)}). 다시 만들어 보세요.", records: false));
             previewCard.Visibility = Visibility.Collapsed;
             ClearPaper();
@@ -426,7 +436,7 @@ public sealed class ReportScreen : Screen
     {
         var when = i.Entry.StartedAt is { } st ? st.ToLocalTime().ToString("M월 d일 tt h:mm", ScreenParts.Ko) : "시작 시각 없음";
         var grade = i.Summary.Grade is { } g ? " · 등급 " + NetPulse.Core.Analysis.Sentences.GradeName(g) : "";
-        var life = i.Entry.Lifecycle == RecordLifecycle.NoSummary ? " · 끝 기록 없음" : "";
+        var life = i.Entry.Lifecycle == RecordLifecycle.NoSummary ? " · 정상 종료 기록 없음" : "";
         return $"측정: {when} · {RecordView.TargetsSummary(i.Entry.Targets)}{grade}{life}";
     }
 
@@ -469,7 +479,7 @@ public sealed class ReportScreen : Screen
         }
         stack.Children.Add(row);
         body.Set(stack, "error");
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { if (retry.IsLoaded) retry.Focus(FocusState.Programmatic); });
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => ScreenParts.FocusWhenReady(retry, this, () => true));
         return card;
     }
 
@@ -520,6 +530,7 @@ public sealed class ReportScreen : Screen
             Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFrame;
             if (ReferenceEquals(clearing, (EventHandler<object>)OnFrame)) { clearing = null; clearingOld = null; }
             paperHost.Children.Remove(old);
+            Context.QueueDiag();   // 예약된 그리기가 줄었다 (M12 G1-B "그리기 끝남")
         }
         if (clearing is { } previous)
         {
@@ -707,7 +718,7 @@ public sealed class ReportScreen : Screen
         Rerender();
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
-            if (leakKinds.Count == 0 && exportButton.IsLoaded) exportButton.Focus(FocusState.Programmatic);
+            if (leakKinds.Count == 0) ScreenParts.FocusWhenReady(exportButton, this, () => leakKinds.Count == 0 && !exporting && !Suspended);
         });
     }
 

@@ -4,15 +4,26 @@ using NetPulse.Design.Tokens;
 
 namespace NetPulse.App.Design;
 
-/// <summary>구간 하나의 프레임 간격 통계 (ms).</summary>
-public sealed record FrameStats(string Segment, int Samples, double Seconds, double P50, double P95, double Max, int Over33)
+/// <summary>
+/// 구간 하나의 프레임 간격 통계 (ms). M12 설계 G2: 구간을 잰 모니터의 주사율(표시 설정 값)과 출처, 그 주사율의 "긴 간격"
+/// (dt &gt; max(33, 2.5T)) 횟수, 관측용 추정 놓침(dt &gt; 1.5T) 수를 함께 남긴다. 기존 <see cref="Over33"/>도 관측으로 남는다.
+/// 주사율을 읽지 못했거나 구간 중에 바뀌었으면 <see cref="Hz"/>가 null이거나 <see cref="RefreshChanged"/>가 참이고, 시험은 실패로 본다.
+/// </summary>
+public sealed record FrameStats(string Segment, int Samples, double Seconds, double P50, double P95, double Max, int Over33,
+    double? Hz = null, string? RefreshSource = null, bool RefreshChanged = false, double? LongGapMs = null, int LongGaps = 0, int Missed = 0)
 {
-    public static FrameStats From(string segment, IReadOnlyList<double> intervals, double seconds)
+    public static FrameStats From(string segment, IReadOnlyList<double> intervals, double seconds, RefreshInfo? refresh = null, bool refreshChanged = false)
     {
-        if (intervals.Count == 0) return new FrameStats(segment, 0, seconds, 0, 0, 0, 0);
+        double? hz = refresh?.Hz;
+        double? longGap = hz is { } h ? Math.Round(FrameContract.LongGap(h), 2) : null;
+        double? missed = hz is { } m ? FrameContract.Missed(m) : null;
+        if (intervals.Count == 0) return new FrameStats(segment, 0, seconds, 0, 0, 0, 0, hz, refresh?.Source, refreshChanged, longGap);
         var s = intervals.OrderBy(x => x).ToArray();
         double Pct(double p) => s[Math.Min(s.Length - 1, (int)(s.Length * p))];
-        return new FrameStats(segment, s.Length, Math.Round(seconds, 2), Math.Round(Pct(0.5), 2), Math.Round(Pct(0.95), 2), Math.Round(s[^1], 2), s.Count(x => x > FrameBudget.Hitch));
+        return new FrameStats(segment, s.Length, Math.Round(seconds, 2), Math.Round(Pct(0.5), 2), Math.Round(Pct(0.95), 2), Math.Round(s[^1], 2), s.Count(x => x > FrameBudget.Hitch),
+            hz, refresh?.Source, refreshChanged, longGap,
+            longGap is { } lg ? s.Count(x => x > FrameContract.LongGap(hz!.Value)) : 0,
+            missed is { } mi ? s.Count(x => x > mi) : 0);
     }
 }
 
@@ -27,9 +38,13 @@ public sealed class FramePacer
     private readonly Stopwatch clock = Stopwatch.StartNew();
     private readonly Func<bool> paused;
     private readonly Action<bool> setLow;
+    private readonly Func<RefreshInfo> refresh;
     private double last = -1;
     private List<double>? segment;
     private double segmentStart;
+    // 구간의 직전 시각 (M12 설계 G2: 첫 간격은 구간 시작부터 잰다. 전에는 구간 시작 전 콜백부터 재 앞 시간이 섞였다)
+    private double segmentLast;
+    private RefreshInfo? segmentRefresh;
     private readonly List<double> window = [];
     private double windowStart;
     private int overWindows;
@@ -38,10 +53,11 @@ public sealed class FramePacer
     private double lastSwitch = double.NegativeInfinity;
     private bool low;
 
-    public FramePacer(Func<bool> paused, Action<bool> setLow)
+    public FramePacer(Func<bool> paused, Action<bool> setLow, Func<RefreshInfo>? refresh = null)
     {
         this.paused = paused;
         this.setLow = setLow;
+        this.refresh = refresh ?? (() => new RefreshInfo(null, "not-queried", null));
         CompositionTarget.Rendering += OnRendering;
     }
 
@@ -52,16 +68,29 @@ public sealed class FramePacer
 
     public void BeginSegment()
     {
+        segmentRefresh = refresh();
         segment = [];
         segmentStart = clock.Elapsed.TotalSeconds;
+        segmentLast = clock.Elapsed.TotalMilliseconds;
     }
 
+    /// <summary>
+    /// 구간을 끝낸다. 마지막 콜백부터 끝까지의 시간도 한 표본으로 넣는다 (끝에서 멈춘 것이 빠지지 않게, M12 설계 G2).
+    /// 끝에서 주사율을 다시 읽어 시작과 다르면 표시한다.
+    /// </summary>
     public FrameStats EndSegment(string name)
     {
         var s = segment ?? [];
         segment = null;
-        return FrameStats.From(name, s, clock.Elapsed.TotalSeconds - segmentStart);
+        double now = clock.Elapsed.TotalMilliseconds;
+        if (now > segmentLast) s.Add(now - segmentLast);
+        var end = refresh();
+        bool changed = segmentRefresh?.Hz != end.Hz || segmentRefresh?.Monitor != end.Monitor;
+        return FrameStats.From(name, s, clock.Elapsed.TotalSeconds - segmentStart, segmentRefresh, changed);
     }
+
+    /// <summary>지금 창의 모니터 주사율 (앱 기록·고지 bench용).</summary>
+    public RefreshInfo Refresh() => refresh();
 
     /// <summary>지금 구간에 쌓인 표본 수와, 그 위치부터의 최대 간격 (bench가 단계별로 어디서 튀는지 본다).</summary>
     public int SegmentSamples => segment?.Count ?? 0;
@@ -95,10 +124,10 @@ public sealed class FramePacer
     private void OnRendering(object? sender, object e)
     {
         double now = clock.Elapsed.TotalMilliseconds;
+        if (segment is not null) { segment.Add(now - segmentLast); segmentLast = now; }   // 구간은 시작 시각부터 (다시 열린 뒤 첫 콜백 포함)
         if (last >= 0)
         {
             double dt = now - last;
-            segment?.Add(dt);
             if (!paused() && now >= suspendedUntil) Track(now, dt);
             else { window.Clear(); windowStart = now; }
         }

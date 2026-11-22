@@ -147,7 +147,7 @@ public sealed class M6FlowTests
             Assert.Equal(["Tcp", "Dns", "Https"], Sd(first).GetProperty("changes").EnumerateArray().Select(e => e.GetString()));
             app.Invoke("diagnose.start");
             var second = WaitRun(app, S(first, "saved"));
-            Assert.Equal("지난 검사와 같습니다.", S(second, "compare"));
+            Assert.Equal("지난 진단과 같습니다.", S(second, "compare"));
             Assert.Equal(0, Sd(second).GetProperty("changes").GetArrayLength());
             Assert.Equal(0, app.Close());
         }
@@ -235,7 +235,8 @@ public sealed class M6FlowTests
         var userData = AppDriver.NewUserData();
         try
         {
-            using var app = Open(userData, "profile", "--demo tests:diag-ok --screen diagnose");
+            // diag-site-hold: diag-ok + HTTPS 제한 15초. 기본 4.5초는 노트북에서 진행 중 Enter가 닿기 전에 끝났다 (M12 노트북 중간 확인)
+            using var app = Open(userData, "profile", "--demo tests:diag-site-hold --screen diagnose");
             app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "diagnose", "진단 화면");
             app.SetText("diagnose.site.input", "slow.example");
             app.Invoke("diagnose.site.run");

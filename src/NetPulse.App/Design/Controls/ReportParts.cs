@@ -15,9 +15,12 @@ namespace NetPulse.App.Design.Controls;
 /// </summary>
 public sealed record ReportLook(Brush Paper, Brush Head, Brush Ink, Brush Muted, Brush Accent, Brush Bad, Brush Warn, Brush Edge, Brush BadSoft, Brush Link, Brush Mark)
 {
-    public static ReportLook Document(DocumentBrushes d) => new(d.Paper, d.Bg, d.Ink, d.Muted, d.Accent, d.Bad, d.Warn, d.Edge, d.BadSoft, d.Link, d.Mark);
+    public static ReportLook Document(DocumentBrushes d) => new(d.Paper, d.Bg, d.Ink, d.Muted, d.Accent, d.Bad, d.Warn, d.Edge, d.BadSoft, d.Link, d.Mark) { Signal = d.Signal };
 
-    public static ReportLook System(TokenBrushes b) => new(b.Bg, b.Bg, b.Ink, b.Muted, b.Accent, b.Bad, b.Warn, b.Edge, b.Bg, b.Ink, b.Ok);
+    public static ReportLook System(TokenBrushes b) => new(b.Bg, b.Bg, b.Ink, b.Muted, b.Accent, b.Bad, b.Warn, b.Edge, b.Bg, b.Ink, b.Ok) { Signal = b.Signal };
+
+    /// <summary>Wi‑Fi 신호 품질 선 (M12 설계 C). 고대비에서는 시스템 색(Hotlight).</summary>
+    public Brush? Signal { get; init; }
 }
 
 /// <summary>
@@ -260,9 +263,9 @@ public static class ReportParts
             Canvas.SetTop(e, y);
             canvas.Children.Add(e);
         }
-        Place(new Rectangle { Width = TimelineFigure.Columns, Height = TimelineFigure.PlotHeight, Stroke = look.Edge, StrokeThickness = Size.Hairline }, TimelineFigure.PlotLeft, TimelineFigure.PlotTop);
+        Place(new Rectangle { Width = f.PlotColumns, Height = TimelineFigure.PlotHeight, Stroke = look.Edge, StrokeThickness = Size.Hairline }, TimelineFigure.PlotLeft, TimelineFigure.PlotTop);
         foreach (var v in f.ValueTicks)
-            Place(new Line { X1 = 0, Y1 = 0, X2 = TimelineFigure.Columns, Y2 = 0, Stroke = look.Edge, StrokeThickness = Size.Hairline }, TimelineFigure.PlotLeft, f.Y(v));
+            Place(new Line { X1 = 0, Y1 = 0, X2 = f.PlotColumns, Y2 = 0, Stroke = look.Edge, StrokeThickness = Size.Hairline }, TimelineFigure.PlotLeft, f.Y(v));
         foreach (var b in f.Bands)
         {
             Place(BandShape(b.Kind, b.ToColumn - b.FromColumn, look), TimelineFigure.Left(b.FromColumn), BandTop(b.Kind));
@@ -288,6 +291,19 @@ public static class ReportParts
         }
         Lines(f.Router, look.Muted, true);
         Lines(f.Internet, look.Accent, false);
+        // Wi‑Fi 신호 품질 (오른쪽 축, 점선) 과 무선 어댑터 바뀜 (위쪽 짧은 막대): SVG와 같은 투영 (M12 설계 C)
+        var signalBrush = look.Signal ?? look.Accent;
+        foreach (var seg in f.Signal)
+        {
+            if (seg.Count == 0) continue;
+            var line = new Polyline { Stroke = signalBrush, StrokeThickness = ChartStyle.SignalLine, StrokeDashArray = new DoubleCollection { ChartStyle.SignalDotOn, ChartStyle.SignalDotOff },
+                StrokeDashCap = PenLineCap.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
+            foreach (var p in seg) line.Points.Add(new Point(TimelineFigure.X(p.Column), TimelineFigure.SignalY(p.ValueMs)));
+            if (seg.Count == 1) line.Points.Add(new Point(TimelineFigure.X(seg[0].Column) + ChartStyle.SignalLine, TimelineFigure.SignalY(seg[0].ValueMs)));
+            canvas.Children.Add(line);
+        }
+        foreach (var c in f.SignalChanges)
+            Place(new Rectangle { Width = ChartStyle.SignalChange, Height = Size.TimelineLane, Fill = signalBrush }, TimelineFigure.X(c) - ChartStyle.SignalChange / 2, TimelineFigure.PlotTop);
         foreach (var m in f.Marks)
             Place(new Line { X1 = 0, Y1 = 0, X2 = 0, Y2 = TimelineFigure.PlotHeight, Stroke = look.Mark, StrokeThickness = m.Count > 1 ? ChartStyle.Line : Size.Hairline },
                 TimelineFigure.X(m.Column), TimelineFigure.PlotTop);
@@ -298,14 +314,19 @@ public static class ReportParts
             t.TextAlignment = TextAlignment.Right;
             Place(t, 0, f.Y(v) - Space.S2);
         }
+        if (f.SignalLine)
+            for (int i = 0; i < TimelineFigure.SignalAxisLabels.Length; i++)
+                Place(Fonts.Text(TimelineFigure.SignalAxisLabels[i], Typography.Caption, look.Muted), f.SignalAxisX, TimelineFigure.SignalY(i == 0 ? NetPulse.Core.Presentation.TimelineGeometry.QualityMax : 0) - Space.S2);
         foreach (var tick in f.TimeTicks)
         {
             var t = Fonts.Text(tick.Label, Typography.Caption, look.Muted);
             t.Width = Space.S8 + Space.S8;
-            t.TextAlignment = TimelineFigure.AtRightEdge(tick) ? TextAlignment.Right : TextAlignment.Center;
-            Place(t, TimelineFigure.X(tick.Column) - (TimelineFigure.AtRightEdge(tick) ? t.Width : t.Width / 2), TimelineFigure.TickTextY - Space.S2);
+            bool right = TimelineFigure.AtRightEdge(tick, f.PlotColumns);
+            t.TextAlignment = right ? TextAlignment.Right : TextAlignment.Center;
+            Place(t, TimelineFigure.X(tick.Column) - (right ? t.Width : t.Width / 2), TimelineFigure.TickTextY - Space.S2);
         }
-        for (int i = 0; i < TimelineFigure.LegendLabels.Length; i++)
+        var legend = f.Legend;
+        for (int i = 0; i < legend.Count; i++)
         {
             double x = TimelineFigure.PlotLeft + i % TimelineFigure.LegendPerRow * TimelineFigure.LegendStep,
                 y = TimelineFigure.LegendY + i / TimelineFigure.LegendPerRow * TimelineFigure.LegendRowHeight;
@@ -316,12 +337,16 @@ public static class ReportParts
                 3 => BandShape(FigureBandKind.PartialNone, Space.S3, look, Space.S3),
                 4 => BandShape(FigureBandKind.LinkDown, Space.S3, look, Space.S3),
                 5 => BandShape(FigureBandKind.Gap, Space.S3, look, Space.S3),
-                _ => new Rectangle { Width = Space.S3, Height = Space.S3, Fill = i switch { 0 => look.Accent, 1 => look.Muted, _ => look.Mark }, Stroke = look.Edge, StrokeThickness = Size.Hairline },
+                _ => new Rectangle { Width = Space.S3, Height = Space.S3, Fill = i switch { 0 => look.Accent, 1 => look.Muted, 6 => look.Mark, _ => signalBrush }, Stroke = look.Edge, StrokeThickness = Size.Hairline },
             };
-            var box = new Grid { Width = Space.S3, Height = Space.S3 };
-            box.Children.Add(swatch);
-            Place(box, x, y - Space.S3);
-            Place(Fonts.Text(TimelineFigure.LegendLabels[i], Typography.Caption, look.Ink), x + Space.S4, y - Space.S4);
+            // 신호 상태 글(값 없음)은 견본 없이 글만 (SVG와 같음)
+            if (i < TimelineFigure.LegendLabels.Length || f.SignalLine)
+            {
+                var box = new Grid { Width = Space.S3, Height = Space.S3 };
+                box.Children.Add(swatch);
+                Place(box, x, y - Space.S3);
+            }
+            Place(Fonts.Text(legend[i], Typography.Caption, look.Ink), x + Space.S4, y - Space.S4);
         }
         stack.Children.Add(new Viewbox { Child = canvas, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.Both, HorizontalAlignment = HorizontalAlignment.Left });
         group.Children.Add(stack);

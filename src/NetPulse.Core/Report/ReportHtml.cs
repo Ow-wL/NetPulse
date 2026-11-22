@@ -14,7 +14,10 @@ public sealed record ReportPalette(
 {
     public static readonly ReportPalette Document = new(
         Bg: "#f4f4f2", Ink: "#111113", Muted: "#52525b", Accent: "#0369a1", Ok: "#047857", Warn: "#a16207", Bad: "#be123c", Focus: "#0369a1",
-        Surface: "#ffffff", Edge: "#d4d4d8", BadSoft: "#fde4ea", WarnSoft: "#fdf1d8", Link: "#111113", Mark: "#047857");
+        Surface: "#ffffff", Edge: "#d4d4d8", BadSoft: "#fde4ea", WarnSoft: "#fdf1d8", Link: "#111113", Mark: "#047857") { Signal = "#6d28d9" };
+
+    /// <summary>Wi‑Fi 신호 품질 선 (M12 설계 C). 디자인 토큰 라이트 팔레트의 신호 색과 같다 (Design 시험이 대조).</summary>
+    public string Signal { get; init; } = "#6d28d9";
 }
 
 /// <summary>HTML·SVG 문맥별 인코딩 (M8 설계 3.4 [1-7]). XML로도 읽히는 형태.</summary>
@@ -134,7 +137,7 @@ public static partial class ReportHtml
 
 :root { color-scheme: light; }
 * { box-sizing: border-box; }
-body { margin: 0; background: {{p.Bg}}; color: {{p.Ink}}; font-family: "Segoe UI", "Malgun Gothic", sans-serif; font-size: 14px; line-height: 1.55; }
+body { margin: 0; background: {{p.Bg}}; color: {{p.Ink}}; font-family: "Segoe UI", "Malgun Gothic", sans-serif; font-size: 14px; line-height: 1.55; word-break: keep-all; overflow-wrap: break-word; }
 main { max-width: 980px; margin: 0 auto; padding: 32px 24px 48px; background: {{p.Surface}}; }
 h1 { font-size: 26px; margin: 0 0 12px; }
 h2 { font-size: 19px; margin: 32px 0 10px; padding-bottom: 6px; border-bottom: 2px solid {{p.Edge}}; break-after: avoid; }

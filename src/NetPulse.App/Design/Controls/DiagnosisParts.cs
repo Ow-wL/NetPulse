@@ -49,7 +49,8 @@ public sealed class CheckCard : GroupPanel
     {
         this.ui = ui;
         Id = id;
-        name = Fonts.Text(QuickDiagnosis.CheckName(id), Typography.Label, ui.Brushes.Ink);
+        // 이름은 줄을 바꾼다 (말줄임 없음): M12 문구 "외부 연결(TCP 443)"이 150%의 좁은 카드에서 잘렸다 (노트북 중간 확인, M6 진단 장면)
+        name = Fonts.Wrapped(QuickDiagnosis.CheckName(id), Typography.Label, ui.Brushes.Ink);
         judgment = Fonts.Text("", Typography.Label, ui.Brushes.Muted);
         AutomationProperties.SetAutomationId(judgment, AutomationProperties.GetAutomationId(this) + ".judgment");
         explain = Fonts.Wrapped(DiagnosisTexts.What(id), Typography.Caption, ui.Brushes.Muted);
@@ -59,7 +60,6 @@ public sealed class CheckCard : GroupPanel
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        name.TextTrimming = TextTrimming.CharacterEllipsis;
         head.Children.Add(name);
         Grid.SetColumn(judgmentIcon, 1);
         head.Children.Add(judgmentIcon);
@@ -80,6 +80,8 @@ public sealed class CheckCard : GroupPanel
             });
         };
         AutomationProperties.SetAutomationId(details, AutomationProperties.GetAutomationId(this) + ".details");
+        // 머리(RowButton 안 내용)와 같은 들여쓰기 (RowButton은 내용에 좌우 S3 여백을 준다): 상세 줄이 머리보다 왼쪽에서 시작했다 (M11 C3)
+        details.Margin = new Thickness(Space.S3, 0, Space.S3, 0);
         var stack = new StackPanel { Spacing = Space.S2 };
         stack.Children.Add(toggle);
         stack.Children.Add(details);

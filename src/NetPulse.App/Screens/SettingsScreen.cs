@@ -72,7 +72,7 @@ public sealed class SettingsScreen : Screen
         var aurora = Toggle("settings.aurora", "연한 오로라", s.Aurora, v => UpdateLook(x => x with { Aurora = v }));
         var effects = Toggle("settings.reduceEffects", "효과 줄이기 (유리 대신 불투명한 표면)", s.ReduceEffects, v => UpdateLook(x => x with { ReduceEffects = v }));
         var motion = Toggle("settings.reduceMotion", "움직임 줄이기", s.ReduceMotion, v => UpdateLook(x => x with { ReduceMotion = v }));
-        (appearance, var appearanceBody) = ScreenParts.Card(Ui, "settings.appearance", "보기", "Windows의 투명 효과·애니메이션 설정도 따릅니다");
+        (appearance, var appearanceBody) = ScreenParts.Card(Ui, "settings.appearance", "화면 표시", "Windows의 투명 효과·애니메이션 설정도 따릅니다");
         appearanceBody.Set(Stack(theme, aurora, effects, motion));
 
         // ---- 상주와 알림 ----
@@ -114,15 +114,15 @@ public sealed class SettingsScreen : Screen
 
         // ---- 진단 기본값 ----
         var cur = Context.Diagnosis.CurrentSettings;
-        tcp0 = DiagField("settings.diag.tcp.0", "외부 TCP 주소 1", cur.TcpTargets.ElementAtOrDefault(0)?.ToString() ?? "");
-        tcp1 = DiagField("settings.diag.tcp.1", "외부 TCP 주소 2", cur.TcpTargets.ElementAtOrDefault(1)?.ToString() ?? "");
+        tcp0 = DiagField("settings.diag.tcp.0", "확인할 외부 주소 1", cur.TcpTargets.ElementAtOrDefault(0)?.ToString() ?? "");
+        tcp1 = DiagField("settings.diag.tcp.1", "확인할 외부 주소 2", cur.TcpTargets.ElementAtOrDefault(1)?.ToString() ?? "");
         domain0 = DiagField("settings.diag.domain.0", "확인 도메인 1", cur.Domains.ElementAtOrDefault(0) ?? "");
         domain1 = DiagField("settings.diag.domain.1", "확인 도메인 2", cur.Domains.ElementAtOrDefault(1) ?? "");
         diagSave = new GlassButton(Ui, ButtonKind.Primary, "settings.diag.save", "저장", Icons.Check) { IsEnabled = false };
         diagReset = new GlassButton(Ui, ButtonKind.Ghost, "settings.diag.reset", "기본값으로");
         diagSave.Click += (_, _) => SaveDiagnosis();
         diagReset.Click += (_, _) => ResetDiagnosis();
-        diagStatus = Fonts.Wrapped("진행 중인 진단은 시작할 때의 값으로 끝까지 돕니다.", Typography.Caption, Ui.Brushes.Muted);
+        diagStatus = Fonts.Wrapped("진행 중인 진단은 시작할 때의 값으로 끝까지 진행합니다.", Typography.Caption, Ui.Brushes.Muted);
         AutomationProperties.SetAutomationId(diagStatus, "settings.diag.status");
         var diagButtons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S3 };
         diagButtons.Children.Add(diagSave);
@@ -151,7 +151,18 @@ public sealed class SettingsScreen : Screen
             var view = new NetPulse.App.Legal.LegalView(Ui, "legal", 360);
             legalView = view;
             view.Opened += (i, ms) => Context.Log.Write("legal", new { step = "expanded", index = i, chars = view.Items![i].Text.Length, ms = Math.Round(ms, 1) });
-            view.Frames += (i, max, over, samples) => Context.Log.Write("legal", new { step = "frames", index = i, maxMs = Math.Round(max, 1), over33 = over, samples });
+            // 창이 있는 모니터의 주사율 (M12 설계 G2): 측정 앞뒤로 읽어 구간 중 모니터·주사율이 바뀌었거나 앞에서 읽지 못했으면 hz를 비운다
+            // (FramePacer 구간과 같은 계약, G4 M12 1라운드 6)
+            NetPulse.App.Design.RefreshInfo? before = null;
+            view.Measuring += _ => before = Ui.Pacer.Refresh();
+            view.Frames += (i, max, over, samples, gaps) =>
+            {
+                var refresh = Ui.Pacer.Refresh();
+                bool changed = before is not { Hz: not null } b || b.Hz != refresh.Hz || b.Monitor != refresh.Monitor;
+                Context.Log.Write("legal", new { step = "frames", index = i, maxMs = Math.Round(max, 1), over33 = over, samples,
+                    gaps = gaps.Select(g => Math.Round(g, 2)).ToArray(), hz = changed ? null : refresh.Hz, refreshSource = refresh.Source,
+                    refreshChanged = changed, hzBefore = before?.Hz });
+            };
             Context.Dialog.OpenContent(legalButton, "라이선스와 고지", view, "닫기", Size.GuideWidth, 520);
             Context.Log.Write("legal", new { step = "opened", items = view.Items?.Count });
         };
@@ -395,7 +406,7 @@ public sealed class SettingsScreen : Screen
             _ => RecordsState.Failed,
         };
         reason = report.Reason ?? (report.Failed.Count > 0 ? $"옮기지 못한 기록 {report.Failed.Count}개." : null);
-        if (report.Leftovers.Count > 0 && state != RecordsState.Leftover) reason = (reason is null ? "" : reason + " ") + "옛 위치에 정리하지 못한 파일이 있습니다(기록은 새 위치에서 엽니다).";
+        if (report.Leftovers.Count > 0 && state != RecordsState.Leftover) reason = (reason is null ? "" : reason + " ") + "옛 위치에 정리하지 못한 파일이 있습니다 (기록은 새 위치에서 엽니다).";
         CheckFolder();
         Context.Log.Write("recordsMove", new
         {
@@ -419,9 +430,9 @@ public sealed class SettingsScreen : Screen
         {
             "saved" => "저장했습니다. 다음 진단부터 이 값으로 확인합니다.",
             "failed" => "설정을 저장하지 못했습니다. 이번 실행에는 적용됩니다.",
-            "notPersisted" => "이번 실행에만 적용합니다. 설정 파일이 이 앱보다 새 판이라 저장하지 않았습니다.",
+            "notPersisted" => "이번 실행에만 적용합니다. 설정 파일이 이 앱보다 새 버전이라 저장하지 않았습니다.",
             "errors" => "고칠 칸이 있습니다.",
-            _ => "진행 중인 진단은 시작할 때의 값으로 끝까지 돕니다.",
+            _ => "진행 중인 진단은 시작할 때의 값으로 끝까지 진행합니다.",
         };
         diagStatus.Foreground = diagState is "errors" or "failed" ? Ui.Brushes.Bad : diagState == "notPersisted" ? Ui.Brushes.Warn : Ui.Brushes.Muted;
         Context.QueueDiag();

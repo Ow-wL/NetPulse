@@ -43,7 +43,7 @@ public sealed class LiveAppWorld(string userData) : IAppWorld
         try { return DetectionPlanner.Plan(NetworkInfo.Snapshot(DetectionPlanner.RouteProbeAddress)); }
         catch (Exception ex) when (ex is System.Net.NetworkInformation.NetworkInformationException or DllNotFoundException or EntryPointNotFoundException)
         {
-            return new DetectionResult(DetectionStatus.Unknown, null, "연결 정보를 읽지 못했습니다: " + ex.GetType().Name, null, Tristate.Unknown, 0);
+            return new DetectionResult(DetectionStatus.Unknown, null, "연결 정보를 읽지 못했습니다. 다시 확인하세요.", null, Tristate.Unknown, 0);
         }
     }, cancellationToken);
 
@@ -55,6 +55,7 @@ public sealed class LiveAppWorld(string userData) : IAppWorld
             Profile = profile, Clock = new SystemClock(), ProbeFor = t => ProbeFactory.For(t, profile.Timeout),
             Primary = primary, Fallback = fallback,
             Routes = new RouteObserver(), Power = new PowerEvents(), Links = new LinkObserver(), LinkLog = new LinkLogReader(),
+            Signal = new WlanSignalReader(),   // M12 설계 C: 위치 권한이 필요 없는 호출만 (핸들은 처음 읽을 때 연다)
             AppVersion = appVersion,
         });
     }

@@ -30,7 +30,7 @@ public static class MotionTokens
     public static readonly TimeSpan[] LightDrift = [TimeSpan.FromSeconds(19), TimeSpan.FromSeconds(23), TimeSpan.FromSeconds(27), TimeSpan.FromSeconds(31)];
 }
 
-/// <summary>프레임 기준 (M2 설계 5.2 저성능 대체, 5.9 벤치). 이 PC 한 대의 기준이다.</summary>
+/// <summary>프레임 기준 (M2 설계 5.2 저성능 대체, 5.9 벤치). 데스크톱 한 대의 기준이다. 시험 판정은 M12부터 주사율 보정·성능 프로필을 더한 <see cref="FrameContract"/>를 쓴다.</summary>
 public static class FrameBudget
 {
     /// <summary>나눠 그리기(M8 리포트 미리 보기)가 한 프레임에 쓰는 시간</summary>
@@ -80,6 +80,8 @@ public static class Waits
     public static readonly TimeSpan MoveHoldTest = TimeSpan.FromMilliseconds(700);
     /// <summary>시험 주입 <c>--move-fail hold-long</c>: 파일 하나가 닫기의 옮기기 대기 한도(CloseWrites)보다 오래 걸린다 (G4 M9 2라운드 b1)</summary>
     public static readonly TimeSpan MoveHoldLongTest = TimeSpan.FromSeconds(5);
+    /// <summary>다시 붙인 단추에 초점 주기를 미뤄 기다리는 한도 (G4 M12 1라운드 4): 이보다 늦게 붙으면 초점을 옮기지 않는다</summary>
+    public static readonly TimeSpan FocusRestore = TimeSpan.FromSeconds(2);
     /// <summary>시험 주입 <c>--report-fail slow</c>: 내보내기를 이만큼 늦춘다 (M8 "내보내는 중" 장면)</summary>
     public static readonly TimeSpan ReportSlowTest = TimeSpan.FromSeconds(4);
 
@@ -108,6 +110,9 @@ public static class BenchTokens
     public static readonly TimeSpan RecordsOpenLimit = TimeSpan.FromSeconds(60);
     public static readonly TimeSpan RecordsSettle = TimeSpan.FromSeconds(2);
     public static readonly TimeSpan MemorySample = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>시험 옵션 --test-finish-before-layout (M12 설계 A): --start 측정이 끝나기를 기다리는 상한</summary>
+    public static readonly TimeSpan FinishBeforeLayoutLimit = TimeSpan.FromSeconds(60);
     public const int RecordsReenterCount = 6;
     // 리포트 bench (M8 설계 5절): 미리 보기 스크롤 단계 수
     public const int ReportScrollSteps = 8;

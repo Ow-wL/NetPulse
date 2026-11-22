@@ -30,6 +30,7 @@ public sealed class MeasureScreen : Screen
     private readonly TimelineView view = new();
     private readonly StackPanel timelineStack = new() { Spacing = Space.S3 };
     private readonly TextBlock range;
+    private TimelineLegend? legend;
     private readonly StackPanel content = new() { Spacing = Space.S5 };
     private readonly StackPanel banners = new() { Spacing = Space.S2 };
     private string? bannersKey, cardsKey, marksKey;
@@ -72,6 +73,10 @@ public sealed class MeasureScreen : Screen
     private readonly ContentControl resultHost = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch };
     private readonly ScrollViewer scroll;
     private HostSnapshot? last;
+    // 시험 조건 확인 (M12 설계 A [2-1]): 끝난 스냅숏을 처음 받은 때의 타임라인 폭, 타임라인이 배치된 뒤 받은 스냅숏 수. 장면 계산과 무관하게 센다
+    private bool finishedSeen, receivedFinishedBeforeLayout, timelineLaidOut;
+    private double? widthAtReceive;
+    private int snapshotsAfterLayout;
     private (string Session, string Mark, long AtMs, DateTimeOffset Wall)? memo;
     private bool suppressDraft;
 
@@ -109,6 +114,8 @@ public sealed class MeasureScreen : Screen
         // 타임라인 카드 (조작 버튼은 카드 머리)
         timeline = new TimelinePanel(Ui, "measure.timeline", compact: false);
         timeline.Command += OnTimeline;
+        timeline.SizeChanged += (_, e) => { if (e.NewSize.Width > 0) timelineLaidOut = true; };
+        timeline.ColumnsChanged += () => { if (last is not null) RenderTimeline(last); };   // M12 설계 A: 끝난 측정은 새 스냅숏이 없다
         zoomOut = new GlassButton(Ui, ButtonKind.Icon, "measure.zoomout", "축소", Icons.Minus);
         zoomIn = new GlassButton(Ui, ButtonKind.Icon, "measure.zoomin", "확대", Icons.Plus);
         left = new GlassButton(Ui, ButtonKind.Icon, "measure.left", "과거로", Icons.Back);
@@ -123,7 +130,7 @@ public sealed class MeasureScreen : Screen
         now.Click += (_, _) => OnTimeline(TimelineCommand.ToNow);
         (timelineCard, timelineBody) = ScreenParts.Card(Ui, "measure.timelinecard", "타임라인", "", left, right, zoomOut, zoomIn, all, now);
         // 보이는 범위는 카드 머리가 아니라 본문 위 한 줄 (좁은 창에서 머리의 조작 버튼과 다투지 않게)
-        range = Fonts.Text("", Typography.Caption, Ui.Brushes.Muted);
+        range = Fonts.Text("", Typography.Caption, Context.Options.HideMeasuredText ? Ui.Brushes.Transparent : Ui.Brushes.Muted);   // 실측 대비 시험: 카드 본문 글 (M12 설계 F)
         AutomationProperties.SetAutomationId(range, "measure.timeline.range");
         timelineStack.Children.Add(range);
         timelineStack.Children.Add(timeline);
@@ -170,33 +177,23 @@ public sealed class MeasureScreen : Screen
 
     public override IReadOnlyList<UIElement> Parts => [header, timelineCard, cards, marksCard];
     public override FrameworkElement? SharedTarget => timelineCard;
+    public override TimelinePanel? SettleTimeline => timeline;   // "그리기 끝남" 타임라인 조건 (M12 G1-B)
 
-    private UIElement Legend()
-    {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S5 };
-        void Item(Microsoft.UI.Xaml.Media.Brush brush, bool dashed, string text)
-        {
-            var item = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S2 };
-            var line = new Microsoft.UI.Xaml.Shapes.Line { X1 = 0, X2 = Space.S4, Y1 = Space.S2, Y2 = Space.S2, Stroke = brush, StrokeThickness = ChartStyle.Line, VerticalAlignment = VerticalAlignment.Center };
-            if (dashed) line.StrokeDashArray = [ChartStyle.DashOn, ChartStyle.DashOff];
-            AutomationProperties.SetAccessibilityView(line, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
-            item.Children.Add(line);
-            item.Children.Add(Fonts.Text(text, Typography.Caption, Ui.Brushes.Muted));
-            row.Children.Add(item);
-        }
-        Item(Ui.Brushes.Accent, false, "인터넷 지연");
-        Item(Ui.Brushes.Series2, true, "공유기 지연");
-        Item(Ui.Brushes.Bad, false, "응답 없음이 관측된 회차");
-        Item(Ui.Brushes.Muted, true, "관측 공백");
-        Item(Ui.Brushes.Warn, true, "증상 표시");
-        return row;
-    }
+    /// <summary>범례: 줄을 넘기는 공용 범례 (150%에서 잘리지 않게, M11 C3) + Wi‑Fi 신호 항목 (M12 설계 C).</summary>
+    private UIElement Legend() => legend = new TimelineLegend(Ui, "measure.timeline.legend");
 
     // ---------------- 그리기 ----------------
 
     public override void Render(HostSnapshot s)
     {
         last = s;
+        if (timelineLaidOut) snapshotsAfterLayout++;
+        if (!finishedSeen && s.Finished is not null && s.State != HostState.Measuring)
+        {
+            finishedSeen = true;
+            widthAtReceive = timeline.ActualWidth;
+            receivedFinishedBeforeLayout = !timelineLaidOut && timeline.ActualWidth <= 0;
+        }
         bool measuring = s.State == HostState.Measuring;
         start.Visibility = s.State is HostState.Idle or HostState.Starting or HostState.NoProfile ? Visibility.Visible : Visibility.Collapsed;
         start.IsEnabled = s.State == HostState.Idle;
@@ -235,6 +232,8 @@ public sealed class MeasureScreen : Screen
             return;
         }
         timelineBody.Set(timelineStack, "normal");
+        // Wi‑Fi 신호 선이 있으면 오른쪽 축 여백을 뺀다: 열 수(timeline.Columns)를 쓰기 전에 정한다 (M12 설계 C)
+        timeline.SignalAxis = s.Signal.Axis;
         long nowMs = Math.Max(1, s.ElapsedMs);
         var (from, to) = view.Window(nowMs);
         var label = ScreenParts.TimeLabel(h.StartedAt, Context.Now);
@@ -244,19 +243,24 @@ public sealed class MeasureScreen : Screen
         long columnMs = (to - from) / Math.Max(1, timeline.Columns);
         var lastBand = s.Bands.Count == 0 ? null : s.Bands[^1];
         var drawKey = $"{s.SessionId}|{view.Label}|{view.Follow}|{view.IsAll}|{ended}|{timeline.Columns}|{s.Bands.Count}|{lastBand?.Kind}|{lastBand?.FromMs}|{lastBand?.OpenEnd}"
-            + $"|{s.Marks.Count}|{(s.Marks.Count == 0 ? null : s.Marks[^1].Mark)}|{s.LinkDowns.Count}|{s.LinkDowns.Count(d => d.Ongoing)}|{s.Gaps.Count}";
+            + $"|{s.Marks.Count}|{(s.Marks.Count == 0 ? null : s.Marks[^1].Mark)}|{s.LinkDowns.Count}|{s.LinkDowns.Count(d => d.Ongoing)}|{s.Gaps.Count}"
+            + $"|{s.Signal.Display}|{s.Signal.Runs.Count}|{s.Signal.AdapterChanges.Count}";
         bool unchanged = columnMs > 2 * h.IntervalMs && drawKey == drawnKey && Math.Abs(from - drawnFrom) < columnMs && Math.Abs(to - drawnTo) < columnMs
             && !NewValuesStandOut(s, h);
-        if (!unchanged)
+        // 배치 전(폭 0)에는 장면을 만들지 않는다: 열 1개 장면이 된다. 배치되면 타임라인이 ColumnsChanged로 다시 부른다 (M12 설계 A)
+        if (timeline.ActualWidth <= 0) drawnKey = null;
+        else if (!unchanged)
         {
             var marks = s.Marks.Select(m => new SymptomMark(m.Mark, null, m.AtMs, m.Wall, m.Memo, null, m.Truncated)).ToArray();
             TimelineFrame frame = null!;
             RenderProfile.Time("measure.frame", () => frame = TimelineModel.Frame(s.Rounds, h.Targets, s.Gaps, marks, s.LinkDowns, s.Bands, from, to, timeline.Columns, h.IntervalMs,
-                view.Follow && !view.IsAll ? $"최근 {view.Label}" : $"{label(from)}~{label(to)}", reps));
-            RenderProfile.Time("measure.draw", () => timeline.Show(frame, label, view.Follow && !ended, $"{label(from)}부터 {label(to)}까지 ({view.Label})"));
+                view.Follow && !view.IsAll ? $"최근 {view.Label}" : $"{label(from)}~{label(to)}", reps, s.Signal));
+            RenderProfile.Time("measure.draw", () => timeline.Show(frame, label, view.Follow && !ended, $"{label(from)}부터 {label(to)}까지 ({RangeLength(view, from, to)})"));
+            legend?.SetSignal(frame.Signal);
             (drawnKey, drawnFrom, drawnTo, drawnFrame, drawnRounds) = (drawKey, from, to, frame, s.Rounds.Count);
         }
-        range.Text = $"{label(from)} ~ {(view.Follow && !ended ? "지금" : label(to))} · {view.Label}";
+        // "·" 뒤는 보이는 범위의 실제 길이 (창 단계가 아님: 59초 측정의 2분 창이 "2분"으로 보였다, M11 시각 검토)
+        range.Text = $"{label(from)} ~ {(view.Follow && !ended ? "지금" : label(to))} · {RangeLength(view, from, to)}";
         AutomationProperties.SetName(range, range.Text);
         zoomIn.IsEnabled = view.StepIndex > 0 || view.IsAll;
         zoomOut.IsEnabled = !view.IsAll;
@@ -265,6 +269,10 @@ public sealed class MeasureScreen : Screen
         right.IsEnabled = !view.IsAll && !view.Follow;
         now.IsEnabled = !view.Follow;
     }
+
+    /// <summary>보이는 범위의 길이 문구: 실제 길이 (전체 보기면 "전체 59초"). 기록 화면도 같은 함수를 쓴다.</summary>
+    internal static string RangeLength(TimelineView view, long from, long to) =>
+        (view.IsAll ? "전체 " : "") + TimelineModel.Seconds(Math.Max(0, to - from));
 
     /// <summary>타임라인 조작 (bench·시험도 이 경로).</summary>
     public void Command(TimelineCommand c) => OnTimeline(c);
@@ -308,7 +316,7 @@ public sealed class MeasureScreen : Screen
             {
                 var names = h.Targets.Where(t => a.NoBaselineTargets.Contains(t.Id)).Select(t => t.Name);
                 specs.Add(("measure.banner.nobaseline", BannerKind.Info,
-                    $"응답 기준선이 없는 대상: {string.Join(", ", names)}. 응답을 막는 장비일 수 있어 구간 판단에서 뺍니다."));
+                    $"아직 한 번도 응답하지 않은 대상: {string.Join(", ", names)}. 응답을 막는 장비일 수 있어 구간 판단에서 뺍니다."));
             }
             if (a.Grade.Reason == "undecidable")
                 specs.Add(("measure.banner.routehold", BannerKind.Info, "경로가 예상과 달라진 순간이 있어 그때의 원인은 판단하지 않습니다."));
@@ -338,10 +346,10 @@ public sealed class MeasureScreen : Screen
         {
             if (!cardTexts.TryGetValue(card.TargetId, out var t)) continue;
             Set(t.Latest, card.Latest);
-            Set(t.Loss, $"손실 {card.LossRate} · {card.LossSentence}");
-            Set(t.Avg, $"평균 지연 {card.Average}" + (card.Errors > 0 ? $" · 검사 오류 {card.Errors}회 (손실에서 뺌)" : ""));
-            Set(t.Streak, $"최대 연속 실패 {card.MaxConsecutiveLoss}회");
-            Set(t.Last, $"마지막 성공 {(card.LastSuccess is { } ls ? LiveSummary.Clock(ls, now) : "없음")} · 마지막 실패 {(card.LastLoss is { } ll ? LiveSummary.Clock(ll, now) : "없음")}");
+            Set(t.Loss, $"응답 없음 {card.LossRate} · {card.LossSentence}");
+            Set(t.Avg, $"평균 지연 {card.Average}" + (card.Errors > 0 ? $" · 측정 오류 {card.Errors}번 (응답 없음 비율 계산에서 뺌)" : ""));
+            Set(t.Streak, $"최대 연속 응답 없음 {card.MaxConsecutiveLoss}번");
+            Set(t.Last, $"마지막 성공 {(card.LastSuccess is { } ls ? LiveSummary.Clock(ls, now) : "없음")} · 마지막 응답 없음 {(card.LastLoss is { } ll ? LiveSummary.Clock(ll, now) : "없음")}");
         }
 
         static void Set(TextBlock t, string text)
@@ -453,7 +461,7 @@ public sealed class MeasureScreen : Screen
             AutomationProperties.SetAutomationId(sentence, "measure.result.sentence");
             stack.Children.Add(sentence);
             long longest = a.Episodes.Count == 0 ? 0 : a.Episodes.Max(e => e.MinDurationMs);
-            var counts = Fonts.Text(a.Episodes.Count == 0 ? "끊김 관측 안 됨" : $"끊김 {a.Episodes.Count}회 · 최장 {TimelineModel.AtLeast(longest)} 이상",
+            var counts = Fonts.Text(a.Episodes.Count == 0 ? "끊김 관측 안 됨" : $"끊김 {a.Episodes.Count}번 · 최장 {TimelineModel.AtLeast(longest)} 이상",
                 Typography.Body, Ui.Brushes.Muted);
             AutomationProperties.SetAutomationId(counts, "measure.result.outages");
             stack.Children.Add(counts);
@@ -546,7 +554,7 @@ public sealed class MeasureScreen : Screen
             Context.QueueDiag();
             return;
         }
-        if (result == EventWriteState.Pending) Context.Toasts.Show(ToastKind.Info, "메모를 받았습니다", "저장소가 회복되면 기록에 씁니다.");
+        if (result == EventWriteState.Pending) Context.Toasts.Show(ToastKind.Info, "메모를 받았습니다", "저장할 수 있게 되면 기록에 씁니다.");
         // 끝난 측정의 메모(노트)는 최근 측정의 첫 메모를 바꿀 수 있다: 목록을 다시 읽는다 (캐시 열쇠에 노트 시각, G4 M5 1라운드 A7)
         if (!Context.Host.Snapshot.Measuring) _ = Context.Recent.RefreshAsync(Context.Host.RunningId);
         CloseMemo(skip: false);
@@ -583,6 +591,10 @@ public sealed class MeasureScreen : Screen
             memoOpen = memo is not null, memoMark = memo?.Mark, memoDraftLength = memoBox.Text.Length,
             window = new { from, to, step = view.Label, follow = view.Follow, all = view.IsAll },
             timeline = AutomationProperties.GetName(timeline),
+            timelineState = timeline.Diag(),
+            timelineCheck = new { receivedFinishedBeforeLayout, widthAtReceive, snapshotsAfterLayout },
+            range = range.Text,
+            legendSignal = legend?.SignalKey,
         };
     }
 }

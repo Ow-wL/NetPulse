@@ -61,7 +61,7 @@ public static class DiagnosisView
     public static CompareView? Compare(DiagnosisRun run, int skippedRecords)
     {
         if (run.Previous is not { } prev || run.Changes is not { } changes) return null;
-        string from = prev.FromRecord ? "지난 진단 기록과" : "지난 검사와";   // 받침에 따라 조사가 다르다 ("기록와"였음)
+        string from = prev.FromRecord ? "지난 진단 기록과" : "지난 진단과";   // 받침에 따라 조사가 다르다 ("기록와"였음)
         string? skipped = skippedRecords > 0 ? $"읽지 못한 진단 기록 {skippedRecords}개는 건너뛰었습니다." : null;
         if (changes.Count == 0) return new CompareView($"{from} 같습니다.", [], skipped);
         var lines = changes.Select(c => $"{QuickDiagnosis.CheckName(c.Id)}: {QuickDiagnosis.JudgmentName(c.Before)} → {QuickDiagnosis.JudgmentName(c.After)}").ToArray();

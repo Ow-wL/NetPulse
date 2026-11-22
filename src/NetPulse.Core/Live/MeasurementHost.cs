@@ -34,6 +34,12 @@ public sealed record HostSnapshot(
 {
     public bool Measuring => State is HostState.Measuring or HostState.Stopping;
     public RoundData? Latest => Rounds.Count == 0 ? null : Rounds[^1];
+
+    /// <summary>
+    /// Wi‑Fi 신호 표시 (M12 설계 C). 측정 중에는 실시간 사본(마지막 표본까지), 끝나면 기록의 신호 근거에서.
+    /// 신호가 관측되지 않은 측정은 <see cref="SignalTrace.None"/>.
+    /// </summary>
+    public SignalTrace Signal { get; init; } = SignalTrace.None;
 }
 
 /// <summary>호스트 설정 (시간은 기본값이 설계 값).</summary>
@@ -102,6 +108,9 @@ public sealed class MeasurementHost : IAsyncDisposable
     private readonly Dictionary<string, string> eventMarks = [];   // 이벤트 ID → 표시 ID (증상·메모)
     private IReadOnlyList<GapSpan> gaps = [];
     private LinkLive links = LinkLive.None;
+    private SignalLive signalLive = SignalLive.None;
+    private SignalTrace signalTrace = SignalTrace.None;
+    private (FinishedMeasurement For, SignalTrace Trace)? finishedSignal;
     private SessionStatus? status;
     private AnalysisResult? analysis;
     private AnalysisStamp? analysisAt;
@@ -231,6 +240,7 @@ public sealed class MeasurementHost : IAsyncDisposable
                 rounds = new AppendOnlyList<RoundData>();
                 events.Clear(); eventStates.Clear(); eventMarks.Clear();
                 gaps = []; links = LinkLive.None; status = null; analysis = null; analysisAt = null; analyzing = null; lastAnalyzedRounds = -1;
+                signalLive = SignalLive.None; signalTrace = SignalTrace.None;
                 loopStop = new CancellationTokenSource();
                 loop = Task.Run(() => LoopAsync(s, loopStop.Token));
             }
@@ -240,8 +250,8 @@ public sealed class MeasurementHost : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            // 어떤 시작 실패든 시작 중에 남지 않는다 (G4 M5 1라운드 A3). 예외 글에는 경로가 들어갈 수 있어 종류만 보인다
-            string message = ex is SessionStartException ? ex.Message : "측정을 시작하지 못했습니다 (" + ex.GetType().Name + ")";
+            // 어떤 시작 실패든 시작 중에 남지 않는다 (G4 M5 1라운드 A3). 예외 글에는 경로가 들어갈 수 있고 예외 이름은 사용자 글에 넣지 않는다: 사유만 (화면이 "측정을 시작하지 못했습니다: "를 앞에 붙인다)
+            string message = ex is SessionStartException ? ex.Message : ex is IOException or UnauthorizedAccessException ? "기록 파일을 쓰지 못했습니다." : "예상하지 못한 오류가 났습니다.";
             lock (gate) { state = HostState.Idle; startError = message; }
             Publish();
             return false;
@@ -539,9 +549,28 @@ public sealed class MeasurementHost : IAsyncDisposable
             gaps = delta.Gaps;
             if (!Equals(links, delta.Links)) changed = true;
             links = delta.Links;
+            // 신호 사본은 게시마다 새 목록이다: 어댑터 항목(닫힌 묶음 사본은 바뀔 때만 새로 만듦)이 같으면 표시도 그대로 둔다
+            if (!SameSignal(signalLive, delta.Signal))
+            {
+                signalTrace = SignalTrace.FromLive(delta.Signal);
+                changed = true;
+            }
+            signalLive = delta.Signal;
             status = delta.Status;
         }
         if (changed) Publish();
+    }
+
+    private static bool SameSignal(SignalLive a, SignalLive b) =>
+        ReferenceEquals(a, b) || (a.Configured == b.Configured && a.IntervalMs == b.IntervalMs && a.Adapters.SequenceEqual(b.Adapters));
+
+    /// <summary>gate 안: 끝난 측정의 신호 표시 (기록의 신호 근거에서, 끝난 측정마다 한 번).</summary>
+    private SignalTrace FinishedSignal(FinishedMeasurement f, MeasurementRecord record, RecordHeader header)
+    {
+        if (finishedSignal is { } c && ReferenceEquals(c.For.Record, record)) return c.Trace;
+        var trace = SignalTrace.FromEvidence(SignalEvidenceBuilder.FromEvents(record.Events, header.IntervalMs), header.IntervalMs);
+        finishedSignal = (f, trace);
+        return trace;
     }
 
     /// <summary>gate 안.</summary>
@@ -620,7 +649,8 @@ public sealed class MeasurementHost : IAsyncDisposable
             var kind = PathMapModel.ConnectionKind(fr.Events);
             return new HostSnapshot(++version, state, Current(profiles), fh.Id, fh, fr.Summary?.EndMs ?? fRounds.LastOrDefault()?.AtMs ?? 0, fh.PlannedMs,
                 fRounds, fr.Gaps, finished.Marks, fLinks, fBands, fStats, LiveSummary.Cards(fh.Targets, fStats, fRounds.LastOrDefault()),
-                finished.Analysis, null, PathMapModel.From(fh.Targets, fRounds, kind, finished.Analysis, null, ended: true), kind, null, finished, startError);
+                finished.Analysis, null, PathMapModel.From(fh.Targets, fRounds, kind, finished.Analysis, null, ended: true), kind, null, finished, startError)
+            { Signal = FinishedSignal(finished, fr, fh) };
         }
         if (!measuring || header is null)
         {
@@ -652,7 +682,7 @@ public sealed class MeasurementHost : IAsyncDisposable
         var tail = view.Count <= 10 ? (IReadOnlyList<RoundData>)view : Enumerable.Range(view.Count - 10, 10).Select(i => view[i]).ToArray();
         var map = PathMapModel.From(header.Targets, tail, connection, analysis, links, ended: false);
         return new HostSnapshot(++version, state, Current(profiles), session!.Id, header, elapsed, header.PlannedMs, view, gaps, CurrentMarks(), downs, bands,
-            stats, dv.Cards, analysis, analysisAt, map, connection, status, null, startError);
+            stats, dv.Cards, analysis, analysisAt, map, connection, status, null, startError) { Signal = signalTrace };
     }
 
     /// <summary>회차·공백에서 나오는 무거운 값 (gate 안에서만).</summary>

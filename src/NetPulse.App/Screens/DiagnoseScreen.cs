@@ -68,7 +68,7 @@ public sealed class DiagnoseScreen : Screen
         }
         checksGrid.SizeChanged += (_, e) => ArrangeChecks(e.NewSize.Width);
         AutomationProperties.SetAutomationId(checksGrid, "diagnose.checks");
-        AutomationProperties.SetName(checksGrid, "검사 일곱");
+        AutomationProperties.SetName(checksGrid, "검사 7가지");
         content.Children.Add(checksGrid);
 
         // 사이트 점검
@@ -107,7 +107,7 @@ public sealed class DiagnoseScreen : Screen
         folder = new GlassButton(Ui, ButtonKind.Ghost, "diagnose.folder", "기록 폴더 열기", Icons.Layers);
         folder.Click += (_, _) => OpenFolder();
         var toolsStack = new StackPanel { Spacing = Space.S2 };
-        toolsStack.Children.Add(Fonts.Wrapped("DNS 캐시 비우기만 시스템을 바꾸므로 확인을 묻습니다. 끝나면 빠른 진단을 다시 돌립니다.", Typography.Caption, Ui.Brushes.Muted));
+        toolsStack.Children.Add(Fonts.Wrapped("DNS 캐시 비우기만 시스템을 바꾸므로 확인을 묻습니다. 끝나면 빠른 진단을 다시 실행합니다.", Typography.Caption, Ui.Brushes.Muted));
         toolsStack.Children.Add(flush);
         var settingsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Space.S1 };
         settingsRow.Children.Add(network);
@@ -163,6 +163,9 @@ public sealed class DiagnoseScreen : Screen
         {
             noteBaseline(userActions);
             if (top && displaced) scroll.ChangeView(null, 0, null, true);   // 진행 중에도 결론 자리가 보이게
+            // 기준을 잡았음을 진단에도 알린다: 다시 쓰지 않으면 다른 이유(빛 움직임 등)로 진단이 갱신될 때까지 기준이 -1로 남았다
+            // (절전 모드 노트북에서 점검이 끝날 때까지 "점검 중, 기준 잡힘"이 한 번도 보이지 않음, M12 노트북 3차·M11 노트북)
+            Context.QueueDiag();
         });
     }
 
@@ -225,6 +228,9 @@ public sealed class DiagnoseScreen : Screen
         // 점검 중 입력 칸의 Enter는 바쁨으로 끝난다: 진행 중인 점검의 기준(그 뒤의 수정 포함)을 덮지 않는다 (G4 3라운드 1)
         if (r == DiagnosisRequest.Started)
             NoteDisplacedFocus(siteRun, had, e => siteDisplaced = e, b => siteBaseline = b);
+        // 요청 수·마지막 응답(시험 고리)을 진단에 바로 알린다: 바쁨·입력 오류는 진단 호스트를 바꾸지 않아 진단이 다시 쓰이지 않았다
+        // (절전 모드 노트북에서 진행 중 Enter의 "바쁨"이 점검이 끝날 때까지 보이지 않음, M12 노트북 최종 게이트 1회차)
+        Context.QueueDiag();
     }
 
     private void ConfirmFlush(Control opener)
@@ -236,12 +242,12 @@ public sealed class DiagnoseScreen : Screen
             if (opener.XamlRoot is null || !opener.IsLoaded) (FindById("diagnose.conclusion.flush") ?? flush).Focus(FocusState.Programmatic);
             if (!ok) return;
             if (Context.Diagnosis.RequestFlush() == DiagnosisRequest.Queued)
-                Context.Toasts.Show(ToastKind.Info, "진단이 끝나면 DNS 캐시를 비웁니다", "비운 뒤 빠른 진단을 다시 돌립니다.");
+                Context.Toasts.Show(ToastKind.Info, "진단이 끝나면 DNS 캐시를 비웁니다", "비운 뒤 빠른 진단을 다시 실행합니다.");
             Render(Context.Host.Snapshot);
         }
         Context.Dialog.Closed += Closed;
         Context.Dialog.Open(opener, "DNS 캐시를 비울까요?",
-            "Windows가 기억한 이름 해석 결과를 지웁니다. 인터넷 연결이나 설정은 바뀌지 않습니다. 끝나면 빠른 진단을 다시 돌립니다.", "비우기", "취소");
+            "Windows가 기억한 이름 해석 결과를 지웁니다. 인터넷 연결이나 설정은 바뀌지 않습니다. 끝나면 빠른 진단을 다시 실행합니다.", "비우기", "취소");
     }
 
     private void OpenSettings(SettingsPage page)
@@ -303,7 +309,7 @@ public sealed class DiagnoseScreen : Screen
         copyState = verified ? "ok" : wrote ? "unverified" : "failed";
         if (verified) Context.Toasts.Show(ToastKind.Success, "결과를 복사했습니다", "주소·도메인 값은 넣지 않았습니다.");
         else if (wrote) Context.Toasts.Show(ToastKind.Warning, "복사했지만 확인하지 못했습니다", "붙여 넣어 내용을 확인해 주세요.");
-        else Context.Toasts.Show(ToastKind.Error, "복사하지 못했습니다", "다른 프로그램이 클립보드를 쓰고 있을 수 있습니다. 다시 시도해 주세요.");
+        else Context.Toasts.Show(ToastKind.Error, "복사하지 못했습니다", "다른 프로그램이 클립보드를 쓰고 있을 수 있습니다. 다시 시도하세요.");
         Context.QueueDiag();
     }
 
@@ -328,7 +334,7 @@ public sealed class DiagnoseScreen : Screen
         {
             DiagnosisOperation.Diagnosing => $"검사 중 {d.Partial.Count}/7",
             DiagnosisOperation.Flushing => FlushStageText(d.Flush),
-            _ => d.Last is { } l ? "마지막 검사 " + LiveSummary.Clock(l.Result.EndedAt, Context.Now) : null,
+            _ => d.Last is { } l ? "지난 진단 " + LiveSummary.Clock(l.Result.EndedAt, Context.Now) : null,
         });
         RenderConclusion(d);
         RenderChecks(d);
@@ -524,6 +530,10 @@ public sealed class DiagnoseScreen : Screen
 
     private void RenderSite(DiagnosisSnapshot d)
     {
+        // 초점을 가진 [점검]을 끄면 WinUI가 초점을 다음 요소(보조 도구의 "DNS 캐시 비우기")로 옮기고 화면을 내렸다 (M11 C3).
+        // 끄기 전에 같은 줄의 입력 칸으로 옮겨 둔다. 화면 안의 이동이라 사용자 조작으로 세지 않고, 끝나면 RestoreFocus가 단추로 돌려놓는다
+        if (d.Site.Running && siteRun.IsEnabled && siteRun.FocusState != FocusState.Unfocused)
+            siteInput.Box.Focus(siteRun.FocusState == FocusState.Keyboard ? FocusState.Keyboard : FocusState.Programmatic);
         siteRun.IsEnabled = !d.Site.Running;
         bool siteFinished = siteWasRunning && !d.Site.Running;
         siteWasRunning = d.Site.Running;

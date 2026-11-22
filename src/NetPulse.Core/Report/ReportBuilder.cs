@@ -55,6 +55,64 @@ public static class ReportBuilder
         private long lastRound;
         private IReadOnlyList<SymptomMark> marks = [];
         private int ignoredMarks;
+        private (NetPulse.Core.Evidence.SignalEvidence Evidence, SignalTrace Trace)? signal;
+
+        /// <summary>기록의 Wi‑Fi 신호 근거와 그 표시 (M12 설계 C, 한 번만 구한다). 분석 판정에는 쓰지 않는다.</summary>
+        private (NetPulse.Core.Evidence.SignalEvidence Evidence, SignalTrace Trace) Signal()
+        {
+            if (signal is { } s) return s;
+            var ev = NetPulse.Core.Evidence.SignalEvidenceBuilder.FromEvents(record.Events, header.IntervalMs);
+            signal = (ev, SignalTrace.FromEvidence(ev, header.IntervalMs));
+            return signal.Value;
+        }
+
+        /// <summary>
+        /// 관측 근거의 Wi‑Fi 신호 (M12 설계 C 리포트): 기본 경로 무선 어댑터마다 품질·RSSI 평균과 최저, 상태별 시간. 그 밖의 무선 어댑터는 수만.
+        /// 끊김 동안의 신호는 관측만 적고 판정·가능성이 높은 곳을 바꾸지 않는다. 신호 자료가 없는 기록은 이 부분이 없다.
+        /// </summary>
+        private IEnumerable<ReportBlock> SignalEvidenceBlocks()
+        {
+            var (ev, trace) = Signal();
+            if (!ev.HasData) yield break;
+            yield return new ReportHeading(ReportRun.Gen("Wi‑Fi 신호"));
+            var route = trace.RouteAdapters.Select(ev.For).OfType<NetPulse.Core.Evidence.SignalAdapterEvidence>().ToArray();
+            yield return new ReportTable("무선 어댑터별 신호 (관측)", Cols("어댑터", "품질 평균", "품질 최저", "RSSI 평균", "RSSI 최저", "상태"),
+                route.Select(x => new ReportRow([
+                    new(red.Adapter(x.Alias, x.InterfaceIndex), "signal.adapter"),
+                    new(ReportRun.Gen(ReportTexts.Quality(x.Stats.QualityAvg)), "signal.qualityAvg"),
+                    new(ReportRun.Gen(ReportTexts.Quality(x.Stats.QualityMin)), "signal.qualityMin"),
+                    new(ReportRun.Gen(ReportTexts.Rssi(x.Stats.RssiAvg)), "signal.rssiAvg"),
+                    new(ReportRun.Gen(ReportTexts.Rssi(x.Stats.RssiMin)), "signal.rssiMin"),
+                    new(ReportRun.Gen(ReportTexts.SignalStates(x.Stats.StateMs, x.LastObserved)), "signal.state"),
+                ])).ToArray());
+            if (trace.OtherAdapters > 0)
+                yield return new ReportParagraph(ReportTexts.OtherWirelessAdapters(trace.OtherAdapters), ParagraphKind.Note);
+            if (trace.AdapterChanges.Count > 0)
+                yield return new ReportParagraph($"측정 중에 경로의 무선 어댑터가 {trace.AdapterChanges.Count}번 바뀌었습니다. 그림에서는 그 시각에 선을 끊었습니다.", ParagraphKind.Note);
+            if (DuringEpisodes(trace) is { } during) yield return new ReportParagraph(during);
+            yield return new ReportParagraph(ReportTexts.SignalScope, ParagraphKind.Note);
+        }
+
+        /// <summary>끊김 동안 관측한 신호 (관측만: "끊김 동안 품질 최저 14%", "연결 안 됨 관측"). 끊김이나 신호 묶음이 없으면 null.</summary>
+        private string? DuringEpisodes(SignalTrace trace)
+        {
+            if (a.Episodes.Count == 0 || trace.Runs.Count == 0) return null;
+            var at = rounds.ToDictionary(r => r.Round, r => r.AtMs);
+            int? min = null;
+            var states = new SortedSet<NetPulse.Core.Evidence.SignalState>();
+            foreach (var e in a.Episodes)
+            {
+                if (!at.TryGetValue(e.FirstRound, out var from) || !at.TryGetValue(e.LastRound, out var last)) continue;
+                long to = last + header.IntervalMs;
+                foreach (var r in trace.Runs)
+                {
+                    if (r.ToMs <= from || r.FromMs >= to) continue;
+                    if (r.Quality is int q) min = min is int m ? Math.Min(m, q) : q;
+                    else if (r.State != NetPulse.Core.Evidence.SignalState.Ok) states.Add(r.State);
+                }
+            }
+            return ReportTexts.SignalDuringEpisodes(a.Episodes.Count, min, states);
+        }
 
         private string Clock(DateTimeOffset wall) => ReportTexts.Clock(wall, header.StartedAt, header.UtcOffsetMinutes);
         private string ClockOf(long round) => wallOf.TryGetValue(round, out var w) ? Clock(w) : "알 수 없음";
@@ -109,12 +167,12 @@ public static class ReportBuilder
             if (record.Summary is { } s)
                 facts.Add(new("끝", ReportRun.Gen(ReportTexts.DateTime(s.EndedAt, header.UtcOffsetMinutes)), "summary.end"));
             else
-                facts.Add(new("끝", ReportRun.Gen(rounds.Length == 0 ? "끝 기록 없음"
-                    : "끝 기록 없음 · 마지막 관측 " + ReportTexts.DateTime(rounds[^1].Wall, header.UtcOffsetMinutes)), "summary.end"));
+                facts.Add(new("끝", ReportRun.Gen(rounds.Length == 0 ? "정상 종료 기록 없음"
+                    : "정상 종료 기록 없음 · 마지막 관측 " + ReportTexts.DateTime(rounds[^1].Wall, header.UtcOffsetMinutes)), "summary.end"));
             facts.Add(new("길이", ReportRun.Gen(endMs is long ms ? (record.Summary is null ? "마지막 관측까지 " : "") + TimelineModel.Seconds(ms) : "알 수 없음"), "summary.duration"));
             facts.Add(new("끝 사유", ReportRun.Gen(RecordView.EndText(input.Lifecycle, record.Summary?.EndReason ?? record.EndReason)), "summary.endReason"));
             if (RecordView.SaveText(record.Summary) is { } save) facts.Add(new("저장 상태", ReportRun.Gen(save), "summary.save"));
-            facts.Add(new("관측 충족", ReportRun.Gen(Coverage(c)), "summary.coverage"));
+            facts.Add(new("판단할 수 있는 관측 비율", ReportRun.Gen(Coverage(c)), "summary.coverage"));
             facts.Add(new("끊김", ReportRun.Gen(ReportTexts.EpisodeCount(a.Episodes.Count, c, a.Grade.Grade)), "summary.episodes"));
             if (a.Episodes.Count > 0)
             {
@@ -149,7 +207,10 @@ public static class ReportBuilder
             long end = Math.Max(record.Summary?.EndMs ?? 0, rounds.Length == 0 ? interval : rounds[^1].DueMs + interval);
             var bands = TimelineModel.Bands(rounds, targets, record.Gaps, interval);
             var downs = a.Links.Downs.Select(d => new LinkDownView(d.Adapter, d.Source, d.FromMs, d.ToMs, false)).ToArray();
-            var frame = TimelineModel.Frame(rounds, targets, record.Gaps, marks, downs, bands, 0, end, TimelineFigure.Columns, interval, "전체");
+            // Wi‑Fi 신호 (M12 설계 C): 품질 선이 있으면 오른쪽 축 여백을 뺀 열 수로 그린다. 신호가 없는 기록은 지금과 같다
+            var signal = Signal().Trace;
+            var frame = TimelineModel.Frame(rounds, targets, record.Gaps, marks, downs, bands, 0, end, TimelineFigure.PlotColumnsFor(signal.Axis), interval, "전체",
+                signal: signal.Display == SignalDisplay.None ? null : signal);
             var figure = TimelineFigure.Build(frame, bands, downs, marks, header.StartedAt, TimeSpan.FromMinutes(header.UtcOffsetMinutes));
             return [new ReportFigure(figure)];
         }
@@ -197,7 +258,7 @@ public static class ReportBuilder
                     new(ReportRun.Gen(ClockOf(e.FirstRound)), "episode.start"),
                     new(ReportRun.Gen(EpisodeDuration(e)), "episode.duration"),
                     new(ReportRun.Gen(mixed ? $"여러 판정 (하위 구간 {e.Parts.Count}개)" : RecordView.VerdictName(e.Parts[0].Verdict)), "episode.verdict"),
-                    new(ReportRun.Gen(mixed ? "하위 구간마다 아래 줄에" : ReportTexts.Candidate(e.Parts[0].Candidate)), "episode.candidate"),
+                    new(ReportRun.Gen(mixed ? "하위 구간별로 아래 줄에 적음" : ReportTexts.Candidate(e.Parts[0].Candidate)), "episode.candidate"),
                 ]));
                 if (!mixed) continue;
                 foreach (var (p, k) in e.Parts.Take(ListPartLimit).Select((p, k) => (p, k)))
@@ -205,7 +266,7 @@ public static class ReportBuilder
                 if (e.Parts.Count > ListPartLimit)
                     rows.Add(new ReportRow([new(ReportRun.Gen(ReportTexts.MoreParts(e.Parts.Count - ListPartLimit)), "part.more")], RowKind.Note));
             }
-            blocks.Add(new ReportTable(caption, Cols("번호", "시작", "길이", "판정", "구간 후보"), rows));
+            blocks.Add(new ReportTable(caption, Cols("번호", "시작", "길이", "판정", "가능성이 높은 곳"), rows));
             return blocks;
         }
 
@@ -223,7 +284,7 @@ public static class ReportBuilder
         {
             var blocks = new List<ReportBlock>();
             var stats = record.Stats ?? StatsCalculator.Compute(rounds, targets.Select(t => t.Id).ToArray(), record.Gaps);
-            blocks.Add(new ReportTable("대상별 응답", Cols("대상", "역할", "방식", "유효 시도", "응답 없음", "손실률", "평균 지연", "최대 지연", "최대 연속 응답 없음", "검사 오류"),
+            blocks.Add(new ReportTable("대상별 응답", Cols("대상", "역할", "방식", "유효 시도", "응답 없음", "응답 없음 비율", "평균 지연", "최대 지연", "최대 연속 응답 없음", "측정 오류"),
                 targets.Select(t =>
                 {
                     var s = stats.Targets.FirstOrDefault(x => x.TargetId == t.Id);
@@ -241,7 +302,7 @@ public static class ReportBuilder
                         new(ReportRun.Gen(s is null ? "값 없음" : $"{s.Error}번"), "target.error"),
                     ]);
                 }).ToArray()));
-            blocks.Add(new ReportParagraph("검사 오류는 응답 없음과 구별하고 손실률의 분모에서 뺍니다.", ParagraphKind.Note));
+            blocks.Add(new ReportParagraph("측정 오류는 응답 없음과 구별하고 응답 없음 비율 계산에서 뺍니다.", ParagraphKind.Note));
 
             blocks.Add(new ReportHeading(ReportRun.Gen("링크 근거")));
             if (a.Links.Summaries.Count == 0) blocks.Add(new ReportParagraph([ReportRun.Gen(ReportTexts.NoLinkEvidence)]));
@@ -253,6 +314,7 @@ public static class ReportBuilder
                         new(ReportRun.Gen(ReportTexts.LinkState(s.Display)), "link.state"),
                         new(ReportRun.Gen(ReportTexts.LinkNotes(s)), "link.notes"),
                     ])).ToArray()));
+            blocks.AddRange(SignalEvidenceBlocks());
 
             var ctx = JudgeContext.From(header, rounds, record.Events, a.Links);
             blocks.Add(new ReportTable("경로 유형 (대상마다)", Cols("대상", "시작 시점 경로", "경로 유형이 바뀐 횟수"),
@@ -315,7 +377,7 @@ public static class ReportBuilder
                     var rows = e.Parts.Take(DetailPartLimit).Select((p, k) => PartRow(p, k, "detail.part")).ToList();
                     if (e.Parts.Count > DetailPartLimit)
                         rows.Add(new ReportRow([new(ReportRun.Gen(ReportTexts.MoreParts(e.Parts.Count - DetailPartLimit)), "detail.part.more")], RowKind.Note));
-                    blocks.Add(new ReportTable("하위 구간", Cols("하위 구간", "시작", "길이", "판정", "구간 후보"), rows));
+                    blocks.Add(new ReportTable("하위 구간", Cols("하위 구간", "시작", "길이", "판정", "가능성이 높은 곳"), rows));
                 }
                 else
                     blocks.Add(new ReportParagraph($"판정: {RecordView.VerdictName(e.Parts[0].Verdict)} · {ReportTexts.Candidate(e.Parts[0].Candidate)}"));
@@ -339,7 +401,7 @@ public static class ReportBuilder
                         detailRows.Add(new ReportRow([new(ReportRun.Gen($"가운데 {d.OmittedRounds}회차는 생략했습니다"), "detail.omitted")], RowKind.Note));
                 }
                 if (d.NothingBefore) detailRows.Insert(0, new ReportRow([new(ReportRun.Gen("앞 회차 없음 (측정 시작)"))], RowKind.Note));
-                if (d.NothingAfter) detailRows.Add(new ReportRow([new(ReportRun.Gen("뒤 회차 없음 (기록 끝)"))], RowKind.Note));
+                if (d.NothingAfter) detailRows.Add(new ReportRow([new(ReportRun.Gen("뒤 회차 없음 (측정 끝)"))], RowKind.Note));
                 blocks.Add(new ReportTable("앞뒤 2회차의 대상별 응답", columns, detailRows));
 
                 var routeRuns = new List<ReportRun> { ReportRun.Gen("시작 시점 경로: ") };
@@ -396,7 +458,7 @@ public static class ReportBuilder
         private IReadOnlyList<ReportBlock> Diagnoses()
         {
             var list = input.Diagnoses.Where(s => s.Status == DiagnosisReadStatus.Ok && s.MeasurementId == header.Id).OrderBy(s => s.StartedAt).ToArray();
-            if (list.Length == 0) return [new ReportParagraph("이 측정 중에 한 빠른 진단이 없습니다.")];
+            if (list.Length == 0) return [new ReportParagraph("이 측정 중에 실행한 빠른 진단이 없습니다.")];
             var blocks = new List<ReportBlock>
             {
                 new ReportParagraph("저장된 결론과 검사 판정입니다. 진단 기록에는 대상 주소가 없어 대상은 순번으로만 다룹니다.", ParagraphKind.Note),
@@ -446,10 +508,10 @@ public static class ReportBuilder
             [
                 new("측정 ID", red.Id(), "condition.id"),
                 new("측정 주기", ReportRun.Gen(ReportTexts.Sec(header.IntervalMs) + "초"), "condition.interval"),
-                new("응답 제한시간", ReportRun.Gen(ReportTexts.Sec(header.TimeoutMs) + "초"), "condition.timeout"),
+                new("응답 제한 시간", ReportRun.Gen(ReportTexts.Sec(header.TimeoutMs) + "초"), "condition.timeout"),
                 new("예상 연결", ReportRun.Gen(ReportTexts.Expected(header.Expected)), "condition.expected"),
                 new("계획한 길이", ReportRun.Gen(TimelineModel.Seconds(header.PlannedMs)), "condition.planned"),
-                new("기록 상태", ReportRun.Gen(damage.Count == 0 ? "손상 없음" : $"알림 {damage.Count}건"), "condition.damage"),
+                new("기록 상태", ReportRun.Gen(damage.Count == 0 ? "손상 없음" : $"기록 문제 {damage.Count}건"), "condition.damage"),
                 new("측정한 앱", ReportRun.Gen("NetPulse " + SafeVersion(header.AppVersion)), "condition.appVersion"),
                 new("분석기 버전", ReportRun.Gen(a.AnalyzerVersion.ToString(CultureInfo.InvariantCulture)), "condition.analyzer"),
                 new("리포트를 만든 앱", ReportRun.Gen("NetPulse " + input.AppVersion), "condition.reportApp"),

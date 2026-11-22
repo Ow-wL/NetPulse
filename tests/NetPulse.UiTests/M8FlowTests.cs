@@ -176,7 +176,7 @@ public sealed class M8FlowTests
                 Assert.Equal([RecordView.Duration(longest)], Values(fields, "summary.longest"));
                 // 끊김: 길이 범위·판정·후보 (하위 구간이 하나인 끊김)
                 Assert.Equal(a.Episodes.Select(RecordView.Duration), Values(fields, "episode.duration"));
-                Assert.Equal(a.Episodes.Select(e => e.Parts.Count > 1 ? "하위 구간마다 아래 줄에" : RecordView.CandidateText(e.Parts[0].Candidate)), Values(fields, "episode.candidate"));
+                Assert.Equal(a.Episodes.Select(e => e.Parts.Count > 1 ? "하위 구간별로 아래 줄에 적음" : RecordView.CandidateText(e.Parts[0].Candidate)), Values(fields, "episode.candidate"));
                 // 대상별 평균·최대 지연
                 Assert.Equal(stats.Select(s => s.AvgRttMs is double v ? PathMapModel.Ms(v) : "값 없음"), Values(fields, "target.avg"));
                 Assert.Equal(stats.Select(s => s.MaxRttMs is double v ? PathMapModel.Ms(v) : "값 없음"), Values(fields, "target.max"));
@@ -184,7 +184,7 @@ public sealed class M8FlowTests
                 string LinkName(NetPulse.Core.Evidence.LinkDisplay x) => x switch
                 {
                     NetPulse.Core.Evidence.LinkDisplay.Down => "끊김 관측", NetPulse.Core.Evidence.LinkDisplay.Denied => "접근 거부",
-                    NetPulse.Core.Evidence.LinkDisplay.ObservedNone => "관측했으나 이벤트 없음", _ => "수집 미지원",
+                    NetPulse.Core.Evidence.LinkDisplay.ObservedNone => "관측했지만 끊김 기록 없음", _ => "이 어댑터는 기록을 지원하지 않음",
                 };
                 Assert.Equal(a.Links.Summaries.Select(x => LinkName(x.Display)), Values(fields, "link.state"));
                 // 경로 유형: 대상마다 첫 경로 이벤트의 유형
@@ -384,7 +384,7 @@ public sealed class M8FlowTests
                 Assert.True(notices.Count >= 2, "손상 알림 " + notices.Count);
                 Assert.True(record.Damage.Total >= 2);
                 Assert.NotEmpty(record.MissingSegments);
-                Assert.Equal([$"알림 {notices.Count}건"], Values(fields, "condition.damage"));
+                Assert.Equal([$"기록 문제 {notices.Count}건"], Values(fields, "condition.damage"));
                 var body = Squash(ReportHtml.BodyTexts(html));
                 foreach (var n in notices) Assert.Contains(Squash([n]), body);
                 foreach (var v in Strong(record)) Assert.False(html.Contains(v, StringComparison.OrdinalIgnoreCase), "남은 값: " + v);

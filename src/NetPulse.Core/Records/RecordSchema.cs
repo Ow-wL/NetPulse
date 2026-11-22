@@ -118,7 +118,7 @@ public static class RecordSchema
     /// <summary>머리의 의미 검증. 틀리면 FormatException (읽을 수 없는 기록).</summary>
     private static void Check(RecordHeader h)
     {
-        static void Require(bool ok, string what) { if (!ok) throw new FormatException("기록 머리 손상: " + what); }
+        static void Require(bool ok, string what) { if (!ok) throw new FormatException("기록의 기본 정보 손상: " + what); }
         Require(!string.IsNullOrWhiteSpace(h.Id), "id");
         Require(h.Segment is >= 0 and <= MaxSegment, "segment");
         Require(!string.IsNullOrWhiteSpace(h.AppVersion), "appVersion");

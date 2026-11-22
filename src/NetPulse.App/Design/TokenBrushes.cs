@@ -16,10 +16,17 @@ public sealed class TokenBrushes
     public SolidColorBrush Bg { get; } = new();
     public SolidColorBrush Ink { get; } = new();
     public SolidColorBrush Muted { get; } = new();
+    /// <summary>비활성 글 (고대비에서 GrayText, 그 밖에는 Muted와 같은 색)</summary>
+    public SolidColorBrush Disabled { get; } = new();
+    /// <summary>비활성 단추 글·아이콘, 점선 테두리 (M12 설계 F, 고대비에서 GrayText)</summary>
+    public SolidColorBrush DisabledInk { get; } = new();
+    public SolidColorBrush DisabledEdge { get; } = new();
     public SolidColorBrush Faint { get; } = new();
     public SolidColorBrush Accent { get; } = new();
     public SolidColorBrush AccentInk { get; } = new();
     public SolidColorBrush Series2 { get; } = new();
+    /// <summary>Wi‑Fi 신호 품질 선 (M12 설계 C)</summary>
+    public SolidColorBrush Signal { get; } = new();
     public SolidColorBrush Ok { get; } = new();
     public SolidColorBrush Warn { get; } = new();
     public SolidColorBrush Bad { get; } = new();
@@ -41,10 +48,14 @@ public sealed class TokenBrushes
         Bg.Color = ToColor(p.Bg);
         Ink.Color = ToColor(p.Ink);
         Muted.Color = ToColor(p.Muted);
+        Disabled.Color = ToColor(p.Disabled);
+        DisabledInk.Color = ToColor(p.DisabledInk);
+        DisabledEdge.Color = ToColor(p.DisabledEdge);
         Faint.Color = ToColor(p.Faint);
         Accent.Color = ToColor(p.Accent);
         AccentInk.Color = ToColor(p.AccentInk);
         Series2.Color = ToColor(p.Series2);
+        Signal.Color = ToColor(p.Signal);
         Ok.Color = ToColor(p.Ok);
         Warn.Color = ToColor(p.Warn);
         Bad.Color = ToColor(p.Bad);
@@ -79,6 +90,7 @@ public sealed class DocumentBrushes
         WarnSoft = B(p.WarnSoft);
         Link = B(p.Link);
         Mark = B(p.Mark);
+        Signal = B(p.Signal);
     }
 
     public SolidColorBrush Paper { get; }
@@ -93,6 +105,7 @@ public sealed class DocumentBrushes
     public SolidColorBrush WarnSoft { get; }
     public SolidColorBrush Link { get; }
     public SolidColorBrush Mark { get; }
+    public SolidColorBrush Signal { get; }
 }
 
 /// <summary>Pretendard 글꼴과 글자 단계 적용.</summary>

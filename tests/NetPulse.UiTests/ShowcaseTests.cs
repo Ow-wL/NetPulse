@@ -64,12 +64,20 @@ public sealed class ShowcaseTests
         app.Toggle("settings.reduceMotion");
         var d = app.WaitDiag(x => x, x => x.GetProperty("reduceMotion").GetBoolean(), "움직임 줄이기 켜짐");
         app.WaitDiag(x => x.GetProperty("active"), a => a.GetProperty("move").GetInt32() + a.GetProperty("scale").GetInt32() + a.GetProperty("repeat").GetInt32() == 0, "활성 이동·크기·반복 0");
-        Thread.Sleep(300);
-        using var first = app.CaptureBitmap();
-        Thread.Sleep(500);
-        using var second = app.CaptureBitmap();
-        var diff = ImageCompare.Diff(first, second);
-        Assert.True(diff.Mean <= 1.0 && diff.P99 <= 4, $"움직임 줄이기 뒤에도 화면이 바뀐다: {diff}");
+        // 켜는 순간 시작된 불투명도 전환(스위치·빛 끄기)은 끝날 때까지 둔다: 느린 PC에서는 300 ms 안에 끝나지 않았다
+        // (M12 노트북 중간 확인, 평균 0.82·99백분위 12). 계속 움직이는 것이 있으면 3초 동안 어느 0.5초 쌍도 같아지지 않아 실패한다.
+        var tries = new List<ImageDiff>();
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+        do
+        {
+            Thread.Sleep(300);
+            using var first = app.CaptureBitmap();
+            Thread.Sleep(500);
+            using var second = app.CaptureBitmap();
+            tries.Add(ImageCompare.Diff(first, second));
+        }
+        while (!(tries[^1].Mean <= 1.0 && tries[^1].P99 <= 4) && DateTime.UtcNow < until);
+        Assert.True(tries[^1].Mean <= 1.0 && tries[^1].P99 <= 4, $"움직임 줄이기 뒤에도 화면이 바뀐다: {string.Join(" / ", tries)}");
         // 버튼을 눌러도 이동·크기 모션이 생기지 않는다
         var created = app.Diag().GetProperty("created");
         int before = created.GetProperty("move").GetInt32() + created.GetProperty("scale").GetInt32();

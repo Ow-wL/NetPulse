@@ -22,10 +22,10 @@ public static class ReportTexts
     public const string PrintHint = "브라우저의 인쇄에서 PDF로 저장할 수 있습니다 (A4 세로).";
 
     public const string Scope =
-        "이 리포트가 말하는 것: 각 대상이 응답했는지, 응답이 얼마나 걸렸는지, 이 PC의 링크가 끊긴 것이 관측됐는지입니다. "
-        + "말하지 않는 것: 끊김이 어느 장비·회선·사업자 쪽에서 생겼는지입니다. 구간 후보는 PC → 공유기 → 인터넷 개념도 위의 후보이며 실제 경로를 증명하지 않습니다.";
+        "이 리포트가 말하는 것: 각 대상이 응답했는지, 응답이 얼마나 걸렸는지, 이 PC의 링크가 끊긴 것이 관측되었는지입니다. "
+        + "말하지 않는 것: 끊김이 어느 장비·회선·사업자 쪽에서 생겼는지입니다. '가능성이 높은 곳'은 PC → 공유기 → 인터넷 개념도 위의 표시이며 실제 경로를 증명하지 않습니다.";
 
-    public const string MaskedNote = "식별 정보를 가린 리포트입니다. 대상은 역할과 순번으로, 사업자는 서로 다른지만, 측정 ID는 시각 부분만 적었습니다. 날짜와 시각은 그대로입니다.";
+    public const string MaskedNote = "식별 정보를 가린 리포트입니다. 대상은 역할과 순번으로, 사업자는 서로 다른지만 알 수 있게 '사업자 A·B'로, 어댑터는 종류와 순번으로, 측정 ID는 시각 부분만 적었습니다. 날짜와 시각은 그대로입니다.";
 
     public const string UnmaskedNote = "가리지 않은 리포트입니다. 대상 이름·주소, 사업자 이름, 네트워크 어댑터 이름, 측정 ID가 그대로 들어 있습니다. 다른 사람에게 보낼 때는 가린 리포트를 만드세요.";
 
@@ -56,7 +56,7 @@ public static class ReportTexts
 
     /// <summary>
     /// 끊김 길이 (M8 설계 3.1 [1-9]). 기록 끝에서 열린 끊김: 끝난 기록은 "측정 끝까지 이어짐 (n초 이상)",
-    /// 끝 기록 없음은 "마지막 관측까지 이어짐, 그 뒤는 알 수 없음 (n초 이상)". "이어지는 중"은 쓰지 않는다 (측정 중 화면의 말).
+    /// 정상 종료 기록 없음은 "마지막 관측까지 이어짐, 그 뒤는 알 수 없음 (n초 이상)". "이어지는 중"은 쓰지 않는다 (측정 중 화면의 말).
     /// </summary>
     public static string Duration(long minMs, long? maxMs, int rounds, bool openAtEnd, RecordLifecycle life)
     {
@@ -78,7 +78,7 @@ public static class ReportTexts
     public static string ListCapTitle(int shown, int total) => $"길이가 긴 끊김 {shown}개 (전체 {total}개)";
 
     public static string ListCapNote(int total, int shown) =>
-        $"끊김 {total}개 가운데 길이가 긴 {shown}개를 시간순으로 적었습니다 (최소 길이가 긴 순, 같으면 먼저 시작한 것; 끝을 모르는 끊김은 최소 길이로). "
+        $"끊김 {total}개 가운데 길이가 긴 {shown}개를 시간순으로 적었습니다 (최소 길이가 긴 순, 같으면 먼저 시작한 것. 끝을 모르는 끊김은 최소 길이로 셈). "
         + $"나머지 {total - shown}개는 위 판정별 통계에 들어 있습니다.";
 
     public static string MoreParts(int n) => $"나머지 하위 구간 {n}개";
@@ -87,13 +87,13 @@ public static class ReportTexts
 
     // ---------------- 링크 근거 (R2) ----------------
 
-    /// <summary>R2 네 상태 (기획서 6.2): 수집 미지원 / 접근 거부 / 관측했으나 이벤트 없음 / 끊김 관측.</summary>
+    /// <summary>R2 네 상태 (기획서 6.2): 기록 미지원 / 접근 거부 / 관측했지만 끊김 기록 없음 / 끊김 관측.</summary>
     public static string LinkState(LinkDisplay d) => d switch
     {
         LinkDisplay.Down => "끊김 관측",
         LinkDisplay.Denied => "접근 거부",
-        LinkDisplay.ObservedNone => "관측했으나 이벤트 없음",
-        _ => "수집 미지원",
+        LinkDisplay.ObservedNone => "관측했지만 끊김 기록 없음",
+        _ => "이 어댑터는 기록을 지원하지 않음",
     };
 
     public const string NoLinkEvidence = "링크 근거를 모으지 못했습니다 (근거 기록이 없음). 이 PC 쪽 링크가 끊겼는지는 이 리포트로 말할 수 없습니다.";
@@ -111,8 +111,8 @@ public static class ReportTexts
             {
                 "partial" => "일부만 관측",
                 "overflow" => "알림이 넘쳐 일부 빠짐",
-                "denied" => "수집 능력: 접근 거부",
-                "unsupported" => "수집 능력: 미지원",
+                "denied" => "기록을 읽을 권한 없음",
+                "unsupported" => "이 어댑터는 기록을 지원하지 않음",
                 "interrupted" => "끝 요약 없이 기록이 멈춤",
                 _ => Code(x),
             };
@@ -144,6 +144,53 @@ public static class ReportTexts
     public static string RouteKind(string? kind) => kind switch { "wired" => "유선", "wireless" => "Wi‑Fi", null => "알 수 없음", _ => "기타" };
 
     public static string AdapterKind(string? kind) => kind switch { "wired" => "유선 어댑터", "wireless" => "무선 어댑터", _ => "기타 어댑터" };
+
+    // ---------------- Wi‑Fi 신호 (M12 설계 C) ----------------
+
+    /// <summary>품질 % (소수 한 자리까지). 값이 없으면 "값 없음".</summary>
+    public static string Quality(double? q) => q is double v ? v.ToString("0.#", CultureInfo.InvariantCulture) + "%" : "값 없음";
+
+    public static string Quality(int? q) => Quality(q is int v ? (double?)v : null);
+
+    /// <summary>RSSI dBm (소수 한 자리까지). 값이 없으면 "값 없음".</summary>
+    public static string Rssi(double? r) => r is double v ? v.ToString("0.#", CultureInfo.InvariantCulture) + " dBm" : "값 없음";
+
+    public static string Rssi(int? r) => Rssi(r is int v ? (double?)v : null);
+
+    public static string SignalStateName(SignalState s) => s switch
+    {
+        Evidence.SignalState.Ok => "읽음",
+        Evidence.SignalState.NotConnected => "연결 안 됨",
+        Evidence.SignalState.Denied => "권한 없음",
+        Evidence.SignalState.Unsupported => "지원 안 함",
+        _ => "읽기 실패",
+    };
+
+    /// <summary>상태별 시간 비율 ("읽음 95% · 연결 안 됨 5%"). 끝 요약이 없는 기록은 "마지막 관측까지"를 붙인다.</summary>
+    public static string SignalStates(SignalStateCounts ms, bool lastObserved)
+    {
+        long total = ms.Total;
+        var parts = Enum.GetValues<SignalState>().Where(s => ms[s] > 0)
+            .Select(s => $"{SignalStateName(s)} {LiveSummary.Percent((double)ms[s] / total)}").ToList();
+        string text = parts.Count == 0 ? "관측 시간 없음" : string.Join(" · ", parts);
+        return lastObserved ? text + " (정상 종료 기록 없음, 마지막 관측까지)" : text;
+    }
+
+    public static string OtherWirelessAdapters(int n) =>
+        $"그 밖의 무선 어댑터 {n}개에서도 신호를 읽었습니다. 경로에 쓰인 어댑터와 시간이 겹쳐 표와 그림에는 넣지 않았습니다.";
+
+    /// <summary>끊김 동안 관측한 신호 (관측만, 끊김이 어디서 생겼는지 말하지 않음).</summary>
+    public static string? SignalDuringEpisodes(int episodes, int? minQuality, IReadOnlyCollection<SignalState> states)
+    {
+        var parts = new List<string>();
+        if (minQuality is int q) parts.Add($"신호 품질 최저 {q}%");
+        foreach (var s in states) parts.Add($"'{SignalStateName(s)}' 상태");
+        if (parts.Count == 0) return null;
+        return $"끊김 {episodes}번 동안 관측된 Wi‑Fi 신호: " + string.Join(", ", parts) + ".";
+    }
+
+    public const string SignalScope =
+        "Wi‑Fi 신호는 관측 근거로만 적습니다. 끊김 판정과 '가능성이 높은 곳'은 신호 값으로 바꾸지 않습니다. 신호 품질은 Windows가 알려 준 0~100% 값입니다.";
 
     // ---------------- 시각 ----------------
 

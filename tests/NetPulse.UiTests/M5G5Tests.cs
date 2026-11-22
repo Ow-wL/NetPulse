@@ -44,14 +44,9 @@ public sealed class M5G5Tests
         Record("bench-diagnose", new { segments = diagSegments, navSteps = b.GetProperty("navSteps").EnumerateArray().Where(n => n.TryGetProperty("segment", out _)).ToArray() });
         Assert.Equal(["diag-enter", "diag-run", "diag-reenter"], diagSegments.Select(s => s.GetProperty("Segment").GetString()));
         var problems = new List<string>();
-        foreach (var s in b.GetProperty("segments").EnumerateArray())
-        {
-            string seg = s.GetProperty("Segment").GetString()!;
-            double p95 = s.GetProperty("P95").GetDouble(), max = s.GetProperty("Max").GetDouble();
-            int over = s.GetProperty("Over33").GetInt32();
-            if (seg == "idle-live" && p95 > FrameBudget.IdleP95) problems.Add($"{seg} 95백분위 {p95:0.0} > {FrameBudget.IdleP95}");
-            if (seg != "idle-live" && (max > FrameBudget.TransitionMax || over > FrameBudget.TransitionHitches)) problems.Add($"{seg} 최대 {max:0.0} ms, 33 ms 초과 {over}회");
-        }
+        var verdicts = b.GetProperty("segments").EnumerateArray()
+            .Select(s => Perf.Check(s, s.GetProperty("Segment").GetString() == "idle-live" ? PerfKind.Idle : PerfKind.Transition, problems)).ToList();   // M12 설계 G2
+        Perf.Record("measure", verdicts);
         double analysisP95 = b.GetProperty("analysis").GetProperty("p95Ms").GetDouble();
         if (analysisP95 > 500) problems.Add($"잠정 분석 95백분위 {analysisP95:0} ms > 500");
         long mb = Math.Max(b.GetProperty("privateMb").GetInt64(), b.TryGetProperty("peakPrivateMb", out var peak) ? peak.GetInt64() : 0);   // 실행 중 최고치까지
@@ -77,12 +72,12 @@ public sealed class M5G5Tests
             app.Select("nav.home");
             var d = app.WaitDiag(x => x, x => M5Fixtures.Str(x, "screen") == "home" && x.GetProperty("reduceMotion").GetBoolean()
                 && x.GetProperty("active").GetProperty("move").GetInt32() + x.GetProperty("active").GetProperty("scale").GetInt32() + x.GetProperty("active").GetProperty("repeat").GetInt32() == 0, "움직임 0");
-            Thread.Sleep(700);
-            using var a = app.CaptureBitmap();
+            var (settledShot, shotWait) = app.WaitSettledAndCapture();   // 고정 대기 대신 상태 기반 대기 (M12 G1-B). 그 뒤 500 ms 간격 비교는 그대로
+            using var a = settledShot;
             Thread.Sleep(500);
             using var b = app.CaptureBitmap();
             var diff = ImageCompare.Diff(a, b);
-            Record("reducedmotion-home", new { diff.Mean, diff.P99, active = d.GetProperty("active") });
+            Record("reducedmotion-home", new { diff.Mean, diff.P99, active = d.GetProperty("active"), captureWait = shotWait.Json });
             Assert.True(diff.Mean <= 1.0 && diff.P99 <= 4, $"캡처 차이 평균 {diff.Mean:0.00}, 99백분위 {diff.P99}");
             app.Close();
         }

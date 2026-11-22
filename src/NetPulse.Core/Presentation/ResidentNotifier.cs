@@ -159,7 +159,7 @@ public sealed class ResidentNotifier
         segmentOpen = false;
         if (balloon && prefs.NotifyDropout && prefs.NotifyRecovered)
             notices.Add(new(NoticeKind.SegmentEnd, false, true, "끊김 관측이 끝났습니다",
-                $"관측이 이어진 시간 {(lastEndMs - segmentStartMs) / 1000}초. 측정은 계속됩니다.", false));
+                $"관측이 이어진 시간 {TimelineModel.AtLeast(lastEndMs - segmentStartMs)}. 측정은 계속됩니다.", false));
     }
 
     private static ResidentNotice StartNotice(ObservationKind kind) => kind == ObservationKind.LinkDown

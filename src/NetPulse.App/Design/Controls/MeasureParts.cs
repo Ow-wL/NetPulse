@@ -45,9 +45,9 @@ public sealed class GlassTextBox : GroupPanel
             r[key] = ui.Brushes.Transparent;
         foreach (var key in new[] { "TextControlForeground", "TextControlForegroundPointerOver", "TextControlForegroundFocused" })
             r[key] = ui.Brushes.Ink;
-        r["TextControlForegroundDisabled"] = ui.Brushes.Muted;
+        r["TextControlForegroundDisabled"] = ui.Brushes.Disabled;
         foreach (var key in new[] { "TextControlPlaceholderForeground", "TextControlPlaceholderForegroundPointerOver", "TextControlPlaceholderForegroundFocused", "TextControlPlaceholderForegroundDisabled" })
-            r[key] = ui.Brushes.Muted;
+            r[key] = ui.Brushes.Disabled;   // 자리표시는 고대비에서 GrayText 그대로 (보조 글이 WindowText가 되어도 입력한 글과 구별되게, M11 C3)
         r["TextControlBorderBrush"] = ui.Brushes.Edge;
         r["TextControlBorderBrushPointerOver"] = ui.Brushes.Muted;
         r["TextControlBorderBrushDisabled"] = ui.Brushes.Edge;
@@ -181,13 +181,17 @@ public sealed class Banner : GroupPanel
     public Banner(Ui ui, string automationId, BannerKind kind, string text) : base(automationId, text)
     {
         var (icon, brush) = kind switch { BannerKind.Error => (Icons.Alert, ui.Brushes.Bad), BannerKind.Warn => (Icons.Alert, ui.Brushes.Warn), _ => (Icons.Info, ui.Brushes.Accent) };
+        var ink = ui.Brushes.Ink;
+        // 실측 대비 시험 (M12 설계 F): 아이콘과 글만 투명하게 그려 배너 유리를 찍는다
+        if (ui.Options.HideMeasuredText) brush = ink = ui.Brushes.Transparent;
         var row = new Grid { ColumnSpacing = Space.S3 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         var i = Icons.Make(icon, brush, Size.IconM);
         i.VerticalAlignment = VerticalAlignment.Top;
         row.Children.Add(i);
-        var t = Fonts.Wrapped(text, Typography.Body, ui.Brushes.Ink);
+        var t = Fonts.Wrapped(text, Typography.Body, ink);
+        AutomationProperties.SetAutomationId(t, automationId + ".text");
         Grid.SetColumn(t, 1);
         row.Children.Add(t);
         AutomationProperties.SetItemStatus(this, kind.ToString().ToLowerInvariant());
