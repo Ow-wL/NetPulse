@@ -1,0 +1,3 @@
+# M11 캡처 장면 목록 (설계 C1, 장면 포함표 M11-completion.md). 형식은 m5-scenes.txt와 같다.
+# 기본 장면에 없던 상태만 둔다. 대체 모드 장면(고대비·효과 줄이기·움직임 줄이기·고대비+150%)은 M11MatrixTests.Extras가 다른 목록의 장면을 그대로 쓴다.
+firstrun-noipv4|none|--demo tests:detect-noipv4|wait:firstrun=NoIpv4Route

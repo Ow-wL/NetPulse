@@ -209,6 +209,8 @@ public sealed class PageHeader : GroupPanel
         if (overline is null) Overline.Visibility = Visibility.Collapsed;
         Title = Fonts.Text(title, Typography.Title, ui.Brushes.Ink);
         AutomationProperties.SetAutomationId(Title, automationId + ".title");
+        // 실측 대비 시험 (M11 설계 C2): 화면 머리 글자만 투명하게
+        if (ui.Options.HideMeasuredText) Overline.Foreground = Title.Foreground = ui.Brushes.Transparent;
         left.Children.Add(Overline);
         left.Children.Add(Title);
         grid.Children.Add(left);

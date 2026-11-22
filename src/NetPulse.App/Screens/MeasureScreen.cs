@@ -453,7 +453,7 @@ public sealed class MeasureScreen : Screen
             AutomationProperties.SetAutomationId(sentence, "measure.result.sentence");
             stack.Children.Add(sentence);
             long longest = a.Episodes.Count == 0 ? 0 : a.Episodes.Max(e => e.MinDurationMs);
-            var counts = Fonts.Text(a.Episodes.Count == 0 ? "끊김 관측 안 됨" : $"끊김 {a.Episodes.Count}회 · 최장 {TimelineModel.Seconds(longest)} 이상",
+            var counts = Fonts.Text(a.Episodes.Count == 0 ? "끊김 관측 안 됨" : $"끊김 {a.Episodes.Count}회 · 최장 {TimelineModel.AtLeast(longest)} 이상",
                 Typography.Body, Ui.Brushes.Muted);
             AutomationProperties.SetAutomationId(counts, "measure.result.outages");
             stack.Children.Add(counts);

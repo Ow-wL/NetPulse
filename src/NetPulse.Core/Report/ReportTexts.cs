@@ -27,7 +27,7 @@ public static class ReportTexts
 
     public const string MaskedNote = "식별 정보를 가린 리포트입니다. 대상은 역할과 순번으로, 사업자는 서로 다른지만, 측정 ID는 시각 부분만 적었습니다. 날짜와 시각은 그대로입니다.";
 
-    public const string UnmaskedNote = "가리지 않은 리포트입니다. 대상 이름·주소·사업자 이름이 그대로 들어 있습니다. 다른 사람에게 보낼 때는 가린 리포트를 만드세요.";
+    public const string UnmaskedNote = "가리지 않은 리포트입니다. 대상 이름·주소, 사업자 이름, 네트워크 어댑터 이름, 측정 ID가 그대로 들어 있습니다. 다른 사람에게 보낼 때는 가린 리포트를 만드세요.";
 
     public const string MaskedNoMemos = "가린 리포트에는 증상 메모를 넣지 않습니다 (자유 글 속 식별 정보를 다 가릴 수 없어서). 메모는 가리기를 끈 리포트에서 넣을 수 있습니다.";
 
@@ -62,8 +62,8 @@ public static class ReportTexts
     {
         if (openAtEnd && maxMs is null)
             return life == RecordLifecycle.NoSummary
-                ? $"마지막 관측까지 이어짐, 그 뒤는 알 수 없음 ({TimelineModel.Seconds(minMs)} 이상)"
-                : $"측정 끝까지 이어짐 ({TimelineModel.Seconds(minMs)} 이상)";
+                ? $"마지막 관측까지 이어짐, 그 뒤는 알 수 없음 ({TimelineModel.AtLeast(minMs)} 이상)"
+                : $"측정 끝까지 이어짐 ({TimelineModel.AtLeast(minMs)} 이상)";
         return RecordView.Duration(minMs, maxMs, rounds);
     }
 
@@ -113,7 +113,7 @@ public static class ReportTexts
                 "overflow" => "알림이 넘쳐 일부 빠짐",
                 "denied" => "수집 능력: 접근 거부",
                 "unsupported" => "수집 능력: 미지원",
-                "interrupted" => "끝 요약 없이 기록이 끊김",
+                "interrupted" => "끝 요약 없이 기록이 멈춤",
                 _ => Code(x),
             };
             if (!parts.Contains(text)) parts.Add(text);

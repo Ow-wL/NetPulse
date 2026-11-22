@@ -47,7 +47,7 @@ public sealed class M5MatrixTests
         try
         {
             foreach (var a in scene.Actions) Act(app, a);
-            return app;
+            return app.OwnUserData();   // 장면 폴더는 앱을 끝낼 때 지운다 (호출부는 폴더를 따로 지우지 않는다)
         }
         catch
         {

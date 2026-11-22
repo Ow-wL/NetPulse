@@ -169,8 +169,8 @@ public static class ReportBuilder
                 stats.Select(s => new ReportRow([
                     new(ReportRun.Gen(RecordView.VerdictName(s.Verdict)), "verdict.name"),
                     new(ReportRun.Gen($"{s.Count}번"), "verdict.count"),
-                    new(ReportRun.Gen($"{TimelineModel.Seconds(s.LongestMinMs)} 이상"), "verdict.longest"),
-                    new(ReportRun.Gen($"{TimelineModel.Seconds((long)Math.Round(s.AverageMinMs))} 이상"), "verdict.average"),
+                    new(ReportRun.Gen($"{TimelineModel.AtLeast(s.LongestMinMs)} 이상"), "verdict.longest"),
+                    new(ReportRun.Gen($"{TimelineModel.AtLeast((long)s.AverageMinMs)} 이상"), "verdict.average"),
                     new(ReportRun.Gen($"{s.OpenEnded}번"), "verdict.open"),
                 ])).ToArray()));
             int partCount = stats.Sum(s => s.Count);
@@ -223,7 +223,7 @@ public static class ReportBuilder
         {
             var blocks = new List<ReportBlock>();
             var stats = record.Stats ?? StatsCalculator.Compute(rounds, targets.Select(t => t.Id).ToArray(), record.Gaps);
-            blocks.Add(new ReportTable("대상별 응답", Cols("대상", "역할", "방식", "유효 응답", "응답 없음", "손실률", "평균 지연", "최대 지연", "최대 연속 응답 없음", "검사 오류"),
+            blocks.Add(new ReportTable("대상별 응답", Cols("대상", "역할", "방식", "유효 시도", "응답 없음", "손실률", "평균 지연", "최대 지연", "최대 연속 응답 없음", "검사 오류"),
                 targets.Select(t =>
                 {
                     var s = stats.Targets.FirstOrDefault(x => x.TargetId == t.Id);

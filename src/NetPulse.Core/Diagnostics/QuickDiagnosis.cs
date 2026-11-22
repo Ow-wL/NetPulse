@@ -268,7 +268,7 @@ public static class QuickDiagnosis
             (4, Is(CheckId.Https, CheckJudgment.Fail, CheckJudgment.Check) && Is(CheckId.Portal, CheckJudgment.Check), () => new(4,
                 "공용 Wi‑Fi 로그인이나 프록시 정책 때문에 웹 연결이 막혀 있을 수 있습니다.", ["브라우저로 아무 웹 페이지나 열어 로그인 화면이 나오는지 확인하세요."])),
             (5, Is(CheckId.Adapter, CheckJudgment.Fail) && Is(CheckId.Tcp, CheckJudgment.Fail) && Is(CheckId.Https, CheckJudgment.Fail), () => new(5,
-                "이 PC의 네트워크 연결 자체에 문제가 있습니다" + Partly(tcp) + ".", ["케이블이나 Wi‑Fi 접속 상태를 확인하세요."])),
+                "이 PC의 네트워크 연결에 문제가 있을 수 있습니다" + Partly(tcp) + ".", ["케이블이나 Wi‑Fi 접속 상태를 확인하세요."])),
             (6, Is(CheckId.Tcp, CheckJudgment.Fail) && Is(CheckId.Https, CheckJudgment.Fail), () => new(6,
                 (gateway.Judgment switch
                 {
@@ -322,7 +322,7 @@ public static class QuickDiagnosis
 
     public static string JudgmentName(CheckJudgment j) => j switch
     {
-        CheckJudgment.Normal => "정상", CheckJudgment.Check => "확인", CheckJudgment.Fail => "실패", _ => "미측정",
+        CheckJudgment.Normal => "정상", CheckJudgment.Check => "확인 필요", CheckJudgment.Fail => "실패", _ => "확인 못 함",   // "확인"이 정상 확인으로, "측정"이 진단과 섞여 읽혔다 (M11 문구 점검)
     };
 
     /// <summary>이전 결과와 판정이 바뀐 검사 (화면은 M6).</summary>

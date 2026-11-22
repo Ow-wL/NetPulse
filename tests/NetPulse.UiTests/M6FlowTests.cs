@@ -377,6 +377,39 @@ public sealed class M6FlowTests
         finally { AppDriver.DeleteUserData(userData); }
     }
 
+    // ---------------- 7-1. Windows 설정 열기 (F7, M11 설계 B1) ----------------
+
+    /// <summary>
+    /// 보조 도구의 설정 단추 셋과 결론 자리의 [네트워크 설정 열기]가 각자 맞는 설정 페이지를 한 번씩 부른다.
+    /// 데모의 시스템 동작 대체(<c>DemoSystemActions</c>)가 호출을 기록만 하므로 실제 설정 창은 열리지 않는다 (허용 목록 경로는 같다).
+    /// </summary>
+    [Fact]
+    public void SettingsButtonsOpenTheMatchingWindowsSettingsPageOnce()
+    {
+        var userData = AppDriver.NewUserData();
+        try
+        {
+            using var app = Open(userData, "profile", "--demo tests:diag-link --screen diagnose");
+            app.WaitDiag(d => M5Fixtures.Str(d, "screen"), s => s == "diagnose", "진단 화면");
+            app.Invoke("diagnose.start");
+            var d = WaitRun(app);
+            Assert.Equal(1, Sd(d).GetProperty("conclusion").GetInt32());                   // 결론 1 → 결론 자리에 네트워크 설정 단추
+            Assert.Empty(Sd(d).GetProperty("actions").EnumerateArray());                   // 검사만으로는 아무것도 부르지 않는다
+            string[] expected = [];
+            foreach (var (button, page) in new[] { ("diagnose.settings.network", "Network"), ("diagnose.settings.wifi", "Wifi"), ("diagnose.settings.proxy", "Proxy"), ("diagnose.conclusion.settings", "Network") })
+            {
+                app.Invoke(button);
+                expected = [.. expected, "settings:" + page];
+                var actions = app.WaitDiag(x => Sd(x).GetProperty("actions").EnumerateArray().Select(a => a.GetString()!).ToArray(), a => a.Length == expected.Length, button);
+                Assert.Equal(expected, actions);                                            // 그 페이지, 한 번, 순서대로
+                Assert.Equal("settings:" + page, S(app.Diag(), "lastAction"));
+            }
+            Assert.Equal("", app.Text("diagnose.tools.status"));                            // 실패 문구 없음
+            Assert.Equal(0, app.Close());
+        }
+        finally { AppDriver.DeleteUserData(userData); }
+    }
+
     // ---------------- 8. 기록 폴더 열기 ----------------
 
     [Fact]

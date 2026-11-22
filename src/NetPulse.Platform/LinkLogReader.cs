@@ -37,11 +37,9 @@ public sealed class LinkLogReader : ILinkLogSource
             // 무선
             foreach (var record in Query("Microsoft-Windows-WLAN-AutoConfig/Operational", LinkCatalog.WlanQuery(fromUtc, toUtc), watch, timeout, wlanCap, optional: true))
             {
-                var guid = NamedData(record, "InterfaceGuid");
-                var state = LinkCatalog.WlanState(record.Id);
-                if (guid is null || state is null) { unparsed++; continue; }
-                var key = adapters.FirstOrDefault(a => SameGuid(a.Key, guid))?.Key;
-                events.Add(new LogLinkEvent(key, key is null ? LinkMatch.Unlinked : LinkMatch.Linked, state.Value, Utc(record)));
+                var parsed = LinkCatalog.ParseWlan(record.Id, NamedData(record, "InterfaceGuid"), Utc(record), adapters);
+                if (parsed is null) { unparsed++; continue; }
+                events.Add(parsed);
             }
             // 어댑터별 지원 여부 (2-1): 유선은 지난 30일 해석표 공급자 이벤트가 그 어댑터에 유일하게 대응된 적이 있어야
             var lookback = DateTimeOffset.UtcNow - LinkCatalog.SupportLookback;
@@ -58,7 +56,7 @@ public sealed class LinkLogReader : ILinkLogSource
             {
                 if (a.Kind == "wired") perAdapter[a.Key] = supportedWired.Contains(a.Key) ? (LinkCapability.Supported, null)
                     : (LinkCapability.Unsupported, lookbackCap.Hit ? "lookback-truncated" : "no-known-driver");
-                else if (a.Kind == "wireless") perAdapter[a.Key] = wlanReadable ? (LinkCapability.Supported, null) : (LinkCapability.Unsupported, "wlan-log-unavailable");
+                else if (a.Kind == "wireless") perAdapter[a.Key] = LinkCatalog.WirelessSupport(wlanReadable);
                 else perAdapter[a.Key] = (LinkCapability.Unsupported, "no-known-driver");
             }
             if (watch.Elapsed > timeout) return new LinkLogResult(perAdapter, events, unparsed, LinkCapability.Unsupported, "timeout");
@@ -125,17 +123,11 @@ public sealed class LinkLogReader : ILinkLogSource
 
     private static string? NamedData(EventRecord r, string name)
     {
-        try
-        {
-            var xml = XDocument.Parse(r.ToXml());
-            XNamespace ns = "http://schemas.microsoft.com/win/2004/08/events/event";
-            return xml.Descendants(ns + "Data").FirstOrDefault(d => (string?)d.Attribute("Name") == name)?.Value;
-        }
-        catch (Exception ex) when (ex is System.Xml.XmlException or EventLogException) { return null; }
+        string xml;
+        try { xml = r.ToXml(); }
+        catch (EventLogException) { return null; }
+        return LinkCatalog.EventData(xml, name);
     }
-
-    private static bool SameGuid(string key, string text) =>
-        Guid.TryParse(key, out var a) && Guid.TryParse(text, out var b) && a == b;
 
     private sealed record AnyAdapter(string Key, string Description);
 
@@ -188,6 +180,40 @@ public static class LinkCatalog
     }
 
     public static LinkState? WlanState(int id) => id switch { WlanDisconnected => LinkState.Down, WlanConnected => LinkState.Up, _ => null };
+
+    /// <summary>
+    /// 이벤트 XML에서 이름 있는 데이터 값 (M11 설계 B3 계약). 그 이름의 데이터가 없거나 XML을 읽지 못하면 null.
+    /// 데이터가 있으면 빈 글도 그대로 돌려준다.
+    /// </summary>
+    public static string? EventData(string eventXml, string name)
+    {
+        try
+        {
+            var xml = XDocument.Parse(eventXml);
+            XNamespace ns = "http://schemas.microsoft.com/win/2004/08/events/event";
+            return xml.Descendants(ns + "Data").FirstOrDefault(d => (string?)d.Attribute("Name") == name)?.Value;
+        }
+        catch (System.Xml.XmlException) { return null; }
+    }
+
+    /// <summary>
+    /// 무선 이벤트 하나 해석 (M11 설계 B3 계약). Id가 8001·8003이 아니거나 <paramref name="interfaceGuid"/>가 null이면 null(해석 안 됨).
+    /// 값이 있으면 측정 어댑터 키와 GUID로 비교해 같으면 Linked, 아니면(다른 GUID, GUID가 아닌 글, 빈 글) 어댑터 없는 Unlinked 사건.
+    /// </summary>
+    public static LogLinkEvent? ParseWlan(int id, string? interfaceGuid, DateTimeOffset wall, IReadOnlyList<AdapterInfo> adapters)
+    {
+        var state = WlanState(id);
+        if (interfaceGuid is null || state is null) return null;
+        var key = adapters.FirstOrDefault(a => SameGuid(a.Key, interfaceGuid))?.Key;
+        return new LogLinkEvent(key, key is null ? LinkMatch.Unlinked : LinkMatch.Linked, state.Value, wall);
+    }
+
+    /// <summary>무선 어댑터의 지원 여부: 무선 로그를 읽을 수 있으면 Supported, 아니면 Unsupported "wlan-log-unavailable" (B3 계약).</summary>
+    public static (LinkCapability Capability, string? Reason) WirelessSupport(bool wlanReadable) =>
+        wlanReadable ? (LinkCapability.Supported, null) : (LinkCapability.Unsupported, "wlan-log-unavailable");
+
+    public static bool SameGuid(string key, string text) =>
+        Guid.TryParse(key, out var a) && Guid.TryParse(text, out var b) && a == b;
 
     private static string Iso(DateTimeOffset t) => t.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
 }

@@ -70,7 +70,7 @@ public static class RecordView
             EndReason.Completed => "계획한 시간을 마침",
             EndReason.Stopped => "사용자가 멈춤",
             EndReason.Error => "오류로 끝남",
-            EndReason.Interrupted => "중간에 끊김",
+            EndReason.Interrupted => "중간에 중단됨",   // 네트워크 "끊김"과 섞이지 않게 (M11 문구 점검)
             _ => "끝 사유 알 수 없음",
         },
     };
@@ -125,7 +125,7 @@ public static class RecordView
     public static string Duration(long minMs, long? maxMs, int rounds)
     {
         if (rounds <= 1) return maxMs is long m1 ? $"1회차 · 최대 약 {TimelineModel.Seconds(m1)}" : "1회차";
-        if (maxMs is not long max) return $"{TimelineModel.Seconds(minMs)} 이상";
+        if (maxMs is not long max) return $"{TimelineModel.AtLeast(minMs)} 이상";
         // 반올림한 두 값이 같으면 범위로 쓰지 않는다 ("약 1시간 6분~1시간 6분", M8 Edge 확인)
         string lo = TimelineModel.Seconds(minMs), hi = TimelineModel.Seconds(max);
         return lo == hi ? $"약 {lo}" : $"약 {lo}~{hi}";
@@ -148,7 +148,7 @@ public static class RecordView
 
         var verdicts = a.Stats.Where(s => s.Verdict != Verdict.Normal && s.Count > 0)
             .Select(s => new VerdictLine(s.Verdict, VerdictName(s.Verdict), s.Count,
-                $"{s.Count}번 · 가장 긴 것 {TimelineModel.Seconds(s.LongestMinMs)} 이상 · 평균 {TimelineModel.Seconds((long)Math.Round(s.AverageMinMs))} 이상"
+                $"{s.Count}번 · 가장 긴 것 {TimelineModel.AtLeast(s.LongestMinMs)} 이상 · 평균 {TimelineModel.AtLeast((long)s.AverageMinMs)} 이상"
                 + (s.OpenEnded > 0 ? $" · 끝을 모르는 것 {s.OpenEnded}번" : "")))
             .ToArray();
         int parts = verdicts.Sum(v => v.Count);

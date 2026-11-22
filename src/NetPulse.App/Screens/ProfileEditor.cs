@@ -439,6 +439,7 @@ public sealed class ProfileEditor : Screen
     {
         var (ok, list, fieldErrors) = Check();
         return new { dirty, locked, saveEnabled = save.IsEnabled, ok, errors = list.Where(i => i.Severity == IssueSeverity.Error).Select(i => i.Code).Concat(fieldErrors.Keys).ToArray(),
-            warnings = list.Where(i => i.Severity == IssueSeverity.Warning).Select(i => i.Code).ToArray(), profiles = profiles.Count, targets = Current.Targets.Count };
+            warnings = list.Where(i => i.Severity == IssueSeverity.Warning).Select(i => i.Code).ToArray(), profiles = profiles.Count, targets = Current.Targets.Count,
+            name = Current.Name };   // 이름 칸 입력이 초안에 들어갔는지 (시험이 다음 조작 전에 기다린다, 바뀜 알림은 비동기)
     }
 }

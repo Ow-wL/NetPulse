@@ -68,6 +68,7 @@ public static class ScreenParts
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var t = Fonts.Text(title, Typography.Headline, ui.Brushes.Ink);
         t.VerticalAlignment = VerticalAlignment.Center;
+        AutomationProperties.SetAutomationId(t, id + ".title");   // 실측 대비 시험이 찾는 카드 제목 (M11 설계 C2)
         head.Children.Add(t);
         var n = Fonts.Text(note ?? "", Typography.Caption, ui.Brushes.Muted);
         n.VerticalAlignment = VerticalAlignment.Center;
@@ -82,6 +83,8 @@ public static class ScreenParts
         Grid.SetColumn(actions, 2);
         head.Children.Add(actions);
         stack.Children.Add(head);
+        // 실측 대비 시험 (M11 설계 C2, M5 설계 7.4와 같은 방식): 카드 제목·작은 글만 투명하게 그려 그 뒤 배경을 찍는다 (공유 브러시는 바꾸지 않는다)
+        if (ui.Options.HideMeasuredText) t.Foreground = n.Foreground = ui.Brushes.Transparent;
         var body = new CardBody(n);
         Grid.SetRow(body, 1);
         stack.Children.Add(body);
