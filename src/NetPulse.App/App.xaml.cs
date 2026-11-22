@@ -20,6 +20,7 @@ public partial class App : Application
 
     public App()
     {
+        StartupTrace.Step("app");
         InitializeComponent();
         // 처리되지 않은 예외는 종류·HRESULT·우리 코드 쪽 스택 줄까지 남긴다 (드문 종료 충돌의 원인을 다음에 바로 보려고)
         UnhandledException += (_, e) => log?.Write("unhandled", new
@@ -39,6 +40,7 @@ public partial class App : Application
         // 화면 앱: 전체(2세대) 수집이 프레임을 막지 않게 (M5 이월 2, M6 bench: 긴 측정의 잠정 분석이 2세대 수집을 일으켜
         // 화면 이동 프레임이 예산 가까이 튀었다). 메모리가 모자라면 런타임이 그래도 막는 수집을 한다
         System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.SustainedLowLatency;
+        StartupTrace.Step("launched");
         StartupOptions parsed;
         try { parsed = StartupOptions.Parse(Environment.GetCommandLineArgs().Skip(1).ToArray()); }
         catch (Exception ex) when (ex is ArgumentException or FormatException or OverflowException)
@@ -93,6 +95,10 @@ public partial class App : Application
     {
         Directory.CreateDirectory(options.UserData);
         log = new AppLog(options.UserData);
+        // 시작 단계 기록 (M12 설계 B2): 앞 실행이 정상 종료 표시 없이 끝났으면 그 도달 지점, 기록 파일을 쓰지 못했으면 그 사실
+        if (StartupTrace.PreviousInterrupted is { } previous)
+            log.Write("previousRunInterrupted", new { run = previous.Run, lastStep = previous.LastStep, at = previous.LastAt, steps = previous.Steps });
+        if (StartupTrace.Failure is { } traceFailure) log.Write("startTraceFailed", new { type = traceFailure });
         if (options.TestInjectionAllowed)
         {
             if (options.FakeVersion is { } fake) AppInfo.Override(fake);
@@ -109,9 +115,11 @@ public partial class App : Application
         }
         if (TermsConsent.IsAccepted(options.UserData))
         {
+            StartupTrace.Step("consented");
             LaunchAfterConsent(options, log, owner, termsSaved: true);
             return;
         }
+        StartupTrace.Step("terms");
         var terms = new TermsWindow(options, log);
         window = terms;
         instanceHandler = command =>
@@ -200,12 +208,15 @@ public partial class App : Application
             if (options.Demo is not null && options.UserDataGiven) FaultMoveOps.Configure(moves, moveFail);
             else log.Write("moveFailRefused", new { });
         }
+        StartupTrace.Step("host");
         var shell = new AppShell(options, log, settings, host, recent, memos, diagnosis, ShutdownAsync,
             new ResidentServices(moves, workGate, recordStartup, TermsNotSaved: !termsSaved));
+        StartupTrace.Step("shell");
         window = shell;
         shell.AttachInstance(owner!);
         instanceHandler = shell.OnInstanceCommand;
         window.Activate();
+        StartupTrace.Step("activated");
     }
 
     private void MarkForReplay()

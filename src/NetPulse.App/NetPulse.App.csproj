@@ -18,6 +18,8 @@
     <ApplicationIcon>Assets\NetPulse.ico</ApplicationIcon>
     <!-- 단일 파일 묶음은 압축하지 않는다: 이진 검사가 묶음 안 내용을 그대로 본다 (설계 B4) -->
     <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
+    <!-- 진입점은 Program.cs (M12 설계 B2: 관리 코드에 들어오자마자 시작 단계 기록) -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK.Base" />

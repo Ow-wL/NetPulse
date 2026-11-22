@@ -162,6 +162,13 @@ public sealed partial class AppShell : Window
         root.Loaded += (_, _) =>
         {
             log.Write("loaded", null);
+            StartupTrace.Step("loaded");
+            void FirstFrame(object? sender, object e)
+            {
+                Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= FirstFrame;
+                StartupTrace.Step("firstFrame");
+            }
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += FirstFrame;
             _ = recent.RefreshAsync(host.RunningId);
             _ = Task.Run(diagnosis.LoadRecent);
             StartScreen();
@@ -267,6 +274,7 @@ public sealed partial class AppShell : Window
             first = options.Screen ?? "measure";
         }
         Navigate(first, null);
+        StartupTrace.Step("ready");   // 첫 화면을 띄움 (시작 준비 완료, M12 설계 B2)
     }
 
     // ---------------- 탐색 ----------------
