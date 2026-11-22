@@ -64,9 +64,20 @@ public sealed class TimelinePanel : UserControl
     /// <summary>열 수 = 그래프 폭 (픽셀). 화면이 <see cref="TimelineModel.Frame"/>에 넘긴다.</summary>
     public int Columns => Math.Max(1, (int)Math.Round(ActualWidth));
 
+    /// <summary>마지막으로 받은 장면을 계산할 때 쓴 열 수 (화면은 <see cref="Columns"/>로 장면을 만들고 바로 <see cref="Show"/>한다). 진단·시험용 (M12 설계 A)</summary>
+    public int? FrameColumns { get; private set; }
+    /// <summary>처음 받은 장면의 열 수 (고치기 전 실행의 증거: 폭 0에서 만든 장면이면 1)</summary>
+    public int? FirstFrameColumns { get; private set; }
+    public bool HasFrame => frame is not null;
+
+    /// <summary>진단 값: 장면 유무, 지금 폭, 장면에 쓴 열 수. 장면이 있으면 열 수가 지금 폭과 같아야 한다 (M12 설계 A)</summary>
+    public object Diag() => new { hasFrame = HasFrame, width = ActualWidth, columns = Columns, frameColumns = FrameColumns, firstFrameColumns = FirstFrameColumns };
+
     public void Show(TimelineFrame next, Func<long, string> label, bool followingNow, string? range)
     {
         frame = next;
+        FrameColumns = Columns;
+        FirstFrameColumns ??= FrameColumns;
         timeLabel = label;
         follow = followingNow;
         AutomationProperties.SetName(this, next.Summary);

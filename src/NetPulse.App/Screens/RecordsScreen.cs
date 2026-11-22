@@ -1482,6 +1482,7 @@ public sealed class RecordsScreen : Screen
         var items = Context.Records.Items;
         return new
         {
+            timelineState = timeline?.Diag(),
             mode = mode.ToString(),
             listed = Context.Records.Listed,
             count = items.Count,

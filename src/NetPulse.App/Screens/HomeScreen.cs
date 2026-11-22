@@ -396,5 +396,5 @@ public sealed class HomeScreen : Screen
         return row;
     }
 
-    public override object? Diag() => new { recent = recentState, recentCount = Context.Recent.Items.Count, mapCandidate = map.Candidate.ToString() };
+    public override object? Diag() => new { recent = recentState, recentCount = Context.Recent.Items.Count, mapCandidate = map.Candidate.ToString(), timelineState = timeline.Diag() };
 }

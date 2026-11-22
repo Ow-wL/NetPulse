@@ -98,7 +98,9 @@ public sealed class M11MatrixTests
         var path = app.Save(shot, "matrix-" + name);
         var problems = M5MatrixTests.LayoutProblems(app.LayoutNow());
         var privacy = M9MatrixTests.PrivateText(app.Window);
-        Record("matrix-" + name, new { name, sceneFile = file, scene = sceneId, meta, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, layoutProblems = problems, privacy, diag = app.Diag() });
+        var diag = app.Diag();
+        problems.AddRange(M5MatrixTests.TimelineProblems(diag));
+        Record("matrix-" + name, new { name, sceneFile = file, scene = sceneId, meta, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, layoutProblems = problems, privacy, diag });
         Assert.Equal((Size.WindowWidth, Size.WindowHeight), (shot.Width, shot.Height));
         Assert.True(problems.Count == 0, string.Join("\n", problems));
         Assert.True(privacy.Count == 0, string.Join("\n", privacy));

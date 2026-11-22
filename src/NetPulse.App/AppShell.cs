@@ -165,7 +165,9 @@ public sealed partial class AppShell : Window
             _ = recent.RefreshAsync(host.RunningId);
             _ = Task.Run(diagnosis.LoadRecent);
             StartScreen();
-            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => { if (!closing) foreach (var id in new[] { "home", "measure", "diagnose", "records", "report" }) screens.Prepare(id); });   // 진단도 미리 (M6 bench diag-enter 40 ms대), 기록도 (M7 bench records-enter 50 ms대), 리포트도 (M8 bench report-enter 64 ms 한 번)
+            // 시험 --test-finish-before-layout: 측정 화면은 미리 배치하지 않는다 (끝난 스냅숏을 배치 전에 받게, M12 설계 A)
+            var prepare = options.TestFinishBeforeLayout ? new[] { "home", "diagnose", "records", "report" } : new[] { "home", "measure", "diagnose", "records", "report" };
+            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => { if (!closing) foreach (var id in prepare) screens.Prepare(id); });   // 진단도 미리 (M6 bench diag-enter 40 ms대), 기록도 (M7 bench records-enter 50 ms대), 리포트도 (M8 bench report-enter 64 ms 한 번)
             // 기록 화면이 처음 쓰는 메서드는 백그라운드에서 미리 컴파일 (첫 상세 열기의 컴파일 시간, M7 bench records-open)
             _ = Design.JitWarmup.Start(typeof(RecordsScreen), typeof(Design.Controls.TimelinePanel), typeof(Design.Controls.TrendChart),
                 typeof(Core.Presentation.RecordView), typeof(Core.Presentation.TimelineModel), typeof(Core.Analysis.EpisodeDetail),
@@ -255,6 +257,13 @@ public sealed partial class AppShell : Window
             if (host.CurrentProfile is null && host.World is DemoAppWorld demo && demo.World.Detect().Proposal is { } p)
                 host.SaveProfiles(new NetPulse.Core.Targets.ProfileSet([p], p.Id));   // 데모 재현: 프로필이 없으면 데모 탐지 제안으로
             await host.StartAsync();
+            if (options.TestFinishBeforeLayout)
+            {
+                // 시험 (M12 설계 A [2-1]): 측정이 끝난 뒤에야 측정 화면으로 간다. 화면은 그때 처음 트리에 붙고 배치 전에 그린다
+                var limit = DateTime.UtcNow + TimeSpan.FromSeconds(60);
+                while (host.Snapshot.Finished is null && DateTime.UtcNow < limit && !closing) await Task.Delay(20);
+                log.Write("testFinishBeforeLayout", new { finished = host.Snapshot.Finished is not null });
+            }
             first = options.Screen ?? "measure";
         }
         Navigate(first, null);

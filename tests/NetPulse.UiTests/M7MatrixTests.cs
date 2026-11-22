@@ -34,6 +34,7 @@ public sealed class M7MatrixTests
         var path = app.Save(shot, "matrix-" + name);
         var problems = M5MatrixTests.LayoutProblems(app.LayoutNow());
         var diag = app.Diag();
+        problems.AddRange(M5MatrixTests.TimelineProblems(diag));
         File.WriteAllText(Path.Combine(G5Dir, "matrix-" + name + ".json"), JsonSerializer.Serialize(
             new { name, scene = id, theme, scale, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, layoutProblems = problems, diag },
             new JsonSerializerOptions { WriteIndented = true }));

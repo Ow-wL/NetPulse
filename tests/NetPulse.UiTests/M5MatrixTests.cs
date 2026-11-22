@@ -166,6 +166,22 @@ public sealed class M5MatrixTests
     /// <summary>현재 화면의 진단 값 (없으면 null).</summary>
     private static JsonElement? Sd(JsonElement d) => d.TryGetProperty("screenDiag", out var s) && s.ValueKind == JsonValueKind.Object ? s : null;
 
+    /// <summary>
+    /// 타임라인 장면 검사 (M12 설계 A, 안전망): 지금 화면에 장면을 가진 타임라인이 있으면 장면 계산에 쓴 열 수가 지금 폭과 같아야 한다.
+    /// 배치 검사는 Canvas 안의 선 누락을 잡지 못한다 (M11 측정 끝 다크 타임라인).
+    /// </summary>
+    internal static List<string> TimelineProblems(JsonElement diag)
+    {
+        var problems = new List<string>();
+        if (Sd(diag) is not { } sd || !sd.TryGetProperty("timelineState", out var t) || t.ValueKind != JsonValueKind.Object) return problems;
+        if (!t.GetProperty("hasFrame").GetBoolean()) return problems;
+        double width = t.GetProperty("width").GetDouble();
+        var fc = t.GetProperty("frameColumns");
+        int? frameColumns = fc.ValueKind == JsonValueKind.Number ? fc.GetInt32() : null;
+        if (width > 0 && frameColumns != (int)Math.Round(width)) problems.Add($"타임라인 장면 열 수 {frameColumns} ≠ 폭 {Math.Round(width)}");
+        return problems;
+    }
+
     /// <summary>배치 검사 판정 (M2 설계 5.8과 같음): 스크롤 밖 잘림 0, 스크롤 안은 보이는 요소의 가로가 보기 안, 글자 잘림 0, 같은 층 상호작용 요소 겹침 0.</summary>
     internal static List<string> LayoutProblems(JsonElement data)
     {
@@ -202,6 +218,7 @@ public sealed class M5MatrixTests
         var layout = app.LayoutNow();
         var problems = LayoutProblems(layout);
         var diag = app.Diag();
+        problems.AddRange(TimelineProblems(diag));
         Record("matrix-" + name, new { name, scene = id, theme, scale, file = Path.GetFileName(path), w = shot.Width, h = shot.Height, layoutProblems = problems, diag });
         Assert.Equal((Size.WindowWidth, Size.WindowHeight), (shot.Width, shot.Height));
         Assert.True(problems.Count == 0, string.Join("\n", problems));

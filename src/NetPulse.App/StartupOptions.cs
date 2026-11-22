@@ -66,6 +66,11 @@ public sealed record StartupOptions
     public bool RecordsApplyHold { get; init; }
     /// <summary>실측 시험 전용 (M10 D4): 시험 풍선을 한 번 보낸다. 데모가 아니고 NETPULSE_LIVE=1일 때만.</summary>
     public bool LiveBalloonTest { get; init; }
+    /// <summary>
+    /// 시험 전용 (M12 설계 A [2-1]): <c>--start</c> 측정이 끝날 때까지 기다린 뒤 측정 화면으로 간다. 측정 화면은 미리 배치하지 않으므로
+    /// 끝난 스냅숏을 배치 전(타임라인 폭 0)에 받는다. 데모 + 명시한 사용자 폴더 + <c>--start</c>에서만.
+    /// </summary>
+    public bool TestFinishBeforeLayout { get; init; }
 
     /// <summary>
     /// 시험 주입을 받아도 되는가 (M10 설계 D3): 데모와 명시한 사용자 폴더가 둘 다 있을 때만.
@@ -169,12 +174,14 @@ public sealed record StartupOptions
                 "--memo-hold" => o with { MemoHold = Next() is var mh && System.Text.RegularExpressions.Regex.IsMatch(mh, "^[1-9][0-9]?$") ? mh : throw new ArgumentException("--memo-hold는 1~99") },
                 "--records-apply-hold" => o with { RecordsApplyHold = true },
                 "--live-balloon-test" => o with { LiveBalloonTest = true },
+                "--test-finish-before-layout" => o with { TestFinishBeforeLayout = true },
                 _ => throw new ArgumentException($"알 수 없는 인수입니다: {args[i]}"),
             };
         }
         // 시험 주입은 데모 + 명시한 사용자 폴더가 둘 다 있어야 시작한다 (하나라도 없으면 거절, M10 설계 D3)
-        if ((o.FakeVersion is not null || o.NoticesFail || o.MemoHold is not null || o.RecordsApplyHold) && !o.TestInjectionAllowed)
+        if ((o.FakeVersion is not null || o.NoticesFail || o.MemoHold is not null || o.RecordsApplyHold || o.TestFinishBeforeLayout) && !o.TestInjectionAllowed)
             throw new ArgumentException("시험 주입 인수는 --demo와 --user-data를 함께 줄 때만 받습니다.");
+        if (o.TestFinishBeforeLayout && !o.Start) throw new ArgumentException("--test-finish-before-layout은 --start와 함께만 받습니다.");
         if (o.LiveBalloonTest && (o.Demo is not null || Environment.GetEnvironmentVariable("NETPULSE_LIVE") != "1"))
             throw new ArgumentException("--live-balloon-test는 실측(데모 아님)이고 NETPULSE_LIVE=1일 때만 받습니다.");
         if (o.UiScale is < 1 or > 3) throw new ArgumentException("--ui-scale은 1~3");

@@ -72,6 +72,10 @@ public sealed class MeasureScreen : Screen
     private readonly ContentControl resultHost = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch };
     private readonly ScrollViewer scroll;
     private HostSnapshot? last;
+    // 시험 조건 확인 (M12 설계 A [2-1]): 끝난 스냅숏을 처음 받은 때의 타임라인 폭, 타임라인이 배치된 뒤 받은 스냅숏 수. 장면 계산과 무관하게 센다
+    private bool finishedSeen, receivedFinishedBeforeLayout, timelineLaidOut;
+    private double? widthAtReceive;
+    private int snapshotsAfterLayout;
     private (string Session, string Mark, long AtMs, DateTimeOffset Wall)? memo;
     private bool suppressDraft;
 
@@ -109,6 +113,7 @@ public sealed class MeasureScreen : Screen
         // 타임라인 카드 (조작 버튼은 카드 머리)
         timeline = new TimelinePanel(Ui, "measure.timeline", compact: false);
         timeline.Command += OnTimeline;
+        timeline.SizeChanged += (_, e) => { if (e.NewSize.Width > 0) timelineLaidOut = true; };
         zoomOut = new GlassButton(Ui, ButtonKind.Icon, "measure.zoomout", "축소", Icons.Minus);
         zoomIn = new GlassButton(Ui, ButtonKind.Icon, "measure.zoomin", "확대", Icons.Plus);
         left = new GlassButton(Ui, ButtonKind.Icon, "measure.left", "과거로", Icons.Back);
@@ -197,6 +202,13 @@ public sealed class MeasureScreen : Screen
     public override void Render(HostSnapshot s)
     {
         last = s;
+        if (timelineLaidOut) snapshotsAfterLayout++;
+        if (!finishedSeen && s.Finished is not null && s.State != HostState.Measuring)
+        {
+            finishedSeen = true;
+            widthAtReceive = timeline.ActualWidth;
+            receivedFinishedBeforeLayout = !timelineLaidOut && timeline.ActualWidth <= 0;
+        }
         bool measuring = s.State == HostState.Measuring;
         start.Visibility = s.State is HostState.Idle or HostState.Starting or HostState.NoProfile ? Visibility.Visible : Visibility.Collapsed;
         start.IsEnabled = s.State == HostState.Idle;
@@ -583,6 +595,8 @@ public sealed class MeasureScreen : Screen
             memoOpen = memo is not null, memoMark = memo?.Mark, memoDraftLength = memoBox.Text.Length,
             window = new { from, to, step = view.Label, follow = view.Follow, all = view.IsAll },
             timeline = AutomationProperties.GetName(timeline),
+            timelineState = timeline.Diag(),
+            timelineCheck = new { receivedFinishedBeforeLayout, widthAtReceive, snapshotsAfterLayout },
         };
     }
 }
