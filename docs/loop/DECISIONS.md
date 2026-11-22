@@ -2059,3 +2059,8 @@ Codex가 못 읽었다고 한 것: 157개 파일 전체 정독, `ProfileEditor`�
 - 차단 2 (문서): `standard` 초과 보고에서 report-scroll(1·2·3회), report-options(2회), records-enter(3회)가 빠졌다 → 전체 목록 표를 더했다.
 - 사소: `M12SignalTests`는 파일 이름이고 클래스는 셋(10·7·10건 통과) → 고침. M12 시트 장면 수 30 → 27.
 - 화면 사소 2건(진단 제목 괄호 안 줄바꿈, 숫자·단위 갈림)은 Claude 목록과 같고 다음 마일스톤 이월로 동의.
+
+## 2026-11-23 · M12 증거 검토 2라운드 (기록 `89da8f8`): `APPROVE` (차단·중요·사소 0) → 마감
+
+검토 원문: `.loop/reviews/m12-evidence-r2-*.md`. 1라운드 문서 지적 4건 해소, `standard` 초과 표는 12개 파일·28개 판정과 대조해 누락·과잉 없음(총 10건). 새 X 없이 마감해도 된다고 판단.
+- 다음: `close-milestone.ps1 -Approved e5658a2… -Base main -Screens -EvidenceReview` (공개 전 검사 → 푸시 → PR → CI). 병합은 사용자.
